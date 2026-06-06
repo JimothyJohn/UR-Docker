@@ -1,9 +1,8 @@
-version: '3.8'
 services:
   ursim:
-    image: universalrobots/ursim_e-series:5.12.5
+    image: universalrobots/ursim_e-series:5.12
     stdin_open: true
-    tty: true  
+    tty: true
     ports:
       - "5900:5900"
       - "6080:6080"
@@ -12,4 +11,70 @@ services:
       - "30001:30001"
     environment:
       - ROBOT_MODEL=UR10
+    # URSim 5.12.5 was built against an older kernel/glibc; on modern hosts
+    # (Linux 6.x) the default Docker seccomp profile causes URControl's
+    # socket() calls to return ENOSYS, leaving PolyScope showing
+    # "No Controller". Disabling seccomp lets URControl start. NET_BIND_SERVICE
+    # lets it bind the Modbus port (502).
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - NET_BIND_SERVICE
+    # Healthcheck succeeds once URControl has booted and the Dashboard
+    # server is replying with a robotmode other than NO_CONTROLLER.
+    # Lets dependent services (`depends_on: ursim: condition: service_healthy`)
+    # wait on the controller, not just the port being open.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "echo robotmode | nc -w 1 -q 1 localhost 29999 | grep -q 'Robotmode:' && ! echo robotmode | nc -w 1 -q 1 localhost 29999 | grep -q NO_CONTROLLER",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  # PolyScope X simulator (URSim PolyScopeX) — a *separate* product from the
+  # e-Series/PolyScope 5 `ursim` above, not a drop-in replacement:
+  #   - Web UI on port 80 (no VNC 5900/6080) — mapped to host 8000 so we don't
+  #     need a privileged host port and never collide with the e-Series ports.
+  #   - Does NOT expose the PolyScope-5 Dashboard (29999) / Primary (30001)
+  #     surface, so the `urctl` toolkit in this repo does NOT drive it.
+  #   - Needs `--privileged` and a `host.docker.internal` host-gateway alias.
+  #   - `ROBOT_TYPE` uses the PolyScope X names: UR3, UR5, UR8L, UR10, UR16,
+  #     UR18, UR20, UR30 (distinct from the e-Series `ROBOT_MODEL`).
+  # Gated behind the `polyscopex` profile so `docker compose up` still brings up
+  # only the e-Series sim. Start it with `docker compose --profile polyscopex up`
+  # or `make simx-up`, then open http://localhost:8000 in Chrome.
+  ursim-px:
+    image: universalrobots/ursim_polyscopex:10.13.0
+    profiles: ["polyscopex"]
+    stdin_open: true
+    tty: true
+    ports:
+      - "8000:80"
+      # URScript execution still rides the Primary client (30001); RTDE telemetry
+      # is on 30004. Published on OFFSET host ports (31001/31004) so this sim can
+      # run alongside the e-Series one without colliding with its 30001/30004.
+      # Point the toolkit at them with UR_PRIMARY_PORT=31001 (see `make simx-*`).
+      # NOTE: these interfaces must be turned on once in the PolyScope X UI under
+      # Settings -> Security -> Services (Primary Client Interface + RTDE), and
+      # mutating Robot-API/Primary actions require Remote control mode.
+      - "31001:30001"
+      - "31004:30004"
+    environment:
+      # OSX: set HOST_ARCH=arm64 on Apple Silicon (e.g. `HOST_ARCH=arm64 make simx-up`).
+      - HOST_ARCH=${HOST_ARCH:-amd64}
+      - ROBOT_TYPE=${ROBOT_TYPE:-UR10}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # PolyScope X's backend requires full privileges to start.
+    privileged: true
+    # Persist created applications/programs across container recreation. The
+    # e-Series sim has no such mount (its /programs is wiped on recreate); this
+    # one does, since PolyScope X is meant for authoring in the web UI.
+    volumes:
+      - ./.ursim-polyscopex/applications:/ur/bin/backend/applications
     restart: unless-stopped

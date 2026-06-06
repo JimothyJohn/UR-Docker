@@ -1,0 +1,95 @@
+# PickAndStack — pick up 3 items (the apples in inputs/image.png) and stack
+# them at one nearby location. MOTIONS ONLY: the gripper open/close steps are
+# placeholders, commented out, so you wire in your gripper (or URCap call)
+# later. Emits "pickstack/" textmsg checkpoints.
+#
+# The pick stations and the stack are derived at runtime from one reachable
+# reference configuration's TCP pose (offsets in the base frame), so the cycle
+# runs inside the UR10 envelope on URSim out of the box. On real hardware,
+# replace `ref` and the pickN / stack offsets with poses taught in your cell.
+
+def PickAndStack():
+  textmsg("pickstack/start")
+
+  # --- motion + process tunables (edit for your cell) ---
+  v_j   = 1.0     # joint speed   (rad/s)
+  a_j   = 1.2     # joint accel   (rad/s^2)
+  v_l   = 0.25    # linear speed  (m/s)
+  a_l   = 0.5     # linear accel  (m/s^2)
+  appr  = 0.10    # approach/retreat clearance (m)
+  layer = 0.05    # stack layer height per item (m)
+
+  # Candle home — safe, far from singularity.
+  home = [0.0, -1.5708, 0.0, -1.5708, 0.0, 0.0]
+  movej(home, a=a_j, v=v_j)
+
+  # GRIPPER PLACEHOLDER (open) — enable when wired:
+  # set_standard_digital_out(0, False)
+  # sleep(0.3)
+
+  # Reference pose; stations are taught relative to it (edit me).
+  ref = [0.0, -1.2217, 1.5708, -1.9199, -1.5708, 0.0]
+  movej(ref, a=a_j, v=v_j)
+  p_ref = get_actual_tcp_pose()
+  up = p[0.0, 0.0, appr, 0.0, 0.0, 0.0]   # base-frame lift
+
+  # Pick stations (base-frame offsets from the reference TCP) — edit per item.
+  pick1 = pose_add(p_ref, p[0.0, -0.20, -0.20, 0.0, 0.0, 0.0])
+  pick2 = pose_add(p_ref, p[0.0,  0.00, -0.20, 0.0, 0.0, 0.0])
+  pick3 = pose_add(p_ref, p[0.0,  0.20, -0.20, 0.0, 0.0, 0.0])
+  # Stack location (one spot; item i lands layer*(i-1) higher) — edit me.
+  stack = pose_add(p_ref, p[0.30, 0.0, -0.20, 0.0, 0.0, 0.0])
+
+  # ===== ITEM 1: pick, then place on the stack (bottom layer) =====
+  movej(pose_add(pick1, up), a=a_j, v=v_j)   # approach above item 1
+  movel(pick1, a=a_l, v=v_l)                 # descend to grasp
+  # GRIPPER PLACEHOLDER (close) on item 1:
+  # set_standard_digital_out(0, True)
+  # sleep(0.5)
+  movel(pose_add(pick1, up), a=a_l, v=v_l)   # retract
+  place1 = pose_add(stack, p[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+  movej(pose_add(place1, up), a=a_j, v=v_j)  # carry above the stack
+  movel(place1, a=a_l, v=v_l)                # lower onto the stack
+  # GRIPPER PLACEHOLDER (open) release item 1:
+  # set_standard_digital_out(0, False)
+  # sleep(0.5)
+  movel(pose_add(place1, up), a=a_l, v=v_l)  # retract
+  textmsg("pickstack/item1_done")
+
+  # ===== ITEM 2: pick, then place on the stack (layer 2) =====
+  movej(pose_add(pick2, up), a=a_j, v=v_j)
+  movel(pick2, a=a_l, v=v_l)
+  # GRIPPER PLACEHOLDER (close) on item 2:
+  # set_standard_digital_out(0, True)
+  # sleep(0.5)
+  movel(pose_add(pick2, up), a=a_l, v=v_l)
+  place2 = pose_add(stack, p[0.0, 0.0, layer, 0.0, 0.0, 0.0])
+  movej(pose_add(place2, up), a=a_j, v=v_j)
+  movel(place2, a=a_l, v=v_l)
+  # GRIPPER PLACEHOLDER (open) release item 2:
+  # set_standard_digital_out(0, False)
+  # sleep(0.5)
+  movel(pose_add(place2, up), a=a_l, v=v_l)
+  textmsg("pickstack/item2_done")
+
+  # ===== ITEM 3: pick, then place on the stack (layer 3) =====
+  movej(pose_add(pick3, up), a=a_j, v=v_j)
+  movel(pick3, a=a_l, v=v_l)
+  # GRIPPER PLACEHOLDER (close) on item 3:
+  # set_standard_digital_out(0, True)
+  # sleep(0.5)
+  movel(pose_add(pick3, up), a=a_l, v=v_l)
+  place3 = pose_add(stack, p[0.0, 0.0, layer * 2, 0.0, 0.0, 0.0])
+  movej(pose_add(place3, up), a=a_j, v=v_j)
+  movel(place3, a=a_l, v=v_l)
+  # GRIPPER PLACEHOLDER (open) release item 3:
+  # set_standard_digital_out(0, False)
+  # sleep(0.5)
+  movel(pose_add(place3, up), a=a_l, v=v_l)
+  textmsg("pickstack/item3_done")
+
+  movej(home, a=a_j, v=v_j)
+  textmsg("pickstack/done")
+end
+
+PickAndStack()

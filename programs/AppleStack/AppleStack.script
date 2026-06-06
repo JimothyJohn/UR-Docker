@@ -1,0 +1,118 @@
+# AppleStack — pick up the three apples in inputs/image.png and stack them.
+#
+# VISION SOURCE
+#   inputs/image.png is a near top-down shot taken from above the mounting
+#   surface and to the right of the base. Three apples are visible:
+#     - apple A: RED,   upper-middle of frame
+#     - apple B: RED,   left, slightly lower than A
+#     - apple C: GREEN, right of centre, lowest in frame
+#
+#   Approx pixel centres (image ~320x176):  A(150,53)  B(109,81)  C(192,92)
+#   Apple diameter reads ~45 px; a real apple is ~0.075 m, so the table scale
+#   is ~0.075/45 = 0.00167 m/px. Converting each apple's offset from the cluster
+#   centroid (150,75) to metres and mapping the top-down image axes to the base
+#   frame (image up -> base +X, image right -> base -Y) gives the planar offsets
+#   below. They reproduce the apples' RELATIVE layout from the photo.
+#
+# CALIBRATION CAVEAT
+#   Without a measured camera->base transform, the absolute spot and rotation of
+#   the cluster can't be recovered from one image. So the cluster is anchored at
+#   a reachable reference pose (p_ref) and the apples are placed by their
+#   image-derived *relative* offsets — the arrangement is faithful and always
+#   reachable on URSim. On real hardware, set p_ref (and/or the per-apple
+#   offsets) from your calibrated camera or taught poses.
+#
+# GRIPPER / SIM NOTE
+#   The gripper is modelled as standard digital output 0 (True = closed), like
+#   PickPlace. URSim has no physical gripper or apples, so this runs the full
+#   motion + I/O sequence; on hardware, wire output 0 to your gripper (or swap
+#   in its URCap) and the same program picks and stacks for real.
+#
+# Emits "applestack/" textmsg checkpoints.
+
+def AppleStack():
+  textmsg("applestack/start")
+
+  # --- motion + process tunables (edit for your cell) ---
+  v_j     = 1.0      # joint speed   (rad/s)
+  a_j     = 1.2      # joint accel   (rad/s^2)
+  v_l     = 0.25     # linear speed  (m/s)
+  a_l     = 0.5      # linear accel  (m/s^2)
+  appr    = 0.10     # approach/retreat clearance above a pose (m)
+  drop    = -0.20    # table surface is this far below the reference pose (m)
+  apple_d = 0.075    # apple diameter -> stack layer height (m)
+
+  # Candle home — safe, far from singularity.
+  home = [0.0, -1.5708, 0.0, -1.5708, 0.0, 0.0]
+  movej(home, a=a_j, v=v_j)
+
+  set_standard_digital_out(0, False)        # gripper open
+  textmsg("applestack/gripper=open")
+
+  # Reachable reference config; its TCP is the apple-cluster centroid on the
+  # table. The stations are taught relative to it (edit for your cell).
+  ref = [0.0, -1.2217, 1.5708, -1.9199, -1.5708, 0.0]
+  movej(ref, a=a_j, v=v_j)
+  p_ref = get_actual_tcp_pose()
+  up = p[0.0, 0.0, appr, 0.0, 0.0, 0.0]     # base-frame lift
+
+  # Per-apple pick poses: cluster centroid (p_ref) + image-derived base-frame
+  # offset, dropped to the table. [dx, dy] in metres (see header).
+  appleA = pose_add(p_ref, p[ 0.038,  0.001, drop, 0.0, 0.0, 0.0])  # RED   (top)
+  appleB = pose_add(p_ref, p[-0.010,  0.070, drop, 0.0, 0.0, 0.0])  # RED   (left)
+  appleC = pose_add(p_ref, p[-0.028, -0.071, drop, 0.0, 0.0, 0.0])  # GREEN (right)
+
+  # Stack location: a clear spot in front of the cluster. Item i lands
+  # apple_d*(i-1) higher so they pile up. (Reds on the bottom, green on top.)
+  stack = pose_add(p_ref, p[0.28, 0.0, drop, 0.0, 0.0, 0.0])
+
+  # ===== APPLE A (red) -> stack layer 0 (bottom) =====
+  movej(pose_add(appleA, up), a=a_j, v=v_j)         # approach above apple A
+  movel(appleA, a=a_l, v=v_l)                       # descend to grasp
+  set_standard_digital_out(0, True)                 # close gripper
+  sleep(0.5)
+  textmsg("applestack/grasped_A_red")
+  movel(pose_add(appleA, up), a=a_l, v=v_l)         # lift
+  placeA = pose_add(stack, p[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+  movej(pose_add(placeA, up), a=a_j, v=v_j)         # carry above the stack
+  movel(placeA, a=a_l, v=v_l)                       # lower onto the table
+  set_standard_digital_out(0, False)                # release
+  sleep(0.5)
+  movel(pose_add(placeA, up), a=a_l, v=v_l)         # retract
+  textmsg("applestack/stacked_A")
+
+  # ===== APPLE B (red) -> stack layer 1 =====
+  movej(pose_add(appleB, up), a=a_j, v=v_j)
+  movel(appleB, a=a_l, v=v_l)
+  set_standard_digital_out(0, True)
+  sleep(0.5)
+  textmsg("applestack/grasped_B_red")
+  movel(pose_add(appleB, up), a=a_l, v=v_l)
+  placeB = pose_add(stack, p[0.0, 0.0, apple_d, 0.0, 0.0, 0.0])
+  movej(pose_add(placeB, up), a=a_j, v=v_j)
+  movel(placeB, a=a_l, v=v_l)
+  set_standard_digital_out(0, False)
+  sleep(0.5)
+  movel(pose_add(placeB, up), a=a_l, v=v_l)
+  textmsg("applestack/stacked_B")
+
+  # ===== APPLE C (green) -> stack layer 2 (top) =====
+  movej(pose_add(appleC, up), a=a_j, v=v_j)
+  movel(appleC, a=a_l, v=v_l)
+  set_standard_digital_out(0, True)
+  sleep(0.5)
+  textmsg("applestack/grasped_C_green")
+  movel(pose_add(appleC, up), a=a_l, v=v_l)
+  placeC = pose_add(stack, p[0.0, 0.0, apple_d * 2, 0.0, 0.0, 0.0])
+  movej(pose_add(placeC, up), a=a_j, v=v_j)
+  movel(placeC, a=a_l, v=v_l)
+  set_standard_digital_out(0, False)
+  sleep(0.5)
+  movel(pose_add(placeC, up), a=a_l, v=v_l)
+  textmsg("applestack/stacked_C")
+
+  movej(home, a=a_j, v=v_j)                          # back to a safe home
+  textmsg("applestack/done")
+end
+
+AppleStack()

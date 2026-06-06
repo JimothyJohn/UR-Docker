@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install dev deps
+        run: pip install -r requirements-dev.txt
+      - name: ruff
+        run: ruff check urctl scripts tests
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
+      - name: unit tests
+        run: pytest -m "not integration"
+
+  integration:
+    runs-on: ubuntu-latest
+    # The URSim container is large (>1 GB) and slow to start — only run on
+    # main and on PRs that touch the simulator wiring.
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install dev deps
+        run: pip install -r requirements-dev.txt
+      - name: start URSim
+        run: |
+          docker compose up -d
+          # Wait for Dashboard + URControl to come up.
+          for i in $(seq 1 60); do
+            if (echo robotmode; echo quit) | nc -w 2 localhost 29999 2>/dev/null | grep -q 'Robotmode:'; then
+              echo "URSim is up"; break
+            fi
+            sleep 2
+          done
+      - name: integration tests
+        # Tests use sudo docker — GitHub runners don't need it, override.
+        env:
+          DOCKER: docker
+        run: pytest -m integration
+      - name: dump polyscope log on failure
+        if: failure()
+        run: docker exec ur-docker-ursim-1 tail -100 /ursim/polyscope.log || true
+      - name: tear down
+        if: always()
+        run: docker compose down
