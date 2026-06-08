@@ -241,10 +241,7 @@ def _encode_png(width: int, height: int, rgb: bytes) -> bytes:
 
     def chunk(tag: bytes, body: bytes) -> bytes:
         return (
-            struct.pack(">I", len(body))
-            + tag
-            + body
-            + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
+            struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
         )
 
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit RGB
@@ -254,9 +251,7 @@ def _encode_png(width: int, height: int, rgb: bytes) -> bytes:
         raw.append(0)  # filter type None
         raw += rgb[y * stride : (y + 1) * stride]
     sig = b"\x89PNG\r\n\x1a\n"
-    return (
-        sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b"")
-    )
+    return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b"")
 
 
 def test_png_decoder_roundtrip_exact(tmp_path):

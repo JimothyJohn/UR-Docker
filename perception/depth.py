@@ -31,9 +31,7 @@ class DepthMap:
 
     def __post_init__(self) -> None:
         if len(self.depth_m) != self.width * self.height:
-            raise ValueError(
-                f"depth has {len(self.depth_m)} values, expected {self.width * self.height}"
-            )
+            raise ValueError(f"depth has {len(self.depth_m)} values, expected {self.width * self.height}")
 
     def at(self, x: int, y: int) -> float:
         return self.depth_m[y * self.width + x]

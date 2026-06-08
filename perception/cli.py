@@ -51,9 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="stub | blob_cv (default: $PERCEPTION_BLOB_BACKEND or stub)",
     )
-    ap.add_argument(
-        "--min-blob-area", type=int, default=None, help="drop blobs smaller than this (px)"
-    )
+    ap.add_argument("--min-blob-area", type=int, default=None, help="drop blobs smaller than this (px)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sy = sub.add_parser("synthetic", help="process a deterministic synthetic frame (no camera)")
@@ -119,9 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "capture":
         return _emit(call_tool(pipe, "perceive_frame", {}))
     if args.cmd == "image":
-        return _emit(
-            call_tool(pipe, "perceive_image", {"path": args.path, "max_width": args.max_width})
-        )
+        return _emit(call_tool(pipe, "perceive_image", {"path": args.path, "max_width": args.max_width}))
     if args.cmd == "call":
         try:
             params = json.loads(args.json_args)

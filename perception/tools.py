@@ -115,10 +115,7 @@ _BY_NAME = {t.name: t for t in TOOLS}
 
 def get_tool_schemas() -> list[dict]:
     """Return each tool as ``{name, description, input_schema}`` (Anthropic shape)."""
-    return [
-        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
-        for t in TOOLS
-    ]
+    return [{"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in TOOLS]
 
 
 def _validate(params: dict, schema: dict) -> None:

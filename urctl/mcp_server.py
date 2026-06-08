@@ -77,9 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="urctl-mcp", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument(
-        "--host", default=None, help="controller host/IP (default: $UR_HOST or localhost)"
-    )
+    ap.add_argument("--host", default=None, help="controller host/IP (default: $UR_HOST or localhost)")
     ap.add_argument(
         "--platform",
         choices=["e-series", "polyscopex"],

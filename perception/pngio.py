@@ -39,9 +39,7 @@ def load_png(path: str) -> tuple[int, int, int, bytes]:
         ctype = data[i + 4 : i + 8]
         body = data[i + 8 : i + 8 + length]
         if ctype == b"IHDR":
-            width, height, bit_depth, color_type, _comp, _filt, interlace = struct.unpack(
-                ">IIBBBBB", body
-            )
+            width, height, bit_depth, color_type, _comp, _filt, interlace = struct.unpack(">IIBBBBB", body)
         elif ctype == b"IDAT":
             idat += body
         elif ctype == b"IEND":

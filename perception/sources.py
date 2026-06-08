@@ -100,7 +100,6 @@ def _require_cv2():
         import cv2
     except ImportError as exc:  # pragma: no cover - exercised only without cv2
         raise ImportError(
-            "OpenCV (cv2) is required for DeviceSource. "
-            "Install it with `pip install -e .[perception]`."
+            "OpenCV (cv2) is required for DeviceSource. Install it with `pip install -e .[perception]`."
         ) from exc
     return cv2

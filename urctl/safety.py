@@ -110,9 +110,7 @@ class SafetyEnvelope:
 
         if len(target) != self.num_joints:
             violations.append(
-                SafetyViolation(
-                    "joint_count", f"expected {self.num_joints} joint values, got {len(target)}"
-                )
+                SafetyViolation("joint_count", f"expected {self.num_joints} joint values, got {len(target)}")
             )
         else:
             for i, q in enumerate(target):
@@ -132,9 +130,7 @@ class SafetyEnvelope:
             violations.append(SafetyViolation("velocity", "velocity must be > 0"))
         elif velocity > self.max_joint_speed:
             violations.append(
-                SafetyViolation(
-                    "velocity", f"{velocity:.4f} rad/s exceeds max {self.max_joint_speed:.4f}"
-                )
+                SafetyViolation("velocity", f"{velocity:.4f} rad/s exceeds max {self.max_joint_speed:.4f}")
             )
 
         if acceleration <= 0:
@@ -218,8 +214,7 @@ class SafetyEnvelope:
                     violations.append(
                         SafetyViolation(
                             "tcp_reach",
-                            f"target {dist:.4f} m from base exceeds max reach "
-                            f"{self.max_reach:.4f} m",
+                            f"target {dist:.4f} m from base exceeds max reach {self.max_reach:.4f} m",
                         )
                     )
 
@@ -227,9 +222,7 @@ class SafetyEnvelope:
             violations.append(SafetyViolation("tcp_velocity", "velocity must be > 0"))
         elif velocity > self.max_tcp_speed:
             violations.append(
-                SafetyViolation(
-                    "tcp_velocity", f"{velocity:.4f} m/s exceeds max {self.max_tcp_speed:.4f}"
-                )
+                SafetyViolation("tcp_velocity", f"{velocity:.4f} m/s exceeds max {self.max_tcp_speed:.4f}")
             )
 
         if acceleration <= 0:

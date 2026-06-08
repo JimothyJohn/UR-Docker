@@ -57,9 +57,7 @@ def dash(*commands: str, timeout: float = 8.0) -> str:
                 break
             chunks.append(chunk)
     text = b"".join(chunks).decode("utf-8", errors="replace")
-    lines = [
-        ln for ln in text.splitlines() if ln and not ln.startswith(("Connected:", "Disconnected"))
-    ]
+    lines = [ln for ln in text.splitlines() if ln and not ln.startswith(("Connected:", "Disconnected"))]
     return "\n".join(lines)
 
 

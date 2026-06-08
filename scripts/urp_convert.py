@@ -154,9 +154,9 @@ def urp_to_script(urp_bytes: bytes) -> str:
     root = ET.fromstring(xml_bytes)
 
     out: list[str] = [
-        f"# Extracted from URP: name={root.get('name','?')}, "
-        f"lastSavedIn={root.get('lastSavedIn','?')}, "
-        f"robotType={root.get('robotType','?')}"
+        f"# Extracted from URP: name={root.get('name', '?')}, "
+        f"lastSavedIn={root.get('lastSavedIn', '?')}, "
+        f"robotType={root.get('robotType', '?')}"
     ]
 
     def walk_program_tree(node: ET.Element) -> None:
@@ -216,16 +216,12 @@ def _default_out(inp: str, new_ext: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p_to_urp = sub.add_parser("to-urp", help="Wrap a .script as a .urp")
     p_to_urp.add_argument("input", help="path to .script (or '-' for stdin)")
-    p_to_urp.add_argument(
-        "output", nargs="?", help="path to .urp (default: input with .urp suffix)"
-    )
+    p_to_urp.add_argument("output", nargs="?", help="path to .urp (default: input with .urp suffix)")
     p_to_urp.add_argument("--name", help="program name embedded in URP (default: input stem)")
     p_to_urp.add_argument(
         "--installation",
@@ -254,9 +250,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_to_script = sub.add_parser("to-script", help="Extract URScript from a .urp")
     p_to_script.add_argument("input", help="path to .urp (or '-' for stdin)")
-    p_to_script.add_argument(
-        "output", nargs="?", help="path to .script (default: input with .script suffix)"
-    )
+    p_to_script.add_argument("output", nargs="?", help="path to .script (default: input with .script suffix)")
 
     args = ap.parse_args(argv)
 

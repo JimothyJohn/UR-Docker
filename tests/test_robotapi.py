@@ -237,7 +237,13 @@ class TestRobotAPILive:
     def test_robot_mode_is_a_known_state(self):
         mode = self._client().robot_mode()
         assert mode in (
-            "POWER_OFF", "BOOTING", "IDLE", "RUNNING", "POWER_ON", "BACKDRIVE", "CONFIRM_SAFETY"
+            "POWER_OFF",
+            "BOOTING",
+            "IDLE",
+            "RUNNING",
+            "POWER_ON",
+            "BACKDRIVE",
+            "CONFIRM_SAFETY",
         ), f"unexpected robotmode: {mode!r}"
 
     def test_safety_and_control_mode_readable(self):

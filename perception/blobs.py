@@ -148,9 +148,7 @@ class StubBlobDetector:
             if len(pixels) < self.min_area:
                 continue
             if self.split_touching:
-                groups = _split_component(
-                    pixels, w, self.split_peak_ratio, self.split_separation_ratio
-                )
+                groups = _split_component(pixels, w, self.split_peak_ratio, self.split_separation_ratio)
             else:
                 groups = [pixels]
             for group in groups:

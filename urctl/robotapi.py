@@ -102,14 +102,10 @@ class RobotAPIClient:
     # ----- raw protocol ------------------------------------------------------
 
     def _get(self, path: str) -> tuple[int, dict | None]:
-        return _http_json(
-            "GET", self.config.robot_api_url + path, timeout=self.config.timeout
-        )
+        return _http_json("GET", self.config.robot_api_url + path, timeout=self.config.timeout)
 
     def _put(self, path: str, payload: dict) -> tuple[int, dict | None]:
-        return _http_json(
-            "PUT", self.config.robot_api_url + path, body=payload, timeout=self.config.timeout
-        )
+        return _http_json("PUT", self.config.robot_api_url + path, body=payload, timeout=self.config.timeout)
 
     @staticmethod
     def _error_text(status: int, body: dict | None) -> str:
@@ -128,8 +124,7 @@ class RobotAPIClient:
             return (
                 "Forbidden (403): PolyScope X refused this because the robot is not in "
                 "Remote control mode. Switch to Remote on the Safety screen in the "
-                "PolyScope X UI (localhost:8000), then retry."
-                + (f" [robot said: {msg}]" if msg else "")
+                "PolyScope X UI (localhost:8000), then retry." + (f" [robot said: {msg}]" if msg else "")
             )
         return f"Error ({status}): {msg}" if msg else f"Error ({status})"
 
@@ -262,9 +257,7 @@ class RobotAPIClient:
         """Load a program by name. PolyScope X programs are ``.urpx`` and are
         addressed by *name* (no ``.urp`` suffix, unlike the Dashboard ``load``)."""
         name = program[:-4] if program.endswith(".urp") else program
-        return self._put_reply(
-            "/program/v1/loaded", {"name": name}, f"Loading program: {name}"
-        )
+        return self._put_reply("/program/v1/loaded", {"name": name}, f"Loading program: {name}")
 
     def play(self) -> str:
         return self._put_reply("/program/v1/state", {"action": "play"}, "Starting program")

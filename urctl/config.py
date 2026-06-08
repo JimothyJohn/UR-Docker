@@ -126,9 +126,7 @@ class RobotConfig:
             "rtde_enabled": not _env_flag("UR_RTDE_DISABLE"),
             "platform": os.environ.get("UR_PLATFORM", DEFAULT_PLATFORM),
             "robot_api_port": _env_int("UR_ROBOT_API_PORT", DEFAULT_ROBOT_API_PORT),
-            "robot_api_base_path": os.environ.get(
-                "UR_ROBOT_API_BASE_PATH", DEFAULT_ROBOT_API_BASE_PATH
-            ),
+            "robot_api_base_path": os.environ.get("UR_ROBOT_API_BASE_PATH", DEFAULT_ROBOT_API_BASE_PATH),
         }
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]

@@ -127,12 +127,8 @@ class PerceptionConfig:
             "depth_far_m": _env_float("PERCEPTION_DEPTH_FAR_M", DEFAULT_DEPTH_FAR_M),
             "min_blob_area": _env_int("PERCEPTION_MIN_BLOB_AREA", DEFAULT_MIN_BLOB_AREA),
             "blob_min_chroma": _env_int("PERCEPTION_BLOB_MIN_CHROMA", DEFAULT_BLOB_MIN_CHROMA),
-            "blob_link_tolerance": _env_int(
-                "PERCEPTION_BLOB_LINK_TOLERANCE", DEFAULT_BLOB_LINK_TOLERANCE
-            ),
-            "blob_split_touching": _env_bool(
-                "PERCEPTION_BLOB_SPLIT_TOUCHING", DEFAULT_BLOB_SPLIT_TOUCHING
-            ),
+            "blob_link_tolerance": _env_int("PERCEPTION_BLOB_LINK_TOLERANCE", DEFAULT_BLOB_LINK_TOLERANCE),
+            "blob_split_touching": _env_bool("PERCEPTION_BLOB_SPLIT_TOUCHING", DEFAULT_BLOB_SPLIT_TOUCHING),
         }
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]

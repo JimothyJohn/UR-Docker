@@ -75,9 +75,7 @@ class DepthAnythingEstimator:
         # transformers returns a PIL "depth" image (relative inverse depth).
         rel = np.asarray(out["depth"], dtype=np.float32)
         if rel.shape != (frame.height, frame.width):
-            rel = np.asarray(Image.fromarray(rel).resize((frame.width, frame.height))).astype(
-                np.float32
-            )
+            rel = np.asarray(Image.fromarray(rel).resize((frame.width, frame.height))).astype(np.float32)
 
         lo, hi = float(rel.min()), float(rel.max())
         span = hi - lo
