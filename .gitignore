@@ -1,1 +1,28 @@
 *.code-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local input artifacts (images, scratch data) — not part of the repo
+inputs/
+
+# PolyScope X sim's persisted applications/programs (host-side volume mount)
+.ursim-polyscopex/
+# Local secrets + runtime state (never commit)
+.env
+.claude/scheduled_tasks.lock

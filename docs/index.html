@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Little Robot Who Learned to Help — a storybook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Universal Robots brand palette (e-Series style guide) */
+    --paper:#e9eef3;       /* light blue-grey backdrop */
+    --paper-deep:#d7e2ec;
+    --cream:#ffffff;       /* white page */
+    --ink:#2b3440;         /* dark slate text */
+    --ink-soft:#646464;    /* GRAY_1 */
+    --rust:#56a0d3;        /* UR_BLUE — primary accent */
+    --rust-deep:#2f5bb7;   /* NAVY_BLUE */
+    --mustard:#e6ce4c;     /* GOLD_YELLOW */
+    --teal:#2f5bb7;        /* NAVY_BLUE — secondary accent */
+    --teal-deep:#1f3d7a;   /* deep navy */
+    --sage:#009245;        /* GREEN */
+    --sky:#c2e1f6;         /* LIGHT_BLUE */
+    --shadow:rgba(31,61,122,.18);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:"Fraunces",Georgia,serif;
+    color:var(--ink);
+    background:var(--paper);
+    line-height:1.7;
+    font-size:19px;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* paper grain overlay */
+  body::before{
+    content:"";
+    position:fixed;inset:0;z-index:9999;pointer-events:none;
+    opacity:.5;mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+  }
+  /* soft vignette */
+  body::after{
+    content:"";position:fixed;inset:0;z-index:9998;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 30%,transparent 55%,rgba(31,61,122,.10) 100%);
+  }
+
+  .book{max-width:880px;margin:0 auto;padding:0 22px}
+  .spread{
+    position:relative;
+    background:var(--cream);
+    margin:46px 0;
+    padding:54px 56px;
+    border-radius:6px;
+    box-shadow:0 18px 40px -22px var(--shadow), 0 2px 0 rgba(255,255,255,.6) inset;
+  }
+  .spread::before{
+    content:"";position:absolute;inset:14px;border:1.5px solid rgba(31,61,122,.18);
+    border-radius:3px;pointer-events:none;
+  }
+  @media(max-width:600px){.spread{padding:34px 24px}}
+
+  /* ---- typography ---- */
+  h1,h2,h3{font-weight:600;line-height:1.12;margin:0}
+  .display{
+    font-size:clamp(40px,8vw,76px);
+    letter-spacing:-.01em;
+    text-align:center;
+  }
+  .dansk{
+    font-family:"Caveat",cursive;
+    color:var(--rust);
+    font-size:clamp(26px,5vw,40px);
+    text-align:center;
+    margin-top:.2em;
+    font-weight:700;
+  }
+  .chapter-no{
+    font-family:"Caveat",cursive;
+    color:var(--teal);
+    font-size:30px;font-weight:700;
+    text-align:center;letter-spacing:.04em;
+    margin-bottom:2px;
+  }
+  .chapter-title{
+    text-align:center;
+    font-size:clamp(26px,4.6vw,38px);
+    margin-bottom:.7em;
+    font-style:italic;
+  }
+  p{margin:0 0 1.1em}
+  .lead{font-size:1.06em}
+  .dropcap::first-letter{
+    font-size:3.5em;line-height:.8;float:left;
+    padding:6px 10px 0 0;color:var(--rust);
+    font-weight:600;
+  }
+  .quote{
+    font-family:"Caveat",cursive;
+    font-size:1.55em;line-height:1.35;
+    color:var(--teal-deep);
+    text-align:center;
+    margin:1.4em auto;max-width:34ch;
+  }
+  .quote .who{display:block;font-family:"Fraunces",serif;font-style:italic;
+    font-size:.55em;color:var(--ink-soft);margin-top:.5em}
+  em{color:var(--rust-deep);font-style:italic}
+
+  /* divider ornament */
+  .rule{display:flex;align-items:center;justify-content:center;gap:14px;margin:30px 0;color:var(--rust)}
+  .rule .ln{height:1.5px;width:80px;background:currentColor;opacity:.5}
+
+  /* illustration layout */
+  figure{margin:0}
+  .art-wrap{text-align:center;margin:6px 0 8px}
+  .art-wrap svg{max-width:100%;height:auto;filter:drop-shadow(0 14px 18px rgba(31,61,122,.18))}
+  .caption{font-family:"Caveat",cursive;font-size:1.35em;color:var(--ink-soft);
+    text-align:center;margin-top:.2em}
+
+  .split{display:flex;gap:34px;align-items:center}
+  .split.rev{flex-direction:row-reverse}
+  .split .txt{flex:1}
+  .split .pic{flex:0 0 290px}
+  @media(max-width:680px){.split{flex-direction:column}.split.rev{flex-direction:column}.split .pic{flex:none;width:240px}}
+
+  .scroll-hint{
+    text-align:center;font-family:"Caveat",cursive;color:var(--ink-soft);
+    font-size:1.4em;margin-top:18px;
+  }
+  .scroll-hint span{display:inline-block;animation:bob 2.4s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(7px)}}
+
+  footer{
+    text-align:center;padding:14px 0 70px;color:var(--ink-soft);
+    font-style:italic;font-size:.92em;
+  }
+  footer .heart{color:var(--rust)}
+
+  /* gentle wave on the wee robot */
+  .wave{transform-box:fill-box;transform-origin:bottom center;animation:wave 3.4s ease-in-out infinite}
+  @keyframes wave{0%,100%{transform:rotate(0)}45%{transform:rotate(-7deg)}70%{transform:rotate(4deg)}}
+  .twinkle{animation:tw 3s ease-in-out infinite}
+  @keyframes tw{0%,100%{opacity:.25}50%{opacity:1}}
+  .blink{animation:blink 5s steps(1,end) infinite}
+  @keyframes blink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
+</style>
+</head>
+<body>
+
+<!-- reusable defs / palette gradients -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".45" stop-color="#dbe6f0"/>
+      <stop offset="1" stop-color="#b9cfe0"/>
+    </linearGradient>
+    <linearGradient id="joint" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#56a0d3"/>
+      <stop offset="1" stop-color="#2f5bb7"/>
+    </linearGradient>
+    <radialGradient id="face" cx="50%" cy="40%" r="70%">
+      <stop offset="0" stop-color="#c2e1f6"/>
+      <stop offset="1" stop-color="#56a0d3"/>
+    </radialGradient>
+  </defs>
+</svg>
+
+<div class="book">
+
+  <!-- ========================= COVER ========================= -->
+  <section class="spread" id="cover">
+    <div class="chapter-no" style="color:var(--mustard)">· a little storybook ·</div>
+    <h1 class="display">The Little Robot<br>Who Learned to Help</h1>
+    <div class="dansk">Den lille hjælpsomme robot</div>
+
+    <div class="art-wrap" style="margin-top:18px">
+      <!-- HERO: robot in a snowy workshop window, waving -->
+      <svg viewBox="0 0 520 420" width="520" role="img" aria-label="A friendly little robot arm waving by a frosty workshop window">
+        <!-- window / room -->
+        <rect x="40" y="26" width="440" height="300" rx="18" fill="#e9f1f8"/>
+        <rect x="40" y="26" width="440" height="300" rx="18" fill="none" stroke="#2f5bb7" stroke-width="6"/>
+        <!-- winter sky panes -->
+        <g>
+          <rect x="58" y="44" width="184" height="128" rx="6" fill="#dcecf8"/>
+          <rect x="278" y="44" width="184" height="128" rx="6" fill="#dcecf8"/>
+          <!-- snow -->
+          <g fill="#ffffff">
+            <circle class="twinkle" cx="92" cy="74" r="4"/><circle class="twinkle" cx="150" cy="110" r="3" style="animation-delay:.6s"/>
+            <circle class="twinkle" cx="210" cy="64" r="3.5" style="animation-delay:1.2s"/><circle class="twinkle" cx="120" cy="150" r="3" style="animation-delay:.3s"/>
+            <circle class="twinkle" cx="320" cy="90" r="4" style="animation-delay:.9s"/><circle class="twinkle" cx="400" cy="64" r="3" style="animation-delay:1.5s"/>
+            <circle class="twinkle" cx="440" cy="130" r="3.5" style="animation-delay:.2s"/><circle class="twinkle" cx="356" cy="150" r="3" style="animation-delay:1.1s"/>
+          </g>
+          <!-- little hills -->
+          <path d="M58 172 q60 -40 120 -10 q40 22 64 8 V172 Z" fill="#aecfe8"/>
+          <path d="M278 172 q70 -34 130 -6 q30 16 54 6 V172 Z" fill="#aecfe8"/>
+        </g>
+        <!-- floor / bench -->
+        <rect x="40" y="300" width="440" height="26" fill="#8aa0b3"/>
+        <rect x="40" y="300" width="440" height="8" fill="#e6ce4c" opacity=".6"/>
+
+        <!-- THE ROBOT -->
+        <g transform="translate(250,300)">
+          <!-- base -->
+          <path d="M-58 0 L58 0 L40 -30 L-40 -30 Z" fill="url(#joint)"/>
+          <ellipse cx="0" cy="-30" rx="40" ry="11" fill="#56a0d3"/>
+          <ellipse cx="0" cy="-30" rx="40" ry="11" fill="none" stroke="#15326b" stroke-width="3"/>
+          <!-- shoulder link up -->
+          <rect x="-22" y="-86" width="44" height="58" rx="14" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+          <ellipse cx="0" cy="-86" rx="26" ry="14" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+          <!-- upper arm (reaching left & up) -->
+          <g transform="rotate(-34)">
+            <rect x="-18" y="-150" width="36" height="150" rx="16" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+            <circle cx="0" cy="-150" r="22" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+            <!-- forearm (the waving arm) -->
+            <g class="wave" transform="translate(0,-150) rotate(40)">
+              <rect x="-15" y="-128" width="30" height="128" rx="14" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+              <circle cx="0" cy="-128" r="17" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+              <!-- wrist + friendly head -->
+              <g transform="translate(0,-128)">
+                <rect x="-11" y="-30" width="22" height="30" rx="9" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+                <g transform="translate(0,-48)">
+                  <circle r="30" fill="#ffffff" stroke="#2f5bb7" stroke-width="4"/>
+                  <circle r="22" fill="url(#face)"/>
+                  <!-- eyes -->
+                  <g class="blink" transform-box="fill-box" transform-origin="center">
+                    <circle cx="-8" cy="-3" r="3.6" fill="#2f5bb7"/>
+                    <circle cx="8" cy="-3" r="3.6" fill="#2f5bb7"/>
+                  </g>
+                  <!-- smile -->
+                  <path d="M-9 7 q9 9 18 0" fill="none" stroke="#2f5bb7" stroke-width="3" stroke-linecap="round"/>
+                  <!-- cheeks -->
+                  <circle cx="-14" cy="5" r="3.5" fill="#eca5a5" opacity=".7"/>
+                  <circle cx="14" cy="5" r="3.5" fill="#eca5a5" opacity=".7"/>
+                  <!-- antenna -->
+                  <line x1="0" y1="-30" x2="0" y2="-42" stroke="#2f5bb7" stroke-width="3"/>
+                  <circle cx="0" cy="-46" r="5" fill="var(--rust)"/>
+                </g>
+              </g>
+            </g>
+          </g>
+        </g>
+        <!-- floating heart -->
+        <path class="twinkle" d="M408 250 c0 -10 16 -10 16 0 c0 10 -16 18 -16 18 c0 0 -16 -8 -16 -18 c0 -10 16 -10 16 0 Z" fill="var(--rust)" style="animation-delay:.4s"/>
+      </svg>
+    </div>
+
+    <p style="text-align:center;font-style:italic;color:var(--ink-soft);margin:0">
+      Born in a workshop on a winter's day · 15 December 2021<br>
+      <span style="font-family:'Caveat',cursive;font-size:1.45em;color:var(--rust)">told for the curious, by his maker</span>
+    </p>
+
+    <div class="scroll-hint">turn the page <span>↓</span></div>
+  </section>
+
+  <!-- ========================= CH 1 ========================= -->
+  <section class="spread">
+    <div class="chapter-no">Chapter One</div>
+    <h2 class="chapter-title">In which a robot is born, knowing nothing at all</h2>
+    <div class="rule"><span class="ln"></span>❀<span class="ln"></span></div>
+
+    <p class="lead dropcap">Once upon a time, in a tidy little workshop where the frost drew ferns on the windows, a maker named Nick bolted together a robot from six round joints and a handful of bright wires. It had a long, gentle arm, a curious tilting head, and a heart that beat in tiny electric pulses.</p>
+
+    <p>But on the day it woke, the little robot could do <em>nothing</em>. It did not know what a part was, nor how heavy, nor how tall. It did not know where to reach, or where to set things down. It knew only one thing in all the world — how to ask a question, very politely.</p>
+
+    <div class="quote">
+      “Have you already taught me what to do?”
+      <span class="who">— the robot's very first words</span>
+    </div>
+
+    <p>And because nobody had, the little robot did the bravest thing a robot can do. It decided to <em>learn</em>.</p>
+  </section>
+
+  <!-- ========================= CH 2 ========================= -->
+  <section class="spread">
+    <div class="chapter-no">Chapter Two</div>
+    <h2 class="chapter-title">In which the robot asks a great many questions</h2>
+    <div class="rule"><span class="ln"></span>✦<span class="ln"></span></div>
+
+    <div class="split">
+      <div class="txt">
+        <p class="dropcap">Before it could lift a single thing, the robot wanted to understand the world it had been given. So it asked, one question at a time, the way a child asks about everything under the sun.</p>
+        <p style="font-family:'Caveat',cursive;font-size:1.35em;line-height:1.5;color:var(--teal-deep)">
+          “How much does your part weigh?”<br>
+          “How tall is it? How wide?”<br>
+          “How many rows shall we make? How many columns?”<br>
+          “Which wire is my gripper on?”<br>
+          “Which little light tells me the part is there?”
+        </p>
+        <p>For every answer, the robot nodded its bright antenna and tucked the number away somewhere safe inside, so it would never have to ask twice.</p>
+      </div>
+      <div class="pic">
+        <figure>
+          <div class="art-wrap">
+            <!-- speech-bubble spot illustration -->
+            <svg viewBox="0 0 240 240" width="240" role="img" aria-label="The little robot head surrounded by question bubbles">
+              <g transform="translate(120,150)">
+                <rect x="-12" y="0" width="24" height="50" rx="9" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+                <circle cx="0" cy="0" r="40" fill="#ffffff" stroke="#2f5bb7" stroke-width="5"/>
+                <circle cx="0" cy="0" r="29" fill="url(#face)"/>
+                <g class="blink" transform-box="fill-box" transform-origin="center">
+                  <circle cx="-11" cy="-4" r="4.6" fill="#2f5bb7"/>
+                  <circle cx="11" cy="-4" r="4.6" fill="#2f5bb7"/>
+                </g>
+                <path d="M-12 9 q12 11 24 0" fill="none" stroke="#2f5bb7" stroke-width="3.4" stroke-linecap="round"/>
+                <circle cx="-19" cy="6" r="4.5" fill="#eca5a5" opacity=".7"/>
+                <circle cx="19" cy="6" r="4.5" fill="#eca5a5" opacity=".7"/>
+                <line x1="0" y1="-40" x2="0" y2="-54" stroke="#2f5bb7" stroke-width="3.4"/>
+                <circle cx="0" cy="-58" r="6" fill="var(--rust)"/>
+              </g>
+              <!-- question bubbles -->
+              <g font-family="Caveat,cursive" font-weight="700" font-size="34" fill="#fff" text-anchor="middle">
+                <g class="twinkle"><circle cx="46" cy="52" r="26" fill="var(--rust)"/><text x="46" y="64">?</text></g>
+                <g class="twinkle" style="animation-delay:.7s"><circle cx="196" cy="70" r="22" fill="var(--mustard)"/><text x="196" y="81">?</text></g>
+                <g class="twinkle" style="animation-delay:1.3s"><circle cx="186" cy="170" r="20" fill="var(--teal)"/><text x="186" y="180">?</text></g>
+                <g class="twinkle" style="animation-delay:.4s"><circle cx="40" cy="160" r="18" fill="var(--sage)"/><text x="40" y="170">?</text></g>
+              </g>
+            </svg>
+          </div>
+          <figcaption class="caption">curious from the very start</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= CH 3 ========================= -->
+  <section class="spread">
+    <div class="chapter-no">Chapter Three</div>
+    <h2 class="chapter-title">In which they hold hands, and the robot is taught</h2>
+    <div class="rule"><span class="ln"></span>❦<span class="ln"></span></div>
+
+    <div class="split rev">
+      <div class="txt">
+        <p class="dropcap">Now came the gentlest magic of all. The maker took the robot softly by the wrist, and the robot went loose and trusting in his hands — this is a thing robots call <em>freedrive</em>, but it is really just holding hands.</p>
+        <p>Together they moved through the air. “This is where we pick the part up,” said the maker, and the robot remembered the spot. With a hopeful little warning it opened its fingers wide:</p>
+        <div class="quote" style="margin:.8em auto">“Hold this part — I'm about to drop it!”</div>
+        <p>They found a safe place to pass through in the middle, and a place to set the part down, and at last a corner of the table where neat parts could be stacked in tidy rows and columns, like loaves cooling on a shelf.</p>
+      </div>
+      <div class="pic">
+        <figure>
+          <div class="art-wrap">
+            <!-- hand guiding the arm -->
+            <svg viewBox="0 0 240 280" width="240" role="img" aria-label="A maker's hand gently guiding the robot's arm">
+              <!-- arm -->
+              <g transform="translate(70,250)">
+                <ellipse cx="0" cy="0" rx="40" ry="11" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+                <rect x="-20" y="-54" width="40" height="54" rx="13" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+                <circle cx="0" cy="-54" r="20" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+                <g transform="rotate(28)">
+                  <rect x="-15" y="-120" width="30" height="120" rx="13" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+                  <circle cx="0" cy="-120" r="16" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+                  <g transform="translate(0,-120) rotate(36)">
+                    <rect x="-12" y="-86" width="24" height="86" rx="11" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+                    <!-- gripper head -->
+                    <g transform="translate(0,-86)">
+                      <circle r="24" fill="#ffffff" stroke="#2f5bb7" stroke-width="4"/>
+                      <circle r="17" fill="url(#face)"/>
+                      <circle cx="-6" cy="-2" r="3" fill="#2f5bb7"/>
+                      <circle cx="6" cy="-2" r="3" fill="#2f5bb7"/>
+                      <path d="M-6 6 q6 6 12 0" fill="none" stroke="#2f5bb7" stroke-width="2.6" stroke-linecap="round"/>
+                    </g>
+                  </g>
+                </g>
+              </g>
+              <!-- guiding hand -->
+              <g transform="translate(150,86)" fill="#e7b48c" stroke="#b97f54" stroke-width="2.5" stroke-linejoin="round">
+                <path d="M40 30 q-6 -34 -2 -52 q3 -10 11 -6 q4 22 4 34 l3 -2 q2 -22 6 -34 q4 -8 11 -4 q1 16 -1 34 q6 -10 12 -16 q7 -5 10 3 q-4 12 -12 24 q10 -4 16 -2 q7 3 1 11 q-12 12 -26 22 q-16 11 -34 6 q-12 -3 -16 -16 q14 4 16 -2 Z"/>
+              </g>
+              <!-- little hearts of trust -->
+              <path class="twinkle" d="M120 40 c0 -7 11 -7 11 0 c0 7 -11 12 -11 12 c0 0 -11 -5 -11 -12 c0 -7 11 -7 11 0 Z" fill="var(--rust)"/>
+            </svg>
+          </div>
+          <figcaption class="caption">“move me to where you want it”</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= CH 4 ========================= -->
+  <section class="spread">
+    <div class="chapter-no">Chapter Four</div>
+    <h2 class="chapter-title">In which the robot tries, and tries again</h2>
+    <div class="rule"><span class="ln"></span>✿<span class="ln"></span></div>
+
+    <p class="lead dropcap">The little robot was eager, but it was not yet proud. After every lesson it would lift the part all by itself — “Alright, let me try!” — and then, with its head tilted just so, it would ask the most honest question a learner can ask:</p>
+
+    <div class="quote">
+      “Did I pick it up okay?”<br>“Did I place it okay?”
+      <span class="who">— asked after every single attempt</span>
+    </div>
+
+    <p>If the answer was <em>no</em>, the robot did not sulk and did not give up. It simply loosened its wrist, took its maker's hand again, and learned the spot anew — around and around, as many times as it took, until at last the answer was <em>yes</em>. That patience was built into its very bones.</p>
+
+    <div class="art-wrap">
+      <!-- the try-again loop -->
+      <svg viewBox="0 0 420 130" width="420" role="img" aria-label="A loop showing teach, try, and ask, repeating">
+        <g font-family="Fraunces,serif" font-size="16" fill="var(--ink)" text-anchor="middle">
+          <g>
+            <circle cx="60" cy="60" r="40" fill="var(--sky)" stroke="#2f5bb7" stroke-width="3"/>
+            <text x="60" y="58">teach</text><text x="60" y="76" font-size="13">me</text>
+          </g>
+          <g>
+            <circle cx="210" cy="60" r="40" fill="var(--mustard)" stroke="#2f5bb7" stroke-width="3"/>
+            <text x="210" y="58">let me</text><text x="210" y="76">try</text>
+          </g>
+          <g>
+            <circle cx="360" cy="60" r="40" fill="#c2e1f6" stroke="#2f5bb7" stroke-width="3"/>
+            <text x="360" y="58">did I</text><text x="360" y="76">do ok?</text>
+          </g>
+          <!-- arrows -->
+          <path d="M104 60 h60" fill="none" stroke="var(--rust)" stroke-width="3" marker-end="url(#ah)"/>
+          <path d="M254 60 h60" fill="none" stroke="var(--rust)" stroke-width="3" marker-end="url(#ah)"/>
+          <!-- loop back -->
+          <path d="M360 102 q-150 60 -300 0" fill="none" stroke="var(--teal)" stroke-width="3" stroke-dasharray="2 7" stroke-linecap="round" marker-end="url(#ah2)"/>
+          <text x="210" y="128" font-family="Caveat,cursive" font-size="20" fill="var(--teal-deep)">…until the answer is yes</text>
+        </g>
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--rust)"/></marker>
+          <marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--teal)"/></marker>
+        </defs>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ========================= CH 5 ========================= -->
+  <section class="spread">
+    <div class="chapter-no">Chapter Five</div>
+    <h2 class="chapter-title">In which the little robot becomes a great help</h2>
+    <div class="rule"><span class="ln"></span>❀<span class="ln"></span></div>
+
+    <div class="split">
+      <div class="txt">
+        <p class="dropcap">And then one quiet morning the lessons were done, and the work began. When a little light blinked to say <em>a part is ready</em>, the robot swept down, gathered it up, carried it gently past the safe middle place, and set it where it belonged. With a wink of its signal it told the machine, “your turn,” and waited ever so patiently for the machine to finish.</p>
+        <p>Then it gathered the finished piece and laid it in the pallet — row by row, column by column — until the whole tray was filled with neat and tidy parts. And it never grew tired, and it never grew bored, and it never once forgot a single thing it had been taught.</p>
+      </div>
+      <div class="pic">
+        <figure>
+          <div class="art-wrap">
+            <!-- robot placing onto a pallet -->
+            <svg viewBox="0 0 240 260" width="240" role="img" aria-label="The robot stacking parts neatly onto a pallet">
+              <!-- pallet of parts -->
+              <g transform="translate(150,196)">
+                <g fill="var(--rust)" stroke="#2f5bb7" stroke-width="2">
+                  <rect x="-6" y="-6" width="26" height="26" rx="4"/>
+                  <rect x="24" y="-6" width="26" height="26" rx="4"/>
+                  <rect x="-6" y="24" width="26" height="26" rx="4"/>
+                  <rect x="24" y="24" width="26" height="26" rx="4"/>
+                </g>
+                <rect x="-12" y="54" width="76" height="9" rx="2" fill="#8aa0b3"/>
+              </g>
+              <!-- arm placing a part -->
+              <g transform="translate(70,250)">
+                <ellipse cx="0" cy="0" rx="34" ry="10" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+                <rect x="-18" y="-48" width="36" height="48" rx="12" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+                <circle cx="0" cy="-48" r="18" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+                <g transform="rotate(40)">
+                  <rect x="-13" y="-110" width="26" height="110" rx="12" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+                  <circle cx="0" cy="-110" r="14" fill="url(#joint)" stroke="#15326b" stroke-width="3"/>
+                  <g transform="translate(0,-110) rotate(34)">
+                    <rect x="-11" y="-70" width="22" height="70" rx="10" fill="url(#metal)" stroke="#9fb6c9" stroke-width="2"/>
+                    <g transform="translate(0,-70)">
+                      <circle r="21" fill="#ffffff" stroke="#2f5bb7" stroke-width="4"/>
+                      <circle r="15" fill="url(#face)"/>
+                      <circle cx="-5" cy="-2" r="2.8" fill="#2f5bb7"/>
+                      <circle cx="5" cy="-2" r="2.8" fill="#2f5bb7"/>
+                      <path d="M-5 5 q5 5 10 0" fill="none" stroke="#2f5bb7" stroke-width="2.4" stroke-linecap="round"/>
+                      <!-- carried part in gripper -->
+                      <rect x="-11" y="18" width="22" height="22" rx="4" fill="var(--rust)" stroke="#2f5bb7" stroke-width="2"/>
+                      <path d="M-12 16 l-5 8 M12 16 l5 8" stroke="#2f5bb7" stroke-width="3" stroke-linecap="round"/>
+                    </g>
+                  </g>
+                </g>
+              </g>
+              <!-- happy signal pulse -->
+              <g class="twinkle" transform="translate(120,40)">
+                <circle r="6" fill="var(--mustard)"/>
+                <circle r="14" fill="none" stroke="var(--mustard)" stroke-width="2" opacity=".6"/>
+                <circle r="22" fill="none" stroke="var(--mustard)" stroke-width="1.5" opacity=".35"/>
+              </g>
+            </svg>
+          </div>
+          <figcaption class="caption">row by row, never tiring</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= THE END ========================= -->
+  <section class="spread" id="end">
+    <div class="chapter-no" style="color:var(--mustard)">· and so ·</div>
+    <h2 class="chapter-title" style="font-style:normal">The End — but not really</h2>
+    <div class="rule"><span class="ln"></span>✦<span class="ln"></span></div>
+
+    <p class="lead" style="text-align:center;max-width:48ch;margin:0 auto 1.2em">
+      The little robot had only one last wish, and it asked for it the way it asked for everything — kindly, and out loud:
+    </p>
+
+    <div class="quote" style="font-size:1.8em">
+      “Make sure to save this,<br>so that I can remember it!”
+    </div>
+
+    <p style="text-align:center;max-width:46ch;margin:0 auto">
+      For a helpful little robot is not born helpful. It is born <em>curious</em>, and it becomes helpful one patient question at a time — held by a kind hand, willing to try again, and trusted to remember.
+    </p>
+
+    <div class="art-wrap" style="margin-top:24px">
+      <svg viewBox="0 0 200 90" width="200" aria-hidden="true">
+        <g transform="translate(100,45)">
+          <circle r="28" fill="#ffffff" stroke="#2f5bb7" stroke-width="4"/>
+          <circle r="20" fill="url(#face)"/>
+          <g class="blink" transform-box="fill-box" transform-origin="center">
+            <circle cx="-7" cy="-2" r="3.4" fill="#2f5bb7"/>
+            <circle cx="7" cy="-2" r="3.4" fill="#2f5bb7"/>
+          </g>
+          <path d="M-8 6 q8 8 16 0" fill="none" stroke="#2f5bb7" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="-13" cy="4" r="3.5" fill="#eca5a5" opacity=".7"/>
+          <circle cx="13" cy="4" r="3.5" fill="#eca5a5" opacity=".7"/>
+          <line x1="0" y1="-28" x2="0" y2="-40" stroke="#2f5bb7" stroke-width="3"/>
+          <circle cx="0" cy="-44" r="5" fill="var(--rust)"/>
+        </g>
+      </svg>
+    </div>
+  </section>
+
+  <footer>
+    Written &amp; illustrated for <strong>HelpfulBot</strong> — a teach-by-prompt cobot by Nick Armenta.<br>
+    First woken 15 December 2021 · still happily palletizing.  Made with <span class="heart">❤</span> and a Universal Robot.
+  </footer>
+
+</div>
+</body>
+</html>

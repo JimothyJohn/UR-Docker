@@ -1,0 +1,117 @@
+# ElegantDance — a non-interactive choreography that shows off the e-Series'
+# smooth path blending, range of motion, and dynamic range. Each run is unique.
+#
+# HOW IT WORKS
+#   Every joint follows its own sinusoid:  q_j(t) = nominal_j + A_j*env(t)*sin(f_j*t + p_j)
+#   The per-joint frequencies f_j and phases p_j are drawn from a small LCG that
+#   is *seeded from the live pose*, so the trajectory is different on every run
+#   (URScript has no random()/nested defs, so the LCG is inlined). Superimposing
+#   six incommensurate sinusoids traces a complex Lissajous-style figure in
+#   joint space — organic, never-repeating motion that still returns home.
+#
+#   env(t) is a single rise-and-fall (a crescendo): the amplitude, joint speed,
+#   and acceleration all swell to a fast, expansive peak mid-run and ease back
+#   down. Waypoints are sampled finely and driven with high acceleration, so the
+#   robot flows through the figure energetically.
+#
+#   NOTE on blends: an earlier version rounded each corner with a movej blend
+#   radius `r`. Because the waypoints are randomized, two consecutive ones can
+#   occasionally fall closer together than the blend radius, which makes the
+#   controller abort the move ("blend radius too large for segment"). Since the
+#   seed (and therefore the geometry) differs every run, that can't be ruled out
+#   by testing — so blends are intentionally omitted for run-to-run robustness.
+#   To re-enable, add `r=0.02` to the movej below AND guarantee a minimum
+#   segment length (e.g. skip waypoints closer than the blend radius).
+#
+# SAFETY
+#   Targets are generated in JOINT space around a well-conditioned, elbow-folded
+#   nominal pose with bounded per-joint amplitudes — so every waypoint is
+#   reachable and far from wrist/shoulder singularities (those only bite
+#   Cartesian movel/IK). Peak speed stays under the UR10's 2.09 rad/s base-joint
+#   limit. On real hardware, sanity-check the envelope against your workcell.
+
+def ElegantDance():
+  textmsg("dance/start")
+
+  # ---- the pose the dance orbits around (reachable, elbow folded) ----------
+  nominal = [0.0, -1.2217, 1.5708, -1.9199, -1.5708, 0.0]
+  # per-joint angular amplitude (rad), bounded to stay reachable + collision-free
+  amp     = [1.10, 0.55, 0.90, 1.10, 1.20, 2.20]
+
+  # ---- seed a small LCG from the current pose so each run differs -----------
+  # 24-bit LCG (m=2^24, a=16807): products stay exact in double precision.
+  q0  = get_actual_joint_positions()
+  rng = q0[0]*q0[0]*131072.0 + q0[3]*q0[3]*65536.0 + 12345.0
+  rng = rng - floor(rng / 16777216.0) * 16777216.0
+
+  # ---- draw per-joint frequencies (0.5..2.0) and phases (0..2pi), one-time --
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  f0 = 0.5 + 1.5*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  f1 = 0.5 + 1.5*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  f2 = 0.5 + 1.5*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  f3 = 0.5 + 1.5*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  f4 = 0.5 + 1.5*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  f5 = 0.5 + 1.5*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  p0 = 6.2832*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  p1 = 6.2832*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  p2 = 6.2832*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  p3 = 6.2832*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  p4 = 6.2832*(rng/16777216.0)
+  rng = rng*16807.0 + 1.0
+  rng = rng - floor(rng/16777216.0)*16777216.0
+  p5 = 6.2832*(rng/16777216.0)
+
+  # ---- ease into the start of the figure -----------------------------------
+  movej(nominal, a=1.2, v=1.0)
+  textmsg("dance/at_nominal")
+
+  # ---- the dance: sweep phase t, evaluate the six sinusoids, blend each
+  #      move into the next so the path flows continuously --------------------
+  steps = 40
+  k = 0
+  while k < steps:
+    t   = k * 0.22
+    # single rise-and-fall over the whole run: 0 -> 1 -> 0 (the crescendo)
+    env = sin(3.14159265 * (k + 1) / (steps + 1))
+    scale = 0.20 + 0.80*env
+    vk    = 0.60 + 1.30*env      # rad/s    (peaks ~1.9, under the 2.09 cap)
+    ak    = 1.50 + 3.00*env      # rad/s^2  (high, so each waypoint is crisp)
+
+    target = [nominal[0] + amp[0]*scale*sin(f0*t + p0),
+              nominal[1] + amp[1]*scale*sin(f1*t + p1),
+              nominal[2] + amp[2]*scale*sin(f2*t + p2),
+              nominal[3] + amp[3]*scale*sin(f3*t + p3),
+              nominal[4] + amp[4]*scale*sin(f4*t + p4),
+              nominal[5] + amp[5]*scale*sin(f5*t + p5)]
+
+    movej(target, a=ak, v=vk)
+    k = k + 1
+  end
+
+  # ---- graceful finale: ease back to nominal and rest ----------------------
+  movej(nominal, a=1.0, v=0.8)
+  textmsg("dance/done")
+end
+
+ElegantDance()
