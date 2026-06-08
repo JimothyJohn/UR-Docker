@@ -203,6 +203,115 @@ Four things PolyScope demands, all easy to miss:
 The `<kinematics>` values can be zero/identity for URSim; real hardware
 prefers values matching the installed robot's actual calibration.
 
+### Authoring a *native node tree* (not a one-line script wrapper)
+
+**Authoring conventions** (functional waypoint names, one Move node per motion
+type, blend every non-stopping waypoint) live in
+`docs/program-authoring-best-practices.md` — follow them when generating
+programs.
+
+`urp_convert`'s `script_to_urp` wraps a whole `.script` in a single
+`<Script type="File">` node — PolyScope loads it, but the operator sees one
+opaque "Script" line. When you want the program to look like real,
+point-and-click UR nodes (MoveJ→Waypoint, If, Loop, Folder…) the `.urp` must
+*be* that typed node tree. `urctl/urp_builder.py` (`UrpProgram` + `Waypoint`)
+emits it. `.script → rich .urp` reconstruction is still impossible (URScript is
+Turing-complete; the tree is gone once it's flat) — but **authoring** the tree
+when *we* generate the program is straightforward.
+
+Two findings, both verified by generating a `.urp` and watching `load` succeed
+against the running sim (`programs/NodeTreeDemo/build.py` is a worked example;
+`tests/test_urp_builder.py` + `TestUrpBuilderLoading` lock it in):
+
+- **The kinematics envelope is load-critical for `<Script>` nodes.** A program
+  with real (UR10e) `<kinematics>`/`jointChecksum="-1,…"` loads fine for
+  Move/Waypoint nodes, but `ScriptNodeConversionStrategy` rejects the whole
+  program ("not a valid file version"). The all-zero `NOT_LINEARIZED` envelope
+  (identical to `urp_convert`'s) loads *every* node type, so the builder emits
+  that unconditionally. Joint-space waypoints don't need calibration anyway.
+- **Verified node set:** `Comment`, `Folder`, `MoveJ`/`MoveL` + joint-space
+  `Waypoint`, `If` (raw expr or digital-in), `Loop` (counting), `Set` (digital
+  out), `Popup`, and the hybrid `Script type="File"` (multi-line helper `def`s)
+  + `Script type="Line"` (a call shown as one script line). `Wait` and
+  `Script type="Code"` were tried and **rejected** by their conversion
+  strategies — they're intentionally absent. Add a node type only after
+  teaching it once in PolyScope (`load` the result over Dashboard to confirm)
+  and diffing the save; do **not** ship guessed node XML.
+
+The "load key functions and use them" pattern: put helper `def`s in a
+`script_file(...)` node and call them from `script_line(...)` nodes, so the
+visible flow reads as named operations (`close_gripper()`) instead of I/O
+plumbing. `make regen-urps` runs any `programs/*/build.py` to refresh its `.urp`
+(falling back to the `.script`→`.urp` converter for script-based samples).
+
+### Guided build with on-pendant confirmation
+
+`urctl/guided.py` (`GuidedSession`) builds a node-tree program **interactively**:
+the operator issues a step, the robot raises a **Yes/No dialog on its own
+pendant** describing what it's about to do, and on Yes the step *executes live
+and is recorded* into the growing `.urp`. The console front end is
+`urctl guided <name> --save <path>` (a REPL: `movej`, `movetcp [rel]`, `out`,
+`comment`, `summary`, `save`, `quit`).
+
+Two authoring conventions are baked in (see
+`docs/program-authoring-best-practices.md`): every recorded step is preceded by a
+**Comment node** built from its `; description` (so always pass one), and
+waypoints are **named by function** (CamelCased description), reusing an earlier
+name when a step returns to the same pose. Because each step gets its own
+comment, guided moves are intentionally not grouped into shared Move nodes.
+Passing **`--freedrive`** makes each move drop into freedrive after executing so
+the operator can hand-guide the exact pose and tap Yes (No/Cancel skips)
+(`Robot.reteach_in_freedrive`); the achieved pose is recorded and later relative
+steps build off it.
+
+**Multi-point inspection app** (`urctl inspect <name> --save <path> [--live]`,
+built on `guided.run_inspection`): a pendant-led loop for "walk the robot to each
+spot and snap a picture." It embeds a camera-trigger subprogram once
+(`guided.CAMERA_TRIGGER_DEF` — a digital-out pulse placeholder; swap for the real
+trigger via `--call` or by editing the def), then repeatedly drops into freedrive
+so the operator hand-guides to a point and taps **Yes** to capture (records a
+MoveJ waypoint + a `script_line` call to the subprogram) or **No/Cancel** to
+finish. This is the canonical use of the Yes/No/Cancel return: Cancel ends the
+loop. No camera calibration needed — points are joint-space teach poses.
+
+The pendant gate is `Robot.confirm_on_pendant(prompt, timeout=…)`, built on
+`request_boolean_from_primary_client` — which **PolyScope's own UI answers**
+(the operator taps the choice on the teach pendant; see the dialect note below
+on `request_*_from_primary_client`). Hard-won details, all verified against the
+sim:
+
+- **Confirm, then act — two round-trips, not one.** The confirm is separate from
+  the motion so the move still flows through the `SafetyEnvelope`; inlining the
+  action into the confirm script would bypass validation.
+- **A timed-out confirm leaves a dialog up on the controller** that blocks the
+  next step. `confirm_on_pendant` detects no-answer (`confirmed=None`) and
+  issues `stop` + `close popup` to clear it. On Yes/No the request program ends
+  itself, so cleanup only runs on timeout.
+- **Only approved *and* executed steps are recorded.** A reject, a safety-refused
+  move, or a move that doesn't confirm completion is tallied in `session.steps`
+  but never added to the program.
+- **Moves are recorded as joint-space waypoints at the achieved pose** (read back
+  after the move), so a Cartesian step replays to the same physical spot without
+  calibration — `move_tcp` becomes a `MoveL` over a joint `Waypoint`.
+
+**Live tree growth (`--live`).** By default the node tree is built host-side and
+only appears in PolyScope's Program tab once the `.urp` is loaded. To make the
+tree grow *node-by-node as you confirm*, pass `urctl guided … --live`: after
+every recorded step the program is saved, placed on the controller, and
+reloaded. An e-Series controller **only refreshes its tree by loading a file**,
+so there's no avoiding a brief reload blink per step. The env-specific bit —
+getting the file into the controller's program dir — is a *placer*:
+`docker_placer(container)` (`docker cp` into this repo's URSim; the default,
+`--live-container`) or `local_dir_placer(dir)` (a host-reachable program dir, a
+mounted real-robot share; `--live-program-dir`). `GuidedSession(on_record=…)` is
+the generic post-record hook; `LiveReloader` is the supplied save→place→load
+implementation (reload failures are swallowed + logged — the in-memory program
+and the final save are unaffected).
+
+The one thing that can't be CI-verified is a human actually tapping Yes/No on
+the pendant; everything up to and after that (dialog raised, blocks, readback,
+timeout cleanup, record-on-approve, live publish+reload) is covered by tests.
+
 ## URScript dialect notes
 
 These are gotchas I hit writing `programs/InspectionBot/InspectionBot.script`:
@@ -259,6 +368,73 @@ them over hand-rolled URScript.
   tool frame). The safety envelope caps a single relative step (default 1.0 m)
   to catch unit mistakes (inches/mm entered as metres).
 
+## Cartesian moves and singularities (`movel` protective stops, C154A0)
+
+A `movel` from a **near-singular pose protective-stops the robot** (controller
+error `C154A0`), even for a tiny step — the inverse kinematics blows up joint
+velocities at the singularity. Two poses bite constantly:
+
+- **URSim's default startup pose** (TCP straight up at z≈1.48 m — fully
+  extended).
+- **`HOME_JOINTS` = `[0, -90, 0, -90, 0, 0]`** — elbow joint = 0 ⇒ the upper
+  arm and forearm are colinear ⇒ **elbow singularity**. `move_home` lands here,
+  so "home then nudge in Cartesian" is exactly the trap.
+
+`movej` is immune (it interpolates in joint space), so the fix is to **`movej`
+to a dexterous, elbow-bent pose before any `movel`**. The integration tests use
+`READY_JOINTS = [0, -1.0, 1.2, -1.8, -1.5708, 0]` for this (see
+`tests/test_integration_ursim.py::_running_robot`).
+
+Diagnosing it: a waited `move_tcp`/`move_joints` that hits this returns
+`ok=False, landed=null` and now also `result.protective_stop=true` (the facade
+checks `safetymode` when a move fails to confirm). The raw reason is in the
+container's URControl log, not `polyscope.log`:
+
+```bash
+sudo docker exec ur-docker-ursim-1 grep -i 'protective\|C154' /ursim/URControl.log | tail
+```
+
+**`robot_mode` stays `RUNNING` through a protective stop** — only `safety_mode`
+flips to `PROTECTIVE_STOP`. So any "is the robot ready?" check that looks at
+`robot_mode` alone is wrong; check `safety_mode` too, and `bring_up()` clears a
+latched protective stop (it calls `unlock protective stop`). A test/helper that
+gates recovery on `robot_mode` will let one protective stop cascade into every
+later motion test.
+
+## How fast can you actually drive it (control throughput)
+
+Measured on the emulated sim, a single **confirmed** move (`move_tcp` /
+`move_joints`, `wait=True`) has a fixed floor of **~1–1.5 s** regardless of the
+move distance/velocity. It breaks down as:
+
+- **~0.5 s** — the safety pre-check does one Dashboard `robotmode` round-trip
+  (connect → send → read-until-close). This is per move.
+- **~0.7 s** — the Primary broadcast round-trip: send the program, then wait for
+  the `urctl/move/done=` `textmsg` to surface in the ~10 Hz state stream.
+- plus the actual motion time.
+
+Two hard limits when you try to go faster by firing moves back-to-back:
+
+- **Rapid per-move reconnects wedge the controller.** Each `move_*` opens a
+  fresh Primary (30001) socket. After **~10** rapid connect/run/disconnect
+  cycles URControl's Primary interface chokes (`Socket::OperatorOverload` /
+  `MultiTCPSender sendall failed` in `URControl.log`) and the robot can drop to
+  **POWER_OFF**. `bring_up()` recovers it (Dashboard still works); the Primary
+  broadcast itself only fully recovers on a container restart.
+- **The safety envelope caps joint speed at ~2.09 rad/s** (`120°/s`,
+  `DEFAULT_MAX_JOINT_SPEED`) and TCP speed at 1.0 m/s. A move above the cap is
+  rejected up front (`ok=False` with a `velocity` violation, nothing sent) — it
+  looks like an instant failure but it's the envelope doing its job. Keep test
+  velocities ≤ ~2.0 rad/s.
+
+**To move a lot, stream a trajectory, don't loop single moves.**
+`Robot.move_trajectory(waypoints, ...)` (tool `ur_move_trajectory`) sends a whole
+joint-space path as one `def` over a single connection: it pays the handshake
+**once**, never reconnects mid-path, validates every waypoint up front, and can
+`blend_radius`-smooth segments (dropped on the last waypoint — a blend on the
+final `movej` errors; see the movej blend-radius pitfall in ur-program-authoring).
+This is both faster and the only way that doesn't risk wedging the controller.
+
 ## Common gotchas (and the symptoms that lead you there)
 
 | Symptom                                       | Cause                                                        | Fix                                                 |
@@ -273,6 +449,12 @@ them over hand-rolled URScript.
 | Robot powers off after `load <name>.urp`      | Fresh `<name>.installation` triggers PolyScope's safety re-eval | `power on` + `brake release` after load (E2E driver handles this) |
 | URScript `def foo(): … end; foo()` over Primary logs `Compile error: name 'foo' is not defined` | PolyScope auto-wraps inbound Primary URScript; the inner `def` is in a nested scope | Body executes anyway — the error is cosmetic. Use the wrap; raw multi-line statements break worse (each line becomes its own program). |
 | `urctl run-script 'movel(...)'` returns `ok:true` but the robot doesn't move | Bare top-level motion is split into its own program and/or the Primary socket closes before the controller latches it (racy) | Use `urctl move-tcp` / `move-joints` (reliable, confirmed). `run-script` now def-wraps by default; `--raw` opts out. See "Executing motion over Primary". |
+| `move-tcp` returns `ok:false`, `landed:null`, `protective_stop:true`; every later move also fails | A `movel` tripped a protective stop (singularity / C154A0), and `robot_mode` stays `RUNNING` so naive "ready?" checks miss it | `movej` to a dexterous pose before `movel`; `bring_up()` (or `unlock protective stop`) to clear the latch. See "Cartesian moves and singularities". |
+| RTDE / Secondary / RT reads refused on `:30004`/`:30002`/`:30003` | Those ports weren't published by docker-compose | The e-Series `ports:` list now publishes `30002-30004`, `30020`, `502`; recreate the container (`docker compose up -d`) after editing it |
+| Moves start failing fast (`ok:false`, no `protective_stop`) and the robot ends `POWER_OFF` after a burst of moves | ~10+ rapid per-move Primary reconnects wedged URControl (`Socket::OperatorOverload`) | Don't loop single moves — use `move_trajectory` (one connection). `bring_up()` to recover. See "How fast can you actually drive it". |
+| A move returns `ok:false` instantly with a `velocity`/`tcp_velocity` violation | Speed exceeds the safety envelope cap (joints ~2.09 rad/s, TCP 1.0 m/s) | Lower the velocity, or raise the cap on a custom `SafetyEnvelope` if you really mean it |
+| PolyScope GUI (noVNC on :6080) stuck on "Please wait…" | Cosmetic — the Java/AWT front-end is slow under emulation; the controller and all network interfaces (Dashboard/Primary/RTDE) are fine | Ignore it; the headless `urctl` path doesn't use the GUI. Confirm with `urctl state` (RUNNING/NORMAL). `docker compose restart ursim` only if you actually need the GUI |
+| `docker ps` shows the container `(unhealthy)` but everything works | The healthcheck shelled out to `nc`, which **isn't installed in the URSim image**, so it always failed (not the controller) | Fixed: the healthcheck now uses `python3` (present in the image). Benign regardless — verify the controller with `urctl state` |
 
 ## Working in this repo
 
@@ -285,7 +467,20 @@ make lint            # ruff + shellcheck
 make sim-down        # stop URSim
 ```
 
-Host-side control (after `pip install -e .`), against the sim or a real robot:
+Environment + deps are managed with **`uv`** (the repo's `pyproject.toml`
+declares the `urctl`/`perception` packages and a `dev` group). `uv sync` builds
+`.venv`; prefix commands with `uv run`. The core (`urctl` + perception core) is
+pure stdlib — numpy/OpenCV/torch/the MCP SDK are optional extras
+(`uv sync --extra perception --extra mcp`).
+
+```bash
+uv sync                                   # create .venv with dev deps
+uv run pytest -m "not integration"        # unit tests
+uv run urctl state                        # run the CLI in the env
+```
+
+Host-side control (via `uv run`, or after `uv sync` activate `.venv`), against
+the sim or a real robot:
 
 ```bash
 urctl state                              # read state as JSON (localhost)

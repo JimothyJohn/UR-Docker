@@ -17,7 +17,8 @@ A "program" here is a `.script` (URScript) committed under `programs/<Name>/`,
 converted to a PolyScope-loadable `.urp`, with a matching `.installation`. See
 `programs/PickPlace`, `programs/AppleStack`, `programs/ElegantDance` as worked
 references, and CLAUDE.md for the `.urp` schema. This skill is the procedure +
-the dialect traps that cost real time.
+the dialect traps that cost real time. For naming/blend/Move-grouping
+conventions, follow `docs/program-authoring-best-practices.md`.
 
 ## The shape every sample follows
 

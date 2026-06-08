@@ -40,7 +40,8 @@ controller exposes (Dashboard on 29999, Primary Client on 30001), so the
 changes is the connection target.
 
 ```bash
-pip install -e .            # installs the `urctl` and `urctl-mcp` commands
+uv sync                     # create the .venv (installs `urctl` + `urctl-mcp`)
+# prefix the commands below with `uv run`, or activate .venv first
 
 urctl state                          # read robot state as JSON (localhost)
 urctl bring-up                       # cold start -> RUNNING (power on + brakes)
@@ -141,8 +142,8 @@ client (Claude Desktop, Claude Code, or any MCP-capable agent) can drive the
 robot:
 
 ```bash
-pip install -e '.[mcp]'        # installs the optional `mcp` SDK
-urctl-mcp --host 10.0.0.5      # serve over stdio
+uv sync --extra mcp                   # installs the optional `mcp` SDK
+uv run urctl-mcp --host 10.0.0.5      # serve over stdio
 ```
 
 Example Claude Desktop / Claude Code MCP config:

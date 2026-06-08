@@ -45,17 +45,26 @@ DEADLINE_S="${UR_TIMEOUT_S:-180}"
 
 # ----- helpers ---------------------------------------------------------------
 
+# True if a TCP port is accepting connections. Uses bash's /dev/tcp instead of
+# `nc` so we don't depend on a netcat variant (BSD nc on macOS has no `-z`/`-q`).
+_port_open() {
+  (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null
+}
+
 # Send one or more Dashboard commands in a single TCP session and print the
 # server's response. The Dashboard server is line-oriented: each command is
-# terminated by \n and the server replies with one line per command. We pipe
-# `quit\n` at the end so the server closes the socket cleanly.
+# terminated by \n and the server replies with one line per command. We send
+# `quit\n` last so the server closes the socket, giving us an EOF to read to.
+# Uses bash /dev/tcp (not nc) for portability across GNU/BSD netcat.
 dash() {
+  exec 3<>"/dev/tcp/${HOST}/${DASH_PORT}" || return 1
   {
     for cmd in "$@"; do printf '%s\n' "$cmd"; done
     sleep 0.3
     printf 'quit\n'
-  } | nc -q1 "$HOST" "$DASH_PORT" \
-    | grep -v -e '^Connected:' -e '^Disconnected'
+  } >&3
+  grep -v -e '^Connected:' -e '^Disconnected' <&3
+  exec 3>&- 3<&-
 }
 
 # Block until `<cmd>` over Dashboard returns output containing `<want>`.
@@ -81,7 +90,7 @@ log() { printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 # server only binds the socket after PolyScope (the Java OSGi runtime) finishes
 # loading bundles — usually 20–40 s after the container boots.
 log "Waiting for Dashboard server on ${HOST}:${DASH_PORT}..."
-until nc -z "$HOST" "$DASH_PORT" 2>/dev/null; do sleep 1; done
+until _port_open "$HOST" "$DASH_PORT"; do sleep 1; done
 log "Dashboard server is accepting connections."
 
 # ----- 2. Wait for URControl (the C++ realtime backend) to come up -----------
@@ -134,8 +143,11 @@ log "Brakes released. Robot is RUNNING."
 # URSim does by default. On real hardware, PolyScope must be in "Remote
 # Control" mode (top-right toggle) or have a program loaded that's running.
 log "Demonstrating direct URScript on Primary Client (${HOST}:${PRIMARY_PORT})..."
-printf 'popup("Powered on via Dashboard — this popup came via Primary 30001", title="backend tap")\n' \
-  | nc -q1 "$HOST" "$PRIMARY_PORT" >/dev/null || true
+if exec 4<>"/dev/tcp/${HOST}/${PRIMARY_PORT}" 2>/dev/null; then
+  printf 'popup("Powered on via Dashboard — this popup came via Primary 30001", title="backend tap")\n' >&4
+  sleep 0.5  # hold the socket open so URControl latches the program before FIN
+  exec 4>&- 4<&-
+fi
 
 # ----- 7. Final report -------------------------------------------------------
 log "Done. Final state:"

@@ -41,6 +41,18 @@ DEFAULT_TCP_ACCELERATION = 1.2  # m/s^2
 TCP_LANDING_TOLERANCE = 0.002
 
 
+def _sanitize_prompt(text: str, *, max_len: int = 200) -> str:
+    """Make ``text`` safe to embed in a URScript double-quoted string literal.
+
+    URScript string literals have no escape sequence for an embedded ``"``, and
+    a newline would split the submission into separate programs — so collapse
+    all whitespace to single spaces, drop double-quotes, and cap the length
+    (pendant popups are narrow). Defensive, not security-critical: the prompt is
+    operator-facing text, not a trust boundary.
+    """
+    return " ".join(text.split()).replace('"', "'")[:max_len]
+
+
 class Robot:
     def __init__(
         self,
@@ -60,9 +72,7 @@ class Robot:
         # platform-agnostic. The attribute keeps the name ``dashboard`` for
         # continuity even though it may hold a RobotAPIClient.
         self.dashboard = (
-            RobotAPIClient(self.config)
-            if self.config.is_polyscopex()
-            else DashboardClient(self.config)
+            RobotAPIClient(self.config) if self.config.is_polyscopex() else DashboardClient(self.config)
         )
         self.primary = PrimaryClient(self.config)
         # RTDE (port 30004) is created lazily on first use so tests and code
@@ -196,16 +206,12 @@ class Robot:
         if self.dry_run:
             return self._log("rtde_state", {}, ok=True, result={"reply": "(dry-run)"})
         if not self.config.rtde_enabled:
-            return self._log(
-                "rtde_state", {}, ok=False, result={"error": "RTDE disabled (UR_RTDE_DISABLE)"}
-            )
+            return self._log("rtde_state", {}, ok=False, result={"error": "RTDE disabled (UR_RTDE_DISABLE)"})
         try:
             raw = self._rtde_client().read_outputs()
         except OSError as exc:
             self._rtde = None
-            return self._log(
-                "rtde_state", {}, ok=False, result={"error": f"RTDE unreachable: {exc}"}
-            )
+            return self._log("rtde_state", {}, ok=False, result={"error": f"RTDE unreachable: {exc}"})
         except Exception as exc:  # RtdeError and friends
             self._rtde = None
             return self._log("rtde_state", {}, ok=False, result={"error": str(exc)})
@@ -323,9 +329,7 @@ class Robot:
         )
         if not wait:
             self.primary.run(body, fn_name="urctl_move")
-            return self._log(
-                "move_joints", args, ok=True, safety=verdict.as_dict(), result={"waited": False}
-            )
+            return self._log("move_joints", args, ok=True, safety=verdict.as_dict(), result={"waited": False})
 
         captured = self.primary.run_and_capture(
             body,
@@ -342,6 +346,8 @@ class Robot:
             and max(abs(a - b) for a, b in zip(landed, target, strict=False)) < LANDING_TOLERANCE
         )
         result = {"landed": landed, "waited": True}
+        if landed is None and "PROTECTIVE_STOP" in self.dashboard.safety_mode():
+            result["protective_stop"] = True
         return self._log("move_joints", args, ok=ok, safety=verdict.as_dict(), result=result)
 
     def move_home(self, **kwargs) -> dict:
@@ -394,9 +400,7 @@ class Robot:
             )
 
         pose_literal = "p[" + ", ".join(str(float(x)) for x in pose) + "]"
-        target_expr = (
-            f"pose_add(get_actual_tcp_pose(), {pose_literal})" if relative else pose_literal
-        )
+        target_expr = f"pose_add(get_actual_tcp_pose(), {pose_literal})" if relative else pose_literal
         body = (
             f"movel({target_expr}, a={acceleration}, v={velocity})\n"
             "sync()\n"
@@ -404,9 +408,7 @@ class Robot:
         )
         if not wait:
             self.primary.run(body, fn_name="urctl_move_tcp")
-            return self._log(
-                "move_tcp", args, ok=True, safety=verdict.as_dict(), result={"waited": False}
-            )
+            return self._log("move_tcp", args, ok=True, safety=verdict.as_dict(), result={"waited": False})
 
         captured = self.primary.run_and_capture(
             body,
@@ -429,7 +431,98 @@ class Robot:
                 < TCP_LANDING_TOLERANCE
             )
         result = {"landed": landed, "waited": True}
+        if landed is None:
+            # The move never confirmed. The most common cause on real hardware
+            # and URSim is a protective stop mid-move (e.g. a movel through a
+            # singularity, error C154A0) — surface it so the failure isn't a
+            # silent ok=False with no reason.
+            if "PROTECTIVE_STOP" in self.dashboard.safety_mode():
+                result["protective_stop"] = True
         return self._log("move_tcp", args, ok=ok, safety=verdict.as_dict(), result=result)
+
+    def move_trajectory(
+        self,
+        waypoints: list[list[float]],
+        *,
+        velocity: float = DEFAULT_VELOCITY,
+        acceleration: float = DEFAULT_ACCELERATION,
+        blend_radius: float = 0.0,
+        wait: bool = True,
+        timeout: float = 120.0,
+    ) -> dict:
+        """Run a joint-space trajectory (a sequence of ``movej`` waypoints) as a
+        single program over one Primary connection.
+
+        This is the fast, robust way to *move the robot a lot*: a confirmed
+        single move costs a fixed handshake (a Dashboard mode check + a broadcast
+        round-trip, ~1 s on URSim) and opens a fresh Primary socket each time, so
+        issuing many moves back-to-back both wastes that handshake per move and —
+        critically — wedges/powers off the controller after ~10 rapid reconnects
+        (URControl logs ``Socket::OperatorOverload``). Streaming the whole path in
+        one ``def`` pays the handshake once and never reconnects mid-trajectory.
+
+        Every waypoint is validated against the safety envelope (joint limits +
+        velocity/accel) before anything is sent; one unsafe waypoint rejects the
+        whole trajectory. ``blend_radius`` (metres) blends consecutive segments
+        for continuous motion; it is dropped on the final waypoint so the robot
+        comes to rest on target (a non-zero blend on the last movej is a URScript
+        error). Returns ``ok`` plus the final landed joint positions.
+        """
+        args = {
+            "waypoints": waypoints,
+            "velocity": velocity,
+            "acceleration": acceleration,
+            "blend_radius": blend_radius,
+            "n": len(waypoints),
+        }
+        if not waypoints:
+            return self._log("move_trajectory", args, ok=False, result={"error": "no waypoints"})
+
+        # One mode check for the whole trajectory (vs one per move), then
+        # validate every waypoint's geometry with robot_mode already confirmed.
+        robot_mode = None if self.dry_run else self.dashboard.robot_mode()
+        for idx, wp in enumerate(waypoints):
+            verdict = self.safety.validate_move_joints(
+                wp, velocity=velocity, acceleration=acceleration, robot_mode=robot_mode
+            )
+            if not verdict.ok:
+                v = verdict.as_dict()
+                v["waypoint"] = idx
+                return self._log("move_trajectory", args, ok=False, safety=v)
+        if self.dry_run:
+            return self._log("move_trajectory", args, ok=True, result={"reply": "(dry-run)"})
+
+        # Blend every segment except the last (a blend radius on the final movej
+        # leaves the move unfinished / errors); the trailing sync() + textmsg
+        # only fire once the whole path is done.
+        lines = []
+        for idx, wp in enumerate(waypoints):
+            r = 0.0 if idx == len(waypoints) - 1 else blend_radius
+            r_arg = f", r={r}" if r else ""
+            lines.append(f"movej({list(wp)}, a={acceleration}, v={velocity}{r_arg})")
+        body = "\n".join(lines) + '\nsync()\ntextmsg("urctl/move/done=", get_actual_joint_positions())\n'
+        if not wait:
+            self.primary.run(body, fn_name="urctl_trajectory")
+            return self._log("move_trajectory", args, ok=True, result={"waited": False})
+
+        captured = self.primary.run_and_capture(
+            body,
+            fn_name="urctl_trajectory",
+            marker="urctl/move",
+            collect_for=timeout,
+            stop_marker="urctl/move/done=",
+        )
+        from .primary import parse_vector
+
+        landed = parse_vector(captured, "urctl/move/done")
+        ok = (
+            landed is not None
+            and max(abs(a - b) for a, b in zip(landed, waypoints[-1], strict=False)) < LANDING_TOLERANCE
+        )
+        result = {"landed": landed, "waited": True}
+        if landed is None and "PROTECTIVE_STOP" in self.dashboard.safety_mode():
+            result["protective_stop"] = True
+        return self._log("move_trajectory", args, ok=ok, result=result)
 
     def freedrive(self, enable: bool) -> dict:
         """Enable/disable freedrive (hand-guiding). All six axes in base frame."""
@@ -494,9 +587,7 @@ class Robot:
         run through the motion envelope (same posture as ``popup``)."""
         args = {"pin": pin, "value": value}
         if not isinstance(pin, int) or isinstance(pin, bool) or not 0 <= pin <= 7:
-            return self._log(
-                "set_digital_output", args, ok=False, result={"error": "pin must be an int 0-7"}
-            )
+            return self._log("set_digital_output", args, ok=False, result={"error": "pin must be an int 0-7"})
         if self.dry_run:
             return self._log("set_digital_output", args, ok=True, result={"reply": "(dry-run)"})
         try:
@@ -509,9 +600,7 @@ class Robot:
         except Exception as exc:
             self._rtde = None
             return self._log("set_digital_output", args, ok=False, result={"error": str(exc)})
-        return self._log(
-            "set_digital_output", args, ok=True, result={"pin": pin, "value": bool(value)}
-        )
+        return self._log("set_digital_output", args, ok=True, result={"pin": pin, "value": bool(value)})
 
     # ----- scripting ---------------------------------------------------------
 
@@ -543,13 +632,9 @@ class Robot:
             return self._log("run_script", args, ok=True, result={"reply": "(dry-run)"})
         if capture:
             if wrap:
-                captured = self.primary.run_and_capture(
-                    script, marker=marker, collect_for=collect_for
-                )
+                captured = self.primary.run_and_capture(script, marker=marker, collect_for=collect_for)
             else:
-                captured = self.primary.send_and_capture(
-                    script, marker=marker, collect_for=collect_for
-                )
+                captured = self.primary.send_and_capture(script, marker=marker, collect_for=collect_for)
             return self._log("run_script", args, ok=True, result={"captured": captured})
         if wrap:
             self.primary.run(script)
@@ -564,6 +649,124 @@ class Robot:
         reply = self.dashboard.popup(text)
         return self._log("popup", args, ok=True, result={"reply": reply})
 
+    def confirm_on_pendant(self, prompt: str, *, timeout: float = 120.0) -> dict:
+        """Raise a Yes/No/Cancel dialog on the PolyScope pendant; block until answered.
+
+        Built on ``request_boolean_from_primary_client``, which PolyScope's own
+        UI answers — the operator taps the choice on the robot's screen (CLAUDE.md:
+        these ``request_*_from_primary_client`` calls are "useful in wizards").
+        The controller's dialog (``RequestDialogCreatorImpl.popupYesNoCancelDialog``)
+        carries three buttons. This is the human-in-the-loop gate behind
+        :class:`urctl.guided.GuidedSession`: announce intent on the robot, let
+        the operator approve it there, then act.
+
+        ``result['confirmed']`` is ``True`` (Yes), ``False`` (No), or ``None``.
+        ``None`` covers both **Cancel** (the operator dismisses the request, which
+        aborts the request program so no answer marker is sent) and a genuine
+        timeout — callers that need to tell them apart should rely on a long
+        ``timeout`` so a ``None`` means Cancel in practice. The Primary socket
+        holds open until the answer (or marker timeout) lands, so a long
+        ``timeout`` is normal: the operator may deliberate. The script gates the
+        answer behind a textmsg marker we read back from the broadcast.
+        """
+        args = {"prompt": prompt, "timeout": timeout}
+        if self.dry_run:
+            return self._log(
+                "confirm_on_pendant", args, ok=True, result={"confirmed": None, "reply": "(dry-run)"}
+            )
+        safe = _sanitize_prompt(prompt)
+        body = (
+            f'if (request_boolean_from_primary_client("{safe}")):\n'
+            '  textmsg("urctl/confirm=yes")\n'
+            "else:\n"
+            '  textmsg("urctl/confirm=no")\n'
+            "end\n"
+        )
+        captured = self.primary.run_and_capture(
+            body,
+            fn_name="urctl_confirm",
+            marker="urctl/confirm=",
+            collect_for=timeout,
+            stop_marker="urctl/confirm=",
+        )
+        confirmed: bool | None = None
+        if any("urctl/confirm=yes" in line for line in captured):
+            confirmed = True
+        elif any("urctl/confirm=no" in line for line in captured):
+            confirmed = False
+        if confirmed is None:
+            # Timed out with no answer: the request dialog is still up on the
+            # controller, blocking the next step. Abort the confirm program and
+            # dismiss the popup so the session can continue. (On Yes/No the
+            # program already ran to completion and ended itself.)
+            try:
+                self.dashboard.stop()
+                self.dashboard.close_popup()
+            except OSError:
+                pass
+        return self._log("confirm_on_pendant", args, ok=True, result={"confirmed": confirmed})
+
+    def reteach_in_freedrive(self, prompt: str, *, timeout: float = 300.0) -> dict:
+        """Drop into freedrive, raise a Yes/No/Cancel dialog, and capture the pose.
+
+        Mirrors :meth:`confirm_on_pendant` but wraps the pendant hold in
+        ``freedrive_mode()`` / ``end_freedrive_mode()`` so the operator can
+        hand-guide the robot to the *exact* spot before pressing OK. The whole
+        sequence is one Primary program: enable freedrive, block on the pendant
+        request, disable freedrive, then ``textmsg`` the achieved joint pose —
+        so the freedrive stays live for precisely the deliberation window and the
+        pose we read back is wherever the operator left the arm.
+
+        ``result['confirmed']`` is ``True`` (OK — pose accepted), ``False``
+        (operator declined) or ``None`` (no answer within ``timeout``).
+        ``result['joints']`` is the achieved 6-vector on OK, else ``None``. On a
+        timeout the dangling freedrive + dialog are cleared so the session can go
+        on (on OK/decline the program ends itself).
+        """
+        args = {"prompt": prompt, "timeout": timeout}
+        if self.dry_run:
+            return self._log(
+                "reteach_in_freedrive", args, ok=True, result={"confirmed": None, "joints": None}
+            )
+        safe = _sanitize_prompt(prompt)
+        body = (
+            "freedrive_mode()\n"
+            f'reteach_ok = request_boolean_from_primary_client("{safe}")\n'
+            "end_freedrive_mode()\n"
+            "if (reteach_ok):\n"
+            '  textmsg("urctl/reteach/pose=", get_actual_joint_positions())\n'
+            "else:\n"
+            '  textmsg("urctl/reteach=cancel")\n'
+            "end\n"
+        )
+        captured = self.primary.run_and_capture(
+            body,
+            fn_name="urctl_reteach",
+            marker="urctl/reteach",
+            collect_for=timeout,
+            stop_marker="urctl/reteach",
+        )
+        from .primary import parse_vector
+
+        joints = parse_vector(captured, "urctl/reteach/pose")
+        confirmed: bool | None = None
+        if joints is not None:
+            confirmed = True
+        elif any("urctl/reteach=cancel" in line for line in captured):
+            confirmed = False
+        if confirmed is None:
+            # Timed out: the program is still blocked in freedrive with the
+            # dialog up. Leave freedrive, kill the program, and dismiss the popup.
+            try:
+                self.freedrive(False)
+                self.dashboard.stop()
+                self.dashboard.close_popup()
+            except OSError:
+                pass
+        return self._log(
+            "reteach_in_freedrive", args, ok=True, result={"confirmed": confirmed, "joints": joints}
+        )
+
     # ----- programs ----------------------------------------------------------
 
     def load_program(self, name: str) -> dict:
@@ -573,9 +776,7 @@ class Robot:
         reply = self.dashboard.load(name)
         state = self.dashboard.program_state()
         ok = "Loading program" in reply
-        return self._log(
-            "load_program", args, ok=ok, result={"reply": reply, "program_state": state}
-        )
+        return self._log("load_program", args, ok=ok, result={"reply": reply, "program_state": state})
 
     def play(self) -> dict:
         if self.dry_run:

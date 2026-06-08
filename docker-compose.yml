@@ -4,11 +4,16 @@ services:
     stdin_open: true
     tty: true
     ports:
-      - "5900:5900"
-      - "6080:6080"
-      - "29999:29999"
-      - "30000:30000"
-      - "30001:30001"
+      - "5900:5900"   # VNC
+      - "6080:6080"   # noVNC (browser)
+      - "29999:29999" # Dashboard server
+      - "30000:30000" # Primary client (legacy alias port)
+      - "30001:30001" # Primary client (state broadcast + URScript execution)
+      - "30002:30002" # Secondary client (read-only mirror)
+      - "30003:30003" # RT interface (125/500 Hz state)
+      - "30004:30004" # RTDE (modern subscription telemetry — urctl get_state upgrades to this)
+      - "30020:30020" # Interpreter mode (URScript REPL inside a loaded program)
+      - "502:502"     # Modbus TCP (field I/O)
     environment:
       - ROBOT_MODEL=UR10
     # URSim 5.12.5 was built against an older kernel/glibc; on modern hosts
@@ -20,20 +25,26 @@ services:
       - seccomp:unconfined
     cap_add:
       - NET_BIND_SERVICE
-    # Healthcheck succeeds once URControl has booted and the Dashboard
-    # server is replying with a robotmode other than NO_CONTROLLER.
-    # Lets dependent services (`depends_on: ursim: condition: service_healthy`)
-    # wait on the controller, not just the port being open.
+    # Healthcheck succeeds once URControl has booted and the Dashboard server is
+    # replying with a robotmode other than NO_CONTROLLER. Lets dependent services
+    # (`depends_on: ursim: condition: service_healthy`) wait on the controller,
+    # not just the port being open. Uses python3 (present in the image) — the
+    # previous check shelled out to `nc`, which ISN'T installed, so it always
+    # failed and the container sat permanently "unhealthy" even though Dashboard
+    # was responding. A single probe with generous timeouts so a busy/slow
+    # PolyScope front-end under emulation doesn't trip it.
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "echo robotmode | nc -w 1 -q 1 localhost 29999 | grep -q 'Robotmode:' && ! echo robotmode | nc -w 1 -q 1 localhost 29999 | grep -q NO_CONTROLLER",
+          "CMD",
+          "python3",
+          "-c",
+          "import socket,sys,time; s=socket.create_connection(('localhost',29999),3); s.sendall(('robotmode'+chr(10)+'quit'+chr(10)).encode()); time.sleep(0.3); d=s.recv(256).decode(); sys.exit(0 if 'Robotmode:' in d and 'NO_CONTROLLER' not in d else 1)",
         ]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
     restart: unless-stopped
 
   # PolyScope X simulator (URSim PolyScopeX) — a *separate* product from the

@@ -192,8 +192,7 @@ def phase1_smoke(host: str) -> PhaseResult:
         host,
         _wrap(
             "e2e_smoke",
-            '  popup("e2e/phase1 popup", title="e2e", blocking=False)\n'
-            '  textmsg("e2e/phase1/ok")\n',
+            '  popup("e2e/phase1 popup", title="e2e", blocking=False)\n  textmsg("e2e/phase1/ok")\n',
         ),
         collect_for=2.0,
     )
@@ -236,9 +235,7 @@ def phase3_motion(host: str, target: list[float]) -> PhaseResult:
     # virtual servos hit exact values, but tolerate a tiny margin.
     err = [abs(a - b) for a, b in zip(landed, target, strict=False)]
     ok = max(err) < 0.05
-    return PhaseResult(
-        "Phase 3: motion", ok, {"target": target, "landed": landed, "max_error": max(err)}
-    )
+    return PhaseResult("Phase 3: motion", ok, {"target": target, "landed": landed, "max_error": max(err)})
 
 
 def phase4_home(host: str) -> PhaseResult:
@@ -269,9 +266,7 @@ def phase5_dashboard_load(host: str, docker: list[str], container: str) -> Phase
         (MOTION_DEMO_INST, "/ursim/programs/MotionDemo.installation"),
         (MOTION_DEMO_SCRIPT, "/ursim/programs/MotionDemo.script"),
     ]:
-        subprocess.run(
-            [*docker, "cp", str(src), f"{container}:{dst}"], check=True, capture_output=True
-        )
+        subprocess.run([*docker, "cp", str(src), f"{container}:{dst}"], check=True, capture_output=True)
     load_reply = dash(host, "load MotionDemo.urp")
     state = dash(host, "programState")
     # Loading a URP that's paired with a fresh installation file makes
@@ -314,9 +309,7 @@ def phase6_play_or_primary_fallback(host: str) -> PhaseResult:
                 False,
                 {"path": "dashboard", "error": "program never reached STOPPED"},
             )
-        return PhaseResult(
-            "Phase 6: play loaded program", True, {"path": "dashboard", "play_reply": reply}
-        )
+        return PhaseResult("Phase 6: play loaded program", True, {"path": "dashboard", "play_reply": reply})
 
     # Dashboard refused (likely Local mode — `is in remote control` would
     # say false). Fall back: run the same motions via Primary 30001, which
@@ -351,9 +344,7 @@ def phase6_play_or_primary_fallback(host: str) -> PhaseResult:
 
     captured: list[str] = []
     for _attempt in (1, 2):
-        captured = primary_send_and_capture(
-            host, urscript, marker="e2e/motiondemo", collect_for=25.0
-        )
+        captured = primary_send_and_capture(host, urscript, marker="e2e/motiondemo", collect_for=25.0)
         if any("e2e/motiondemo/done" in c for c in captured):
             break
         time.sleep(2.0)
@@ -382,7 +373,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--host", default=DEFAULT_HOST)
     ap.add_argument("--container", default="ur-docker-ursim-1")
     ap.add_argument(
-        "--docker", default="sudo docker", help="docker invocation; e.g. 'docker' if no sudo needed"
+        "--docker",
+        # Honour the DOCKER env var (matches tests/_ursim.py and the CI job) so a
+        # passwordless-docker host doesn't need --docker; default to sudo docker.
+        default=os.environ.get("DOCKER", "sudo docker"),
+        help="docker invocation; e.g. 'docker' if no sudo needed (or set DOCKER=docker)",
     )
     ap.add_argument(
         "--no-motion", action="store_true", help="skip motion phases (useful for headless CI smoke)"

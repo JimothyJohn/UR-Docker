@@ -10,21 +10,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
-          cache: pip
-      - name: install dev deps
-        run: pip install -r requirements-dev.txt
+          enable-cache: true
+      - name: install deps
+        run: uv sync --extra perception --extra mcp
       - name: ruff
-        run: ruff check urctl scripts tests
+        run: uv run ruff check urctl perception scripts tests
       - name: shellcheck
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y shellcheck
           shellcheck scripts/*.sh
       - name: unit tests
-        run: pytest -m "not integration"
+        run: uv run pytest -m "not integration"
 
   integration:
     runs-on: ubuntu-latest
@@ -33,12 +32,11 @@ jobs:
     if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-integration')
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
-          cache: pip
-      - name: install dev deps
-        run: pip install -r requirements-dev.txt
+          enable-cache: true
+      - name: install deps
+        run: uv sync --extra perception --extra mcp
       - name: start URSim
         run: |
           docker compose up -d
@@ -53,7 +51,7 @@ jobs:
         # Tests use sudo docker — GitHub runners don't need it, override.
         env:
           DOCKER: docker
-        run: pytest -m integration
+        run: uv run pytest -m integration
       - name: dump polyscope log on failure
         if: failure()
         run: docker exec ur-docker-ursim-1 tail -100 /ursim/polyscope.log || true

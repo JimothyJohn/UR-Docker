@@ -72,7 +72,11 @@ def send_and_collect(
             buf.extend(chunk)
             if stop_marker and stop_marker in buf:
                 # Marker seen — grab whatever's immediately available to finish
-                # the line, then stop instead of draining the whole window.
+                # the line, then stop instead of draining the whole window. Use a
+                # short timeout: the rest of the marker line is almost always in
+                # the same packet, so blocking the full 0.5 s recv timeout here
+                # added ~0.5 s of pure latency to every confirmed move.
+                s.settimeout(0.1)
                 try:
                     tail = s.recv(8192)
                     if tail:

@@ -39,9 +39,17 @@ class FakeController:
     in ``urctl.transport`` that every client funnels through.
     """
 
-    def __init__(self, robot_mode: str = "RUNNING", safety_mode: str = "NORMAL"):
+    def __init__(
+        self,
+        robot_mode: str = "RUNNING",
+        safety_mode: str = "NORMAL",
+        confirm_answer: str | None = "yes",
+    ):
         self.robot_mode = robot_mode
         self.safety_mode = safety_mode
+        # What the "operator" answers a pendant confirm dialog with: "yes",
+        # "no", or None (no answer — simulates a timeout).
+        self.confirm_answer = confirm_answer
         self.dashboard_sends: list[str] = []
         self.primary_sends: list[str] = []
 
@@ -85,15 +93,23 @@ class FakeController:
     ) -> bytes:
         body = payload.decode()
         self.primary_sends.append(body)
+        # A pendant confirm round-trip: echo the marker the "operator" chose
+        # (or nothing, to simulate no answer / timeout).
+        if "request_boolean_from_primary_client" in body:
+            if self.confirm_answer is None:
+                return b""
+            # A freedrive reteach uses its own markers and echoes the achieved
+            # joint pose on OK; a plain confirm uses urctl/confirm=.
+            if "freedrive_mode" in body:
+                if self.confirm_answer == "yes":
+                    return b"urctl/reteach/pose=[1,2,3,4,5,6]\n"
+                return b"urctl/reteach=cancel\n"
+            return f"urctl/confirm={self.confirm_answer}\n".encode()
         # Echo the first bracketed vector back as the "done"/state marker so
         # move/read round-trips parse successfully.
         m = _VEC_RX.search(body)
         vec = m.group(1) if m else "0,0,0,0,0,0"
-        echo = (
-            f"urctl/move/done=[{vec}]\n"
-            f"urctl/state/joints=[{vec}]\n"
-            f"urctl/state/tcp=[0,0,0,0,0,0]\n"
-        )
+        echo = f"urctl/move/done=[{vec}]\nurctl/state/joints=[{vec}]\nurctl/state/tcp=[0,0,0,0,0,0]\n"
         return echo.encode()
 
 
@@ -240,34 +256,26 @@ class TestSafetyTcp:
 
     def test_tcp_overspeed_rejected(self):
         env = SafetyEnvelope()
-        v = env.validate_move_tcp(
-            [0, 0.05, 0, 0, 0, 0], velocity=5.0, acceleration=1.2, relative=True
-        )
+        v = env.validate_move_tcp([0, 0.05, 0, 0, 0, 0], velocity=5.0, acceleration=1.2, relative=True)
         assert not v.ok
         assert any(viol.rule == "tcp_velocity" for viol in v.violations)
 
     def test_tcp_over_accel_rejected(self):
         env = SafetyEnvelope()
-        v = env.validate_move_tcp(
-            [0, 0.05, 0, 0, 0, 0], velocity=0.25, acceleration=99.0, relative=True
-        )
+        v = env.validate_move_tcp([0, 0.05, 0, 0, 0, 0], velocity=0.25, acceleration=99.0, relative=True)
         assert not v.ok
         assert any(viol.rule == "tcp_acceleration" for viol in v.violations)
 
     def test_absolute_target_beyond_reach_rejected(self):
         env = SafetyEnvelope()
-        v = env.validate_move_tcp(
-            [2.0, 0, 0, 0, 0, 0], velocity=0.25, acceleration=1.2, relative=False
-        )
+        v = env.validate_move_tcp([2.0, 0, 0, 0, 0, 0], velocity=0.25, acceleration=1.2, relative=False)
         assert not v.ok
         assert any(viol.rule == "tcp_reach" for viol in v.violations)
 
     def test_relative_step_unit_error_rejected(self):
         # 5 "metres" relative step is almost certainly 5 inches mis-entered.
         env = SafetyEnvelope()
-        v = env.validate_move_tcp(
-            [0, 5.0, 0, 0, 0, 0], velocity=0.25, acceleration=1.2, relative=True
-        )
+        v = env.validate_move_tcp([0, 5.0, 0, 0, 0, 0], velocity=0.25, acceleration=1.2, relative=True)
         assert not v.ok
         assert any(viol.rule == "tcp_step" for viol in v.violations)
 
@@ -275,9 +283,7 @@ class TestSafetyTcp:
         # The same magnitude that's rejected as a relative *step* is fine as an
         # absolute target within reach — the caps are distinct.
         env = SafetyEnvelope()
-        v = env.validate_move_tcp(
-            [0, 1.1, 0, 0, 0, 0], velocity=0.25, acceleration=1.2, relative=False
-        )
+        v = env.validate_move_tcp([0, 1.1, 0, 0, 0, 0], velocity=0.25, acceleration=1.2, relative=False)
         assert v.ok, v.violations
 
     def test_tcp_not_running_rejected(self):
@@ -354,6 +360,57 @@ class TestRobot:
         assert result["ok"] and result["dry_run"]
         assert not fake.primary_sends  # nothing went out
 
+    # ----- joint-space trajectories (streamed, one program) -----------------
+
+    def test_move_trajectory_sends_one_program_with_all_waypoints(self, fake):
+        robot = Robot(RobotConfig())
+        a = [0.0, -1.0, 1.2, -1.8, -1.5708, 0.0]
+        b = [0.3, -1.0, 1.2, -1.8, -1.5708, 0.5]
+        # Loop back to A so the fake (which echoes the *first* bracketed vector as
+        # the done marker) reports landing on the final waypoint => ok.
+        result = robot.move_trajectory([a, b, a], velocity=1.0, acceleration=1.5)
+        assert result["ok"], result
+        # The whole path is a single Primary submission (one def, not N programs).
+        assert len(fake.primary_sends) == 1
+        sent = fake.primary_sends[0]
+        assert "def urctl_trajectory" in sent
+        assert sent.count("movej(") == 3
+        assert robot.audit.records[-1].action == "move_trajectory"
+
+    def test_move_trajectory_rejects_unsafe_waypoint_and_sends_nothing(self, fake):
+        robot = Robot(RobotConfig())
+        good = [0.0, -1.0, 1.2, -1.8, -1.5708, 0.0]
+        bad = [99.0, 0, 0, 0, 0, 0]  # joint 0 out of range
+        result = robot.move_trajectory([good, bad, good])
+        assert result["ok"] is False
+        # The violation points at the offending waypoint, and nothing is streamed.
+        assert result["safety"]["waypoint"] == 1
+        assert not fake.primary_sends
+
+    def test_move_trajectory_blend_dropped_on_final_waypoint(self, fake):
+        robot = Robot(RobotConfig())
+        a = [0.0, -1.0, 1.2, -1.8, -1.5708, 0.0]
+        b = [0.3, -1.0, 1.2, -1.8, -1.5708, 0.5]
+        robot.move_trajectory([a, b, a], velocity=1.0, acceleration=1.5, blend_radius=0.05)
+        movej_lines = [ln for ln in fake.primary_sends[0].splitlines() if "movej(" in ln]
+        # Intermediate segments blend (r=...); the last comes to rest (no r=) so
+        # the robot doesn't error on a blend radius it can't satisfy.
+        assert "r=0.05" in movej_lines[0]
+        assert "r=" not in movej_lines[-1]
+
+    def test_move_trajectory_dry_run_sends_nothing(self, fake):
+        robot = Robot(RobotConfig(), dry_run=True)
+        a = [0.0, -1.0, 1.2, -1.8, -1.5708, 0.0]
+        result = robot.move_trajectory([a, a], velocity=1.0)
+        assert result["ok"] and result["dry_run"]
+        assert not fake.primary_sends
+
+    def test_move_trajectory_empty_is_rejected(self, fake):
+        robot = Robot(RobotConfig())
+        result = robot.move_trajectory([])
+        assert result["ok"] is False
+        assert not fake.primary_sends
+
     def test_bring_up_runs_sequence(self, fake):
         robot = Robot(RobotConfig())
         result = robot.bring_up()
@@ -404,6 +461,26 @@ class TestRobot:
         assert result["ok"] and result["dry_run"]
         assert not fake.primary_sends
 
+    def test_move_tcp_protective_stop_is_surfaced(self, monkeypatch):
+        """A move that never confirms (no done marker) while the controller is
+        in a protective stop reports ok=False AND result.protective_stop=True —
+        so the caller sees the reason, not a silent failure. Mirrors a movel
+        through a singularity tripping error C154A0 on real hardware/URSim."""
+
+        class StoppedMidMove(FakeController):
+            def _primary_collect(self, *a, **kw):
+                # Run the move but emit no "urctl/move/done=" marker: the move
+                # was aborted (protective stop) before it could complete.
+                super()._primary_collect(*a, **kw)
+                return b""
+
+        StoppedMidMove(safety_mode="PROTECTIVE_STOP").install(monkeypatch)
+        robot = Robot(RobotConfig())
+        result = robot.move_tcp([0, 0.05, 0, 0, 0, 0], relative=True)
+        assert result["ok"] is False
+        assert result["landed"] is None
+        assert result["protective_stop"] is True
+
     # ----- run_script wrap behaviour ----------------------------------------
 
     def test_run_script_wraps_by_default(self, fake):
@@ -420,6 +497,81 @@ class TestRobot:
         assert result["ok"]
         # Exactly what we sent — no def wrapper.
         assert fake.primary_sends == ['textmsg("hi")']
+
+
+class TestConfirmOnPendant:
+    def test_yes_returns_confirmed_true(self, monkeypatch):
+        FakeController(confirm_answer="yes").install(monkeypatch)
+        robot = Robot(RobotConfig())
+        res = robot.confirm_on_pendant("Add this step?")
+        assert res["ok"] and res["confirmed"] is True
+
+    def test_no_returns_confirmed_false(self, monkeypatch):
+        fake = FakeController(confirm_answer="no").install(monkeypatch)
+        robot = Robot(RobotConfig())
+        res = robot.confirm_on_pendant("Add this step?")
+        assert res["confirmed"] is False
+        # It actually raised the pendant dialog over Primary.
+        assert any("request_boolean_from_primary_client" in s for s in fake.primary_sends)
+
+    def test_no_answer_returns_none(self, monkeypatch):
+        FakeController(confirm_answer=None).install(monkeypatch)
+        robot = Robot(RobotConfig())
+        # Short timeout so the fake's empty reply resolves quickly.
+        res = robot.confirm_on_pendant("Add this step?", timeout=0.2)
+        assert res["confirmed"] is None
+
+    def test_dry_run_sends_nothing(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        robot = Robot(RobotConfig(), dry_run=True)
+        res = robot.confirm_on_pendant("Add this step?")
+        assert res["confirmed"] is None and res["dry_run"]
+        assert fake.primary_sends == []
+
+    def test_prompt_is_sanitized_into_a_single_line_literal(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        robot = Robot(RobotConfig())
+        robot.confirm_on_pendant('Move to "home"\nthen wait')
+        sent = " ".join(fake.primary_sends)
+        # No embedded double-quote breaking the literal, no newline inside it.
+        assert "Move to 'home' then wait" in sent
+
+    def test_reteach_ok_returns_pose_and_wraps_in_freedrive(self, monkeypatch):
+        fake = FakeController(confirm_answer="yes").install(monkeypatch)
+        robot = Robot(RobotConfig())
+        res = robot.reteach_in_freedrive("Position the part")
+        assert res["confirmed"] is True
+        assert res["joints"] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        body = " ".join(fake.primary_sends)
+        # The hold is genuinely bracketed by freedrive enable/disable.
+        assert "freedrive_mode()" in body and "end_freedrive_mode()" in body
+
+    def test_reteach_decline_returns_false_and_no_pose(self, monkeypatch):
+        FakeController(confirm_answer="no").install(monkeypatch)
+        robot = Robot(RobotConfig())
+        res = robot.reteach_in_freedrive("Position the part")
+        assert res["confirmed"] is False and res["joints"] is None
+
+    def test_reteach_no_answer_clears_freedrive(self, monkeypatch):
+        fake = FakeController(confirm_answer=None).install(monkeypatch)
+        robot = Robot(RobotConfig())
+        res = robot.reteach_in_freedrive("Position the part", timeout=0.2)
+        assert res["confirmed"] is None and res["joints"] is None
+        # Cleanup left the robot out of freedrive (end_freedrive_mode sent).
+        assert any("end_freedrive_mode()" in s for s in fake.primary_sends)
+
+    def test_reteach_dry_run_sends_nothing(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        robot = Robot(RobotConfig(), dry_run=True)
+        res = robot.reteach_in_freedrive("Position the part")
+        assert res["confirmed"] is None and res["dry_run"]
+        assert fake.primary_sends == []
+
+    def test_sanitize_prompt_helper(self):
+        from urctl.robot import _sanitize_prompt
+
+        assert _sanitize_prompt('a "b"\n c') == "a 'b' c"
+        assert len(_sanitize_prompt("x" * 500)) == 200
 
 
 # ----- tool registry ---------------------------------------------------------
@@ -781,9 +933,7 @@ class TestCli:
 
     def test_speed_valid_dispatches(self, fake, monkeypatch, capsys):
         calls: list[float] = []
-        monkeypatch.setattr(
-            urctl_rtde.RtdeClient, "set_speed_slider", lambda self, f: calls.append(f)
-        )
+        monkeypatch.setattr(urctl_rtde.RtdeClient, "set_speed_slider", lambda self, f: calls.append(f))
         rc = cli_main(["speed", "0.3"])
         assert rc == 0
         out = json.loads(capsys.readouterr().out)

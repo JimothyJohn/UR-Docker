@@ -98,9 +98,7 @@ class TestScriptToUrp:
         assert f.text == "/programs/myprog.script"
 
     def test_explicit_source_file_overrides_default(self):
-        root = _parse_urp(
-            uc.script_to_urp("x=1\n", name="myprog", source_file="/custom/path.script")
-        )
+        root = _parse_urp(uc.script_to_urp("x=1\n", name="myprog", source_file="/custom/path.script"))
         f = root.find("./children/MainProgram/children/Script/file")
         assert f.text == "/custom/path.script"
 
@@ -182,17 +180,21 @@ class TestUrpToScript:
         # (re-build the synthetic URP inline rather than re-import the fixture)
         from xml.sax.saxutils import escape
 
+        # Build escaped payloads outside the f-strings: a backslash inside an
+        # f-string replacement field is a syntax error before Python 3.12.
+        inside = escape('textmsg("inside")')
+        outside = escape('textmsg("outside")')
         xml = (
             '<URProgram name="t" installation="default" '
             'installationRelativePath="default" directory="/programs" '
             'createdIn="x" lastSavedIn="x" robotSerialNumber="">'
-            '<children><MainProgram>'
-            '<children>'
-            '<MoveJ><children>'
-            f'<Script type="Code"><cachedContents>{escape("textmsg(\"inside\")")}</cachedContents></Script>'
-            '</children></MoveJ>'
-            f'<Script type="Code"><cachedContents>{escape("textmsg(\"outside\")")}</cachedContents></Script>'
-            '</children></MainProgram></children></URProgram>'
+            "<children><MainProgram>"
+            "<children>"
+            "<MoveJ><children>"
+            f'<Script type="Code"><cachedContents>{inside}</cachedContents></Script>'
+            "</children></MoveJ>"
+            f'<Script type="Code"><cachedContents>{outside}</cachedContents></Script>'
+            "</children></MainProgram></children></URProgram>"
         )
         out = uc.urp_to_script(gzip.compress(xml.encode()))
         assert 'textmsg("inside")' in out

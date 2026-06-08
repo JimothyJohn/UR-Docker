@@ -133,6 +133,14 @@ def _h_move_home(robot: Robot, p: dict) -> dict:
     return robot.move_home(**kwargs)
 
 
+def _h_move_trajectory(robot: Robot, p: dict) -> dict:
+    kwargs = {}
+    for k in ("velocity", "acceleration", "blend_radius"):
+        if k in p:
+            kwargs[k] = p[k]
+    return robot.move_trajectory(p["waypoints"], **kwargs)
+
+
 def _h_freedrive(robot: Robot, p: dict) -> dict:
     return robot.freedrive(p["enable"])
 
@@ -235,6 +243,35 @@ TOOLS: list[Tool] = [
             required=["pose"],
         ),
         _h_move_tcp,
+    ),
+    Tool(
+        "ur_move_trajectory",
+        "Run a joint-space trajectory: a sequence of movej waypoints streamed as "
+        "ONE program over a single Primary connection. This is the way to move a "
+        "lot quickly — issuing many separate moves pays a per-move handshake and "
+        "can wedge the controller after ~10 rapid reconnects. Every waypoint is "
+        "validated against the safety envelope before anything is sent. Optional "
+        "blend_radius (m) smooths consecutive segments; it is dropped on the "
+        "final waypoint so the robot stops on target.",
+        _object_schema(
+            {
+                "waypoints": {
+                    "type": "array",
+                    "items": _JOINTS_SCHEMA,
+                    "minItems": 1,
+                    "description": "Ordered list of 6-joint targets (radians) to move through.",
+                },
+                "velocity": _VELOCITY_SCHEMA,
+                "acceleration": _ACCELERATION_SCHEMA,
+                "blend_radius": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Segment blend radius in metres (0 = stop at each waypoint).",
+                },
+            },
+            required=["waypoints"],
+        ),
+        _h_move_trajectory,
     ),
     Tool(
         "ur_move_home",
@@ -358,10 +395,7 @@ def get_tool_schemas() -> list[dict]:
     tool-calling API (rename ``input_schema`` to ``parameters`` for the
     OpenAI-style shape; it's already the right shape for Anthropic's API).
     """
-    return [
-        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
-        for t in TOOLS
-    ]
+    return [{"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in TOOLS]
 
 
 class ToolError(Exception):
@@ -397,9 +431,7 @@ def _validate(params: dict, schema: dict) -> None:
         if spec["type"] == "number" and isinstance(value, bool):
             raise ToolError(f"argument {key!r} must be a number, got bool")
         if expected and not isinstance(value, expected):
-            raise ToolError(
-                f"argument {key!r} must be {spec['type']}, " f"got {type(value).__name__}"
-            )
+            raise ToolError(f"argument {key!r} must be {spec['type']}, got {type(value).__name__}")
 
 
 def call_tool(robot: Robot, name: str, params: dict | None = None) -> dict:

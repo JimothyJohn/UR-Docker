@@ -2,8 +2,11 @@
 
 DOCKER ?= sudo docker
 COMPOSE ?= $(DOCKER) compose
-PYTHON ?= python3
-PYTEST ?= $(PYTHON) -m pytest
+# Python env + deps are managed with uv (see pyproject.toml).
+UV ?= uv
+PYTHON ?= $(UV) run python
+PYTEST ?= $(UV) run pytest
+RUFF ?= $(UV) run ruff
 
 CONTAINER := ur-docker-ursim-1
 PX_CONTAINER := ur-docker-ursim-px-1
@@ -93,10 +96,10 @@ test-all:  ## Run every test.
 lint: lint-py lint-sh  ## Run all linters.
 
 lint-py:  ## Lint Python with ruff.
-	$(PYTHON) -m ruff check urctl scripts tests
+	$(RUFF) check urctl perception scripts tests
 
 fmt:  ## Format Python with ruff.
-	$(PYTHON) -m ruff format urctl scripts tests
+	$(RUFF) format urctl perception scripts tests
 
 lint-sh:  ## Lint shell scripts (skipped silently if shellcheck not installed).
 	@if command -v shellcheck >/dev/null; then \
@@ -107,10 +110,13 @@ lint-sh:  ## Lint shell scripts (skipped silently if shellcheck not installed).
 
 # ---- Sample programs --------------------------------------------------------
 
-regen-urps:  ## Rebuild every <name>.urp from its sibling <name>.script.
+regen-urps:  ## Rebuild every <name>.urp from its build.py (node tree) or sibling <name>.script.
 	@for d in programs/*/; do \
 		name=$$(basename $$d); \
-		if [ -f "$$d/$$name.script" ]; then \
+		if [ -f "$$d/build.py" ]; then \
+			echo "regenerating $$d$$name.urp (node tree via build.py)"; \
+			$(PYTHON) "$$d/build.py"; \
+		elif [ -f "$$d/$$name.script" ]; then \
 			echo "regenerating $$d/$$name.urp"; \
 			$(PYTHON) scripts/urp_convert.py to-urp \
 				"$$d/$$name.script" "$$d/$$name.urp" \
@@ -121,5 +127,5 @@ regen-urps:  ## Rebuild every <name>.urp from its sibling <name>.script.
 
 # ---- One-time setup ---------------------------------------------------------
 
-install-dev:  ## Install dev dependencies into the active Python env.
-	$(PYTHON) -m pip install -r requirements-dev.txt
+install-dev:  ## Create/refresh the uv venv with dev + optional extras.
+	$(UV) sync --extra perception --extra mcp
