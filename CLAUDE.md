@@ -65,6 +65,7 @@ are unauthenticated; treat the robot's network like a backplane.
 | 30004 | RTDE              | bi        | Subscription protocol: client picks fields + cadence. Modern drivers.  |
 | 30020 | Interpreter mode  | bi        | URScript REPL that runs **inside an already-loaded program**.          |
 | 502   | Modbus TCP        | bi        | Field I/O. Needs `NET_BIND_SERVICE` to bind (handled in compose).      |
+| 22    | SSH (real robots) | bi        | Debian sshd on the controller. The **only** way to drop files in `/programs/` on a real e-Series (no Dashboard upload, no SMB/NFS by default). Not exposed by URSim — use `docker cp` instead. |
 
 The key distinction: **Dashboard is for orchestration** (load program,
 power on, query state). **Primary 30001 is for execution** (write URScript,
@@ -435,6 +436,80 @@ joint-space path as one `def` over a single connection: it pays the handshake
 final `movej` errors; see the movej blend-radius pitfall in ur-program-authoring).
 This is both faster and the only way that doesn't risk wedging the controller.
 
+## Driving a real e-Series (vs URSim): which path to use
+
+Three divergences cost real time on the physical UR10 at `192.168.1.50` —
+none reproduce on URSim. The decision tree:
+
+| You want to…                                            | URSim                                         | Real e-Series                                                                                   |
+| ------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Read state, send `popup`/`addToLog`/`load`/`stop`        | Always works                                  | Always works (Dashboard does not need Remote)                                                   |
+| Move via Primary URScript (`move-joints`, `move-tcp`, `move_trajectory`, `run-script` with motion) | Works in Local — verified                     | **Requires Remote control mode.** In Local, `urctl move-*` and `ur_move_trajectory` silently return `ok:false`, `landed:null`, with **no** safety violation. `run-script` of a textmsg-only script still returns `ok:true` and executes, so it's the motion specifically that is gated. There is no network endpoint to switch Local→Remote — flip the indicator in the top-right corner of the pendant. |
+| Play a loaded `.urp` via Dashboard `play`               | Requires Remote                               | Requires Remote                                                                                  |
+| Drop a `.urp` (or `.installation`) in `/programs/`       | `docker cp` into the URSim container          | **SCP over SSH** (port 22). `/programs` is the PolyScope-visible path. `default.installation` typically already exists, so no installation upload is needed when `urp_builder`'s default matches. |
+| Build a `.urp` of native Move/Waypoint nodes (`UrpProgram.movej(Waypoint(...))`) | Plays cleanly — `kinematicsFlags="4"` + `positionType="CartesianPose"` with the zero kinematics envelope satisfies URSim's IK | **Fails with "Robot cannot reach the required pose"** at runtime if the customer's active tool has a non-zero TCP offset. PolyScope's MoveJ does FK→IK through the **active TCP**, and a long gripper (the installations on this robot have offsets up to ~0.15 m on `tcpOffset`) puts the IK target outside reach for joint configurations that raw URScript `movej(joints)` accepts. URScript's `movej(joints,...)` does NOT do this round-trip — it just runs the joints. So a `.urp` whose motion comes from a `<Script>` node calling `movej` is the reliable path. Switching `kinematicsFlags` to `"6"` (what PolyScope itself emits) alone does **not** fix it. |
+
+The first two divergences are gates (state polling and orchestration are
+fine in Local; motion isn't). The third is structural: the same `.urp`
+that loads and runs on URSim can stall on a real robot if the customer's
+active tool has a non-zero TCP offset, even though the joint targets are
+reachable. **Programs you author for a real-robot cell should emit motion
+as `script_file`/`script_line` nodes**, not native `MoveJ`/`Waypoint`
+nodes. Native nodes are still right for URSim, demos, and any cell whose
+active TCP is at the flange — but you can't tell from the `.urp` alone
+which side of that line you're on.
+
+### File placement on a real robot
+
+```bash
+export SSHPASS='<password>'                       # do not pass -p (visible in ps)
+sshpass -e scp programs/Dance/Dance.urp root@192.168.1.50:/programs/Dance.urp
+uv run urctl --host 192.168.1.50 load Dance
+uv run urctl --host 192.168.1.50 play
+```
+
+Verified: real e-Series ships Debian + sshd on `:22`, root login enabled,
+`/programs/` writable. Pre-existing `/programs/default.installation` pairs
+with `UrpProgram(..., installation="default")` (the builder default). Long
+term, `ssh-copy-id root@<ip>` and drop `sshpass`. There is no Dashboard
+upload command and no SMB/NFS exposed — SSH is the only file-placement
+path.
+
+For step-by-step live program authoring on a real robot, `urctl guided
+--live` accepts **`--live-scp root@<ip>`** (in addition to the URSim
+`--live-container` and mounted-share `--live-program-dir`). Each
+approved step is saved → scp'd into `/programs/` → reloaded over
+Dashboard, so the PolyScope tree grows node-by-node on the pendant. Set
+`SSHPASS` once per shell or enroll a pubkey first — the placer does not
+prompt for a password. The matching `<installation>.installation` is
+expected to already exist on the controller (the placer does not push one
+— a real-cell installation is configuration the operator owns, not
+something to overwrite from the dev box).
+
+### Build motion programs with script nodes (for real-robot cells)
+
+```python
+from urctl.urp_builder import UrpProgram
+
+prog = UrpProgram("Dance", run_only_once=False)
+prog.comment("Looping dance — raw movej() bypasses MoveJ-node IK validation")
+prog.script_file("dance", """def dance():
+  movej([-0.7427, -2.1034, -2.5358, -0.0718, 1.5714, 2.9782], a=1.2, v=1.0, r=0.03)
+  ...
+  movej(home, a=1.2, v=1.0)   # final waypoint — no r= (see movej blend pitfall)
+  sync()
+end
+""")
+prog.script_line("dance()")
+prog.save("programs/Dance/Dance.urp")
+```
+
+The operator sees one "Script: dance helper" definition + one "Script:
+dance()" call line in the Program tree — less editable than native
+Move/Waypoint nodes, but it's the difference between a program that
+runs and one that pops "cannot reach the required pose" mid-cycle.
+`programs/Dance/Dance.urp` is the worked example.
+
 ## Common gotchas (and the symptoms that lead you there)
 
 | Symptom                                       | Cause                                                        | Fix                                                 |
@@ -453,6 +528,8 @@ This is both faster and the only way that doesn't risk wedging the controller.
 | RTDE / Secondary / RT reads refused on `:30004`/`:30002`/`:30003` | Those ports weren't published by docker-compose | The e-Series `ports:` list now publishes `30002-30004`, `30020`, `502`; recreate the container (`docker compose up -d`) after editing it |
 | Moves start failing fast (`ok:false`, no `protective_stop`) and the robot ends `POWER_OFF` after a burst of moves | ~10+ rapid per-move Primary reconnects wedged URControl (`Socket::OperatorOverload`) | Don't loop single moves — use `move_trajectory` (one connection). `bring_up()` to recover. See "How fast can you actually drive it". |
 | A move returns `ok:false` instantly with a `velocity`/`tcp_velocity` violation | Speed exceeds the safety envelope cap (joints ~2.09 rad/s, TCP 1.0 m/s) | Lower the velocity, or raise the cap on a custom `SafetyEnvelope` if you really mean it |
+| **On a real e-Series**, `urctl move-joints` / `move-tcp` / `ur_move_trajectory` returns `ok:false`, `landed:null`, **no safety violation** and joints don't change. `urctl run-script 'textmsg(...)'` still returns `ok:true` from the same robot | Robot is in **Local** control mode. Real e-Series gates Primary URScript *motion* (not state, not textmsg, not Dashboard) on Remote. URSim doesn't, so this only bites on hardware. | Flip the top-right pendant indicator Local→Remote (no network endpoint exists). Add a precondition: read `urctl state`, refuse motion unless `control_mode == "REMOTE"`. See "Driving a real e-Series". |
+| **On a real e-Series**, a `.urp` built with `UrpProgram.movej(Waypoint(...))` loads, plays the first few waypoints, then pops **"Robot cannot reach the required pose"** — yet `ur_move_trajectory` with the *same joint targets* runs clean | PolyScope's MoveJ node does FK→IK through the **active tool TCP** (`useActiveTCP="true"`, `positionType="CartesianPose"`). With a non-flange TCP (gripper, sensor — common, up to ~0.15 m on this robot), the FK pose can be outside reach even when the joints themselves are valid. Raw URScript `movej(joints)` skips the round-trip. Patching `kinematicsFlags="4"`→`"6"` (what PolyScope itself emits) does not fix it. | Don't use native Move/Waypoint nodes for real-robot cells with a non-flange TCP — emit motion via `prog.script_file("helpers", "def f(): movej(...) end")` + `prog.script_line("f()")`. See "Build motion programs with script nodes". |
 | PolyScope GUI (noVNC on :6080) stuck on "Please wait…" | Cosmetic — the Java/AWT front-end is slow under emulation; the controller and all network interfaces (Dashboard/Primary/RTDE) are fine | Ignore it; the headless `urctl` path doesn't use the GUI. Confirm with `urctl state` (RUNNING/NORMAL). `docker compose restart ursim` only if you actually need the GUI |
 | `docker ps` shows the container `(unhealthy)` but everything works | The healthcheck shelled out to `nc`, which **isn't installed in the URSim image**, so it always failed (not the controller) | Fixed: the healthcheck now uses `python3` (present in the image). Benign regardless — verify the controller with `urctl state` |
 

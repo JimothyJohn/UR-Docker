@@ -105,15 +105,19 @@ def run_guided_command(session, line: str) -> dict:
 def build_live_reloader(robot, args):
     """Return a LiveReloader for ``--live`` (or None if not requested).
 
-    ``--live-program-dir`` (a host-reachable controller program dir) wins over
-    ``--live-container`` (docker cp into this repo's URSim). The reload target
-    must be loadable by the controller, hence one of these two placers.
+    Placer precedence: ``--live-scp`` (real robot over SSH) wins over
+    ``--live-program-dir`` (host-reachable share / mounted controller dir) wins
+    over ``--live-container`` (docker cp into this repo's URSim — the dev
+    default). One of these must reach the controller or PolyScope can't reload
+    the tree.
     """
     if not args.live:
         return None
-    from .guided import LiveReloader, docker_placer, local_dir_placer
+    from .guided import LiveReloader, docker_placer, local_dir_placer, scp_placer
 
-    if args.live_program_dir:
+    if getattr(args, "live_scp", None):
+        placer = scp_placer(args.live_scp)
+    elif args.live_program_dir:
         placer = local_dir_placer(args.live_program_dir, installation=args.installation)
     else:
         placer = docker_placer(args.live_container, installation=args.installation)
@@ -344,6 +348,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="host-reachable controller program dir for --live (overrides --live-container; "
         "use for a real robot whose program folder is a mounted share)",
     )
+    gd.add_argument(
+        "--live-scp",
+        default=None,
+        help="SCP target for --live on a real e-Series (e.g. root@192.168.1.50). "
+        "Wins over --live-program-dir / --live-container. Set $SSHPASS for password "
+        "auth, otherwise enroll a pubkey first (ssh-copy-id). The matching "
+        "<installation>.installation must already exist on the controller.",
+    )
 
     insp = sub.add_parser(
         "inspect",
@@ -372,6 +384,12 @@ def build_parser() -> argparse.ArgumentParser:
     insp.add_argument("--live", action="store_true", help="reload the program after each capture")
     insp.add_argument("--live-container", default="ur-docker-ursim-1", help="container for --live")
     insp.add_argument("--live-program-dir", default=None, help="controller program dir for --live")
+    insp.add_argument(
+        "--live-scp",
+        default=None,
+        help="SCP target for --live on a real e-Series (e.g. root@192.168.1.50); see "
+        "`urctl guided --help` for the env vs. pubkey auth options",
+    )
 
     sub.add_parser("tools", help="print the agent tool schemas as JSON")
 

@@ -404,6 +404,42 @@ class TestDockerPlacer:
         assert runs[1][:3] == ["docker", "exec", "my-container"]
 
 
+class TestScpPlacer:
+    def test_uses_sshpass_when_env_set(self, monkeypatch, tmp_path):
+        from urctl import guided
+
+        runs = []
+        monkeypatch.setenv("SSHPASS", "secret")
+        monkeypatch.setattr(guided.subprocess, "run", lambda cmd, **kw: runs.append((cmd, kw)) or None)
+        src = tmp_path / "Demo.urp"
+        src.write_bytes(b"x")
+
+        name = guided.scp_placer("root@10.0.0.5")(src, "Demo")
+
+        assert name == "Demo.urp"
+        cmd, kw = runs[0]
+        # sshpass -e reads SSHPASS from env — never on argv (visible in ps)
+        assert cmd[:3] == ["sshpass", "-e", "scp"]
+        assert "secret" not in cmd
+        assert cmd[-1] == "root@10.0.0.5:/programs/Demo.urp"
+        assert kw["env"]["SSHPASS"] == "secret"
+
+    def test_falls_back_to_pubkey_without_env(self, monkeypatch, tmp_path):
+        from urctl import guided
+
+        runs = []
+        monkeypatch.delenv("SSHPASS", raising=False)
+        monkeypatch.setattr(guided.subprocess, "run", lambda cmd, **kw: runs.append(cmd) or None)
+        src = tmp_path / "Demo.urp"
+        src.write_bytes(b"x")
+
+        guided.scp_placer("root@10.0.0.5")(src, "Demo")
+
+        # No sshpass — plain scp with BatchMode so pubkey auth either works or fails fast
+        assert runs[0][0] == "scp"
+        assert "BatchMode=yes" in runs[0]
+
+
 class TestBuildLiveReloader:
     def _args(self, **kw):
         import argparse
@@ -412,6 +448,7 @@ class TestBuildLiveReloader:
             live=False,
             live_container="ur-docker-ursim-1",
             live_program_dir=None,
+            live_scp=None,
             name="P",
             installation="default",
             save=None,
@@ -436,6 +473,15 @@ class TestBuildLiveReloader:
 
         r = build_live_reloader(FakeRobot([]), self._args(live=True, live_program_dir=str(tmp_path)))
         assert r is not None  # local_dir_placer path chosen (no docker needed)
+
+    def test_scp_overrides_program_dir(self, tmp_path):
+        from urctl.cli import build_live_reloader
+
+        r = build_live_reloader(
+            FakeRobot([]),
+            self._args(live=True, live_scp="root@10.0.0.5", live_program_dir=str(tmp_path)),
+        )
+        assert r is not None  # scp_placer wins; local_dir_placer would copy locally
 
 
 class TestInspection:

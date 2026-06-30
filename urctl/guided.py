@@ -37,6 +37,7 @@ Design choices that matter:
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -451,12 +452,66 @@ def local_dir_placer(program_dir: str | Path, *, installation: str = "default") 
     return place
 
 
+def scp_placer(
+    target: str,
+    *,
+    program_dir: str = "/programs",
+    sshpass_env: str = "SSHPASS",
+) -> Placer:
+    """Placer for a real e-Series controller over SSH/SCP — the only
+    file-placement path on real hardware (no SMB/NFS, no Dashboard upload).
+
+    ``target`` is ``user@host`` (e.g. ``root@192.168.1.50``). If the ``SSHPASS``
+    environment variable is set we use ``sshpass -e scp`` (so the password never
+    appears in argv / ``ps``); otherwise we fall back to plain ``scp``, which
+    requires that you have already enrolled a pubkey on the controller
+    (``ssh-copy-id root@<ip>``).
+
+    PolyScope's program directory on a real e-Series is ``/programs``. The
+    matching ``<installation>.installation`` is expected to already exist on the
+    controller — if it doesn't, ``load`` will fail with the cryptic
+    ``unknown failure`` from Dashboard. See CLAUDE.md → "Driving a real e-Series"
+    for context."""
+
+    use_sshpass = bool(os.environ.get(sshpass_env))
+
+    def place(local_urp: Path, name: str) -> str:
+        dest = f"{target}:{program_dir}/{name}.urp"
+        if use_sshpass:
+            cmd = [
+                "sshpass",
+                "-e",
+                "scp",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                str(local_urp),
+                dest,
+            ]
+            env = {**os.environ, "SSHPASS": os.environ[sshpass_env]}
+            subprocess.run(cmd, check=True, capture_output=True, env=env)
+        else:
+            cmd = [
+                "scp",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "BatchMode=yes",
+                str(local_urp),
+                dest,
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+        return f"{name}.urp"
+
+    return place
+
+
 __all__ = [
     "GuidedSession",
     "StepResult",
     "LiveReloader",
     "docker_placer",
     "local_dir_placer",
+    "scp_placer",
     "Placer",
     "run_inspection",
     "CAMERA_TRIGGER_DEF",
