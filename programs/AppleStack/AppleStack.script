@@ -1,4 +1,6 @@
 # AppleStack — pick up the three apples in inputs/image.png and stack them.
+# (inputs/image.png is gitignored / not shipped — these poses were derived from
+#  one such top-down photo; see programs/AppleStack/README.md.)
 #
 # VISION SOURCE
 #   inputs/image.png is a near top-down shot taken from above the mounting

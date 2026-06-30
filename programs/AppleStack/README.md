@@ -1,6 +1,8 @@
 # AppleStack
 
-Picks up the three apples in `inputs/image.png` and stacks them at one spot.
+Picks up the three apples pictured in `inputs/image.png` and stacks them at one
+spot. (That image is gitignored and not shipped — the poses below were derived
+from one such top-down photo; supply your own to re-derive them.)
 
 ## What's in the picture
 

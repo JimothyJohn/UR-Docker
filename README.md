@@ -173,16 +173,18 @@ blob backends); real backends (Depth Anything V2, OpenCV, webcam capture) are
 optional extras selected purely by config.
 
 ```bash
-perceive synthetic                                 # no camera, no model weights
-perceive image inputs/image.png                    # bundled apples-on-steel fixture
+perceive synthetic                                 # no camera, no image, no weights
+perceive image inputs/image.png                    # an RGB frame you supply (see note)
 perceive capture                                   # one webcam frame → blobs
 perceive --depth-backend depth_anything capture    # real monocular depth model
 ```
 
-On the bundled `inputs/image.png` (three apples on a steel table) the
-dependency-free stubs segment the produce from the metallic background by
-*colorfulness*, then split touching same-colored objects with a distance-
-transform watershed — returning all three apples as separate blobs with
+`perceive synthetic` needs no assets and runs anywhere. For `perceive image`,
+drop your own RGB frame at `inputs/image.png` — `inputs/` is gitignored, so no
+image ships with the repo. Given an apples-on-steel frame (three apples on a
+steel table), the dependency-free stubs segment the produce from the metallic
+background by *colorfulness*, then split touching same-colored objects with a
+distance-transform watershed — returning all three apples as separate blobs with
 per-blob depth, ignoring the steel and the overlay text.
 
 A `Blob` carries `centroid_px`, `bbox`, `area_px`, `depth_m`, `mean_rgb` (2D +
@@ -257,8 +259,9 @@ urctl run-script --capture --marker pickplace/ --collect-for 35 \
   < programs/PickPlace/PickPlace.script
 ```
 
-`programs/PickAndStack/` — picks up three items (the apples in the provided
-`inputs/image.png`) and stacks them at one nearby location, **motions only**.
+`programs/PickAndStack/` — picks up three items (the apples pictured in a
+top-down `inputs/image.png` you supply) and stacks them at one nearby location,
+**motions only**.
 The gripper open/close steps are placeholders, commented out, so you wire your
 gripper (or a URCap call) in later. Pick stations and the stack are derived at
 runtime from one reachable reference pose (base-frame offsets) so it runs inside

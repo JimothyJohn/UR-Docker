@@ -26,3 +26,4 @@ inputs/
 # Local secrets + runtime state (never commit)
 .env
 .claude/scheduled_tasks.lock
+.claude/settings.local.json

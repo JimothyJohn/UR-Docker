@@ -43,7 +43,8 @@ case this repo targets. Three steps:
    its nearest peak, so the two touching red apples separate into two instances.
    A single convex object has one peak and is left whole.
 
-On `inputs/image.png` this yields **3 apples** (two red, one green); set
+On such a frame (supply your own at `inputs/image.png` — it is gitignored and
+not shipped) this yields **3 apples** (two red, one green); set
 `blob_split_touching=False` (or `PERCEPTION_BLOB_SPLIT_TOUCHING=0`) to fall back
 to **2 color regions** (the red pair merged). Occlusion and irregular shapes are
 where a learned segmenter (the upgrade path) earns its keep.
@@ -61,19 +62,21 @@ pip install -e .[perception-torch]    # + Depth Anything V2
 ## Usage
 
 ```bash
-perceive synthetic                                   # no camera, no weights
-perceive image inputs/image.png                      # the apples-on-steel fixture
+perceive synthetic                                   # no camera, no image, no weights
+perceive image inputs/image.png                      # an RGB frame you supply
 perceive capture                                     # one webcam frame → blobs
 perceive --depth-backend depth_anything capture      # real monocular depth
 perceive tools                                       # agent tool schemas (JSON)
 perceive call perceive_synthetic --json '{"width":320,"height":240}'
 ```
 
-`perceive image inputs/image.png` on the bundled fixture (three apples on a
+`perceive image inputs/image.png` on an apples-on-steel frame (three apples on a
 brushed-steel table) returns three blobs — the two (touching) red apples split
 apart plus the green apple — each with its centroid, bbox, mean color, and
 sampled depth, with the steel and the camera's overlay text correctly ignored.
-This is the test fixture in `tests/test_perception.py`.
+`inputs/` is gitignored, so this image is **not** shipped — supply your own;
+`tests/test_perception.py` exercises it as an optional fixture and skips when it
+is absent.
 
 ```python
 from perception import PerceptionPipeline, PerceptionConfig
