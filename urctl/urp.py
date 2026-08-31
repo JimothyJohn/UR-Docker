@@ -14,12 +14,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-try:  # installed alongside the package, or scripts/ already on the path
+try:  # scripts/ already on the path
     from urp_convert import script_to_urp, urp_to_script
-except ImportError:  # running from a source checkout
+except ImportError:
     _scripts = Path(__file__).resolve().parent.parent / "scripts"
-    if str(_scripts) not in sys.path:
-        sys.path.insert(0, str(_scripts))
-    from urp_convert import script_to_urp, urp_to_script
+    if _scripts.is_dir():  # running from a source checkout
+        if str(_scripts) not in sys.path:
+            sys.path.insert(0, str(_scripts))
+        from urp_convert import script_to_urp, urp_to_script
+    else:  # installed wheel: the build vendored a copy as urctl._urp_convert
+        from urctl._urp_convert import script_to_urp, urp_to_script
 
 __all__ = ["script_to_urp", "urp_to_script"]

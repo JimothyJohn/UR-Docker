@@ -30,8 +30,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 # urp_convert.py lives in scripts/ (single source of truth, predates the
-# package); urctl.urp bootstraps it onto sys.path from a source checkout.
+# package); urctl.urp bootstraps it onto sys.path from a source checkout, and
+# the wheel ships a build-time copy as urctl/_urp_convert.py so installs work
+# without the checkout (the CI package job smoke-tests exactly that).
 packages = ["urctl", "perception"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"scripts/urp_convert.py" = "urctl/_urp_convert.py"
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]

@@ -556,6 +556,18 @@ runs and one that pops "cannot reach the required pose" mid-cycle.
 
 ## Working in this repo
 
+**CI/CD** (`.github/`): every PR runs lint (ruff check + format, shellcheck),
+unit tests on Python 3.10/3.12/3.14, and a packaging job that builds the wheel,
+verifies it carries `urctl/webui/` + the vendored `_urp_convert.py`, and
+smoke-installs it. Integration tests (URSim boot) run on pushes to main or on
+PRs labeled **`run-integration`**. Dependabot maintains uv deps, action pins,
+and simulator images (weekly/monthly, grouped); minor/patch non-simulator
+bumps auto-merge once CI is green (`dependabot-auto-merge.yml` — needs
+"Allow auto-merge" enabled in repo settings). CodeQL scans Python + JS weekly
+and per PR. Tagging `v<version>` (matching `urctl.__version__`) builds, tests,
+creates a GitHub Release, and publishes to PyPI via trusted publishing (the
+`pypi` environment; skipped until the PyPI publisher is configured).
+
 ```bash
 make sim-up          # start URSim
 make sim-poweron     # power on + brake release (calls scripts/poweron.sh)
