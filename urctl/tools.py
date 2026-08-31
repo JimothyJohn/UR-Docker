@@ -179,7 +179,41 @@ def _h_dashboard_command(robot: Robot, p: dict) -> dict:
 
 
 def _h_rtde_state(robot: Robot, p: dict) -> dict:
-    return robot.rtde_state()
+    return robot.rtde_state(deep=p.get("deep", False))
+
+
+def _sys_inspector(robot: Robot, p: dict):
+    from .sysinfo import SystemInspector, runner_for
+
+    access = "ssh" if p.get("ssh") else "docker" if p.get("container") else None
+    return SystemInspector(runner_for(robot.config, access=access, target=p.get("ssh") or p.get("container")))
+
+
+def _h_system_snapshot(robot: Robot, p: dict) -> dict:
+    result: dict = {"ok": True, "host": robot.config.host}
+    if not p.get("offline", False):
+        result["live"] = robot.get_state()
+        result["telemetry"] = robot.rtde_state(deep=True)
+    result["system"] = _sys_inspector(robot, p).snapshot(installation_name=p.get("installation", "default"))
+    return result
+
+
+def _h_list_programs(robot: Robot, p: dict) -> dict:
+    return {"ok": True, **_sys_inspector(robot, p).programs()}
+
+
+# Shared schema fragments for the filesystem-access tools.
+_SSH_SCHEMA = {
+    "type": "string",
+    "description": "Reach the controller filesystem over SSH as [user@]host (real robot; "
+    "default user root, default host = the robot host). Mutually exclusive with 'container'.",
+}
+_CONTAINER_SCHEMA = {
+    "type": "string",
+    "description": "Reach a URSim container's filesystem via docker exec (simulator). "
+    "When neither ssh nor container is given, a loopback host implies the default "
+    "URSim container and a remote host implies SSH.",
+}
 
 
 def _h_set_speed_override(robot: Robot, p: dict) -> dict:
@@ -347,11 +381,54 @@ TOOLS: list[Tool] = [
     Tool(
         "ur_rtde_state",
         "Read high-rate structured state via RTDE (port 30004): joint angles "
-        "and velocities, TCP pose/speed/force, and raw safety/runtime status. "
-        "Works even when no program is running (unlike ur_get_state's joint/TCP "
-        "fields). Returns ok=false if RTDE is disabled or unreachable.",
-        _object_schema({}),
+        "and velocities, TCP pose/speed/force, and decoded safety/runtime "
+        "status. Works even when no program is running (unlike ur_get_state's "
+        "joint/TCP fields). Set deep=true for full diagnostics: per-joint "
+        "currents/temperatures/voltages/drive modes, supply power, tool "
+        "telemetry, analog IO, speed scaling. Returns ok=false if RTDE is "
+        "disabled or unreachable.",
+        _object_schema(
+            {
+                "deep": {
+                    "type": "boolean",
+                    "description": "Subscribe the full diagnostic recipe (default false).",
+                }
+            }
+        ),
         _h_rtde_state,
+    ),
+    Tool(
+        "ur_system_snapshot",
+        "Full cell model of the controller: live state + deep RTDE telemetry "
+        "plus filesystem-level facts the network APIs never expose — joint "
+        "serials/firmware (replacement detection), kinematic-calibration "
+        "mismatch, storage health, program inventory, parsed active "
+        "installation (active TCP + whether it is at the flange, payload, "
+        "named IO, safety limits), and installed URCaps. THE place to start "
+        "when meeting a robot or planning a program for it: flange_tcp=false "
+        "means author motion as script nodes, not native MoveJ nodes.",
+        _object_schema(
+            {
+                "ssh": _SSH_SCHEMA,
+                "container": _CONTAINER_SCHEMA,
+                "installation": {
+                    "type": "string",
+                    "description": "Installation name to parse (default 'default').",
+                },
+                "offline": {
+                    "type": "boolean",
+                    "description": "Skip the live network reads (robot powered off).",
+                },
+            }
+        ),
+        _h_system_snapshot,
+    ),
+    Tool(
+        "ur_list_programs",
+        "List the .urp / .script / .installation files on the controller "
+        "(name, size, mtime) — what the operator can load from the pendant.",
+        _object_schema({"ssh": _SSH_SCHEMA, "container": _CONTAINER_SCHEMA}),
+        _h_list_programs,
     ),
     Tool(
         "ur_set_speed_override",

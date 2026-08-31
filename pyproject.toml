@@ -21,6 +21,7 @@ depth = ["torch>=2.0", "transformers>=4.40", "numpy>=1.24", "pillow>=10.0"]
 [project.scripts]
 urctl = "urctl.cli:main"
 urctl-mcp = "urctl.mcp_server:main"
+urctl-gui = "urctl.webapp:main"
 perception = "perception.cli:main"
 
 [build-system]

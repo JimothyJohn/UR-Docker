@@ -81,6 +81,46 @@ DEFAULT_OUTPUTS: list[str] = [
 ]
 DEFAULT_OUTPUT_FREQUENCY = 125.0  # Hz — ample for on-demand state, cheap on the controller.
 
+# The "everything" recipe: full drivetrain + power + tool + IO telemetry for
+# diagnostics dashboards and cell-model snapshots. Field availability varies a
+# little across firmware generations, so clients subscribing to this list
+# should pass ``strict=False`` — the controller answers NOT_FOUND per field and
+# the client silently drops those instead of failing the whole handshake.
+DEEP_OUTPUTS: list[str] = [
+    *DEFAULT_OUTPUTS,
+    "safety_mode",
+    "robot_status_bits",
+    # drivetrain diagnostics (per joint)
+    "actual_current",
+    "joint_temperatures",
+    "actual_joint_voltages",
+    "joint_mode",
+    "target_q",
+    # kinematics extras
+    "elbow_position",
+    # speed scaling (the live slider + what the controller is actually applying)
+    "speed_scaling",
+    "target_speed_fraction",
+    # supply power
+    "actual_robot_voltage",
+    "actual_robot_current",
+    "actual_main_voltage",
+    # analog IO
+    "standard_analog_input0",
+    "standard_analog_input1",
+    "standard_analog_output0",
+    "standard_analog_output1",
+    # tool connector
+    "tool_analog_input0",
+    "tool_analog_input1",
+    "tool_output_voltage",
+    "tool_output_current",
+    "tool_temperature",
+    "tool_mode",
+    # program execution
+    "actual_execution_time",
+]
+
 # The input recipe we register for writes. ``*_mask`` fields select which
 # values in the same package actually apply, so one field can be written
 # without disturbing the others (e.g. nudge the speed slider but leave IO alone).
@@ -112,10 +152,17 @@ class RtdeClient:
         *,
         outputs: list[str] | None = None,
         frequency: float = DEFAULT_OUTPUT_FREQUENCY,
+        strict: bool = True,
     ):
         self.config = config or RobotConfig.from_env()
         self.outputs = list(outputs) if outputs is not None else list(DEFAULT_OUTPUTS)
         self.frequency = frequency
+        # strict=True (default) raises on any NOT_FOUND output field. strict=False
+        # drops unavailable/unknown-typed fields and records them in
+        # ``self.dropped_outputs`` — the right mode for DEEP_OUTPUTS, whose long
+        # tail of diagnostic fields varies across controller firmware versions.
+        self.strict = strict
+        self.dropped_outputs: list[str] = []
         self._sock: socket.socket | None = None
         self._out_recipe: list[tuple[str, str]] = []  # (name, type) in order
         self._out_recipe_id: int = 0
@@ -227,10 +274,32 @@ class RtdeClient:
             raise RtdeError(f"unsupported RTDE field type(s): {sorted(set(unknown))}")
         return recipe_id, list(zip(names, types, strict=False))
 
-    def _setup_outputs(self) -> None:
-        payload = struct.pack(">d", self.frequency) + ",".join(self.outputs).encode("ascii")
+    def _request_outputs(self, names: list[str]) -> bytes:
+        payload = struct.pack(">d", self.frequency) + ",".join(names).encode("ascii")
         self._send(_RTDE_CONTROL_PACKAGE_SETUP_OUTPUTS, payload)
-        body = self._recv_control(_RTDE_CONTROL_PACKAGE_SETUP_OUTPUTS)
+        return self._recv_control(_RTDE_CONTROL_PACKAGE_SETUP_OUTPUTS)
+
+    def _setup_outputs(self) -> None:
+        body = self._request_outputs(self.outputs)
+        if not self.strict:
+            # Tolerant mode: fields the controller doesn't know (NOT_FOUND) or
+            # whose type we can't decode are dropped and the recipe re-requested
+            # without them, so one exotic field never fails the whole handshake.
+            # (Per the RTDE guide, a recipe containing NOT_FOUND fields is not
+            # usable as-is — the client must re-setup with the valid subset.)
+            types = body[1:].decode("ascii", errors="replace").split(",")
+            if len(types) == len(self.outputs):
+                keep = [
+                    n
+                    for n, t in zip(self.outputs, types, strict=False)
+                    if t != "NOT_FOUND" and t in _RTDE_TYPES
+                ]
+                if keep != self.outputs:
+                    self.dropped_outputs = [n for n in self.outputs if n not in keep]
+                    if not keep:
+                        raise RtdeError(f"no requested RTDE output field is available: {self.outputs}")
+                    self.outputs = keep
+                    body = self._request_outputs(self.outputs)
         self._out_recipe_id, self._out_recipe = self._parse_recipe(body, self.outputs)
 
     def _ensure_inputs(self) -> None:

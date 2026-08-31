@@ -76,16 +76,30 @@ class Robot:
         )
         self.primary = PrimaryClient(self.config)
         # RTDE (port 30004) is created lazily on first use so tests and code
-        # paths that never touch it pay no socket.
+        # paths that never touch it pay no socket. ``_rtde_deep`` tracks which
+        # output recipe the cached client negotiated (default vs DEEP_OUTPUTS).
         self._rtde = None
+        self._rtde_deep = False
 
-    def _rtde_client(self):
+    def _rtde_client(self, *, deep: bool = False):
         """Lazily build (and cache) the RTDE client. Dropped on read failure so
-        the next call reconnects (see :meth:`rtde_state` / :meth:`get_state`)."""
-        if self._rtde is None:
-            from .rtde import RtdeClient
+        the next call reconnects (see :meth:`rtde_state` / :meth:`get_state`).
 
-            self._rtde = RtdeClient(self.config)
+        ``deep=True`` upgrades the cached client to the full diagnostic recipe
+        (:data:`urctl.rtde.DEEP_OUTPUTS`, tolerant mode). The deep recipe is a
+        superset of the default one, so once upgraded it serves both callers.
+        """
+        from .rtde import DEEP_OUTPUTS, RtdeClient
+
+        if deep and self._rtde is not None and not self._rtde_deep:
+            self._rtde.close()
+            self._rtde = None
+        if self._rtde is None:
+            if deep:
+                self._rtde = RtdeClient(self.config, outputs=list(DEEP_OUTPUTS), strict=False)
+            else:
+                self._rtde = RtdeClient(self.config)
+            self._rtde_deep = deep
         return self._rtde
 
     def close(self) -> None:
@@ -194,39 +208,41 @@ class Robot:
         }
         return self._log("get_state", {}, ok=True, result=result)
 
-    def rtde_state(self) -> dict:
+    def rtde_state(self, *, deep: bool = False) -> dict:
         """High-rate structured state via RTDE (port 30004).
 
         Unlike :meth:`get_state`, this is RTDE-only and works even when the
         robot is not RUNNING — RTDE reflects the controller directly, not a
         URScript ``textmsg`` we injected. Returns joints/velocities, TCP
-        pose/speed/force, and the raw ``safety_status``/``runtime_state`` bit
-        words. Returns ``ok=False`` if RTDE is disabled or unreachable.
+        pose/speed/force, and decoded safety/runtime state. Returns
+        ``ok=False`` if RTDE is disabled or unreachable.
+
+        ``deep=True`` subscribes the full diagnostic recipe
+        (:data:`urctl.rtde.DEEP_OUTPUTS`): per-joint currents, temperatures,
+        voltages and drive modes, supply power, tool-connector telemetry,
+        analog IO, and speed scaling. Fields a given firmware doesn't offer are
+        dropped, not fatal (listed under ``unavailable_fields``).
         """
+        from . import codes
+
+        params = {"deep": deep} if deep else {}
         if self.dry_run:
-            return self._log("rtde_state", {}, ok=True, result={"reply": "(dry-run)"})
+            return self._log("rtde_state", params, ok=True, result={"reply": "(dry-run)"})
         if not self.config.rtde_enabled:
-            return self._log("rtde_state", {}, ok=False, result={"error": "RTDE disabled (UR_RTDE_DISABLE)"})
+            return self._log(
+                "rtde_state", params, ok=False, result={"error": "RTDE disabled (UR_RTDE_DISABLE)"}
+            )
         try:
-            raw = self._rtde_client().read_outputs()
+            client = self._rtde_client(deep=deep)
+            raw = client.read_outputs()
         except OSError as exc:
             self._rtde = None
-            return self._log("rtde_state", {}, ok=False, result={"error": f"RTDE unreachable: {exc}"})
+            return self._log("rtde_state", params, ok=False, result={"error": f"RTDE unreachable: {exc}"})
         except Exception as exc:  # RtdeError and friends
             self._rtde = None
-            return self._log("rtde_state", {}, ok=False, result={"error": str(exc)})
-        result = {
-            "joints": raw.get("actual_q"),
-            "joint_velocities": raw.get("actual_qd"),
-            "tcp": raw.get("actual_TCP_pose"),
-            "tcp_speed": raw.get("actual_TCP_speed"),
-            "tcp_force": raw.get("actual_TCP_force"),
-            "safety_status": raw.get("safety_status_bits"),
-            "runtime_state": raw.get("runtime_state"),
-            "rtde_robot_mode": raw.get("robot_mode"),
-            "timestamp": raw.get("timestamp"),
-        }
-        return self._log("rtde_state", {}, ok=True, result=result)
+            return self._log("rtde_state", params, ok=False, result={"error": str(exc)})
+        result = codes.shape_rtde_sample(raw, deep=deep, unavailable=client.dropped_outputs if deep else None)
+        return self._log("rtde_state", params, ok=True, result=result)
 
     # ----- power -------------------------------------------------------------
 

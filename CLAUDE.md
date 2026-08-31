@@ -30,6 +30,27 @@ function-calling), an `urctl` CLI, and an `urctl-mcp` MCP server. The older
 `scripts/` are kept as standalone shell/Python helpers; `urctl.urp` re-exports
 the converter so `scripts/urp_convert.py` stays the single source of truth.
 
+**Deep introspection (the harness layer, see `docs/harness.md`):** the toolkit
+can read *everything* about a controller, not just live state. `urctl
+rtde-state --deep` pulls the full RTDE diagnostic recipe (per-joint
+currents/temps/drive modes, TCP force, supply power, tool telemetry, speed
+scaling — decoded to names by `urctl/codes.py`; unsupported fields drop
+gracefully). `urctl snapshot` fuses that with filesystem introspection
+(`urctl/sysinfo.py` — SSH on a real robot, docker exec on URSim, auto-inferred
+from the host) into one cell model: joint serials/firmware with replacement
+detection, kinematic-calibration mismatch, storage health, program inventory,
+installed URCaps, and the parsed active installation
+(`urctl/installation.py`) — whose `flange_tcp` flag is the decision input for
+the MoveJ-node-vs-script-node authoring choice below. `urctl programs` lists
+what the operator can load. All three are also agent tools
+(`ur_rtde_state`/`ur_system_snapshot`/`ur_list_programs`) and therefore MCP
+tools.
+
+**Local GUI (`urctl gui` / `urctl-gui`):** a loopback-only web cockpit
+(`urctl/webapp.py` + `urctl/webui/index.html`, stdlib server, SSE telemetry at
+12.5 Hz, live FK arm view) whose every button dispatches through the same tool
+registry (validated + safety-enveloped + audited). `docs/harness.md` §5.
+
 ## Assistant skills (procedural how-tos)
 
 Task-triggered skills live in `.claude/skills/` and encode the *procedures* that

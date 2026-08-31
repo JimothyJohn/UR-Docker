@@ -247,9 +247,40 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("state", help="read and print robot state")
-    sub.add_parser("rtde-state", help="read high-rate structured state via RTDE (port 30004)")
+    rt = sub.add_parser("rtde-state", help="read high-rate structured state via RTDE (port 30004)")
+    rt.add_argument(
+        "--deep",
+        action="store_true",
+        help="full diagnostic recipe: joint currents/temps/voltages, power, tool, analog IO",
+    )
     sub.add_parser("bring-up", help="cold start to RUNNING (power on + brake release)")
     sub.add_parser("power-off", help="power off motors")
+
+    def _add_access_args(p):
+        p.add_argument(
+            "--ssh",
+            metavar="[USER@]HOST",
+            default=None,
+            help="reach the controller filesystem over SSH (default user root; default host = --host)",
+        )
+        p.add_argument(
+            "--container",
+            metavar="NAME",
+            default=None,
+            help="reach a URSim container filesystem via docker exec",
+        )
+
+    sn = sub.add_parser(
+        "snapshot",
+        help="full cell model: live state + deep RTDE + controller filesystem (joints, "
+        "calibration, programs, installation, storage)",
+    )
+    _add_access_args(sn)
+    sn.add_argument("--installation", default="default", help="installation name to parse (default: default)")
+    sn.add_argument("--no-live", action="store_true", help="skip the network reads (offline robot)")
+
+    pr = sub.add_parser("programs", help="list .urp/.script/.installation files on the controller")
+    _add_access_args(pr)
 
     sp = sub.add_parser("speed", help="set the global speed slider (0-1) via RTDE")
     sp.add_argument("fraction", type=float, help="speed scale 0-1 (1.0 = full programmed speed)")
@@ -391,6 +422,10 @@ def build_parser() -> argparse.ArgumentParser:
         "`urctl guided --help` for the env vs. pubkey auth options",
     )
 
+    gu = sub.add_parser("gui", help="serve the local web control panel (urctl-gui)")
+    gu.add_argument("--port", type=int, default=None, help="GUI port (default 7620)")
+    gu.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+
     sub.add_parser("tools", help="print the agent tool schemas as JSON")
 
     ct = sub.add_parser("call", help="dispatch a tool by name")
@@ -430,7 +465,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "state":
         return _emit(robot.get_state())
     if args.cmd == "rtde-state":
-        return _emit(robot.rtde_state())
+        return _emit(robot.rtde_state(deep=args.deep))
+    if args.cmd in ("snapshot", "programs"):
+        from .sysinfo import SystemInspector, runner_for
+
+        access = "ssh" if args.ssh else "docker" if args.container else None
+        runner = runner_for(config, access=access, target=args.ssh or args.container)
+        inspector = SystemInspector(runner)
+        if args.cmd == "programs":
+            return _emit({"ok": True, **inspector.programs()})
+        result: dict = {"ok": True, "host": config.host}
+        if not args.no_live:
+            result["live"] = robot.get_state()
+            result["telemetry"] = robot.rtde_state(deep=True)
+        result["system"] = inspector.snapshot(installation_name=args.installation)
+        return _emit(result)
     if args.cmd == "bring-up":
         return _emit(robot.bring_up())
     if args.cmd == "power-off":
@@ -489,6 +538,16 @@ def main(argv: list[str] | None = None) -> int:
         return _inspect_app(robot, args)
     if args.cmd == "dashboard":
         return _emit(robot.dashboard_command(" ".join(args.command)))
+    if args.cmd == "gui":
+        from .webapp import DEFAULT_PORT, serve
+
+        serve(
+            config,
+            port=args.port if args.port is not None else DEFAULT_PORT,
+            open_browser=not args.no_browser,
+            dry_run=args.dry_run,
+        )
+        return 0
     if args.cmd == "call":
         try:
             params = json.loads(args.json_args)
