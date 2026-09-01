@@ -318,6 +318,11 @@ const S = {
   isLocalSim: false,
 };
 const $ = (id) => document.getElementById(id);
+// Escape before any innerHTML interpolation. Controller-sourced strings
+// (program names, IO names, error text) are data, not markup — a program
+// named "<img onerror=…>.urp" must render as its name, not execute.
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const JN = ["Base", "Shoulder", "Elbow", "Wrist 1", "Wrist 2", "Wrist 3"];
 const deg = (r) => (r * 180 / Math.PI);
 
@@ -350,7 +355,7 @@ function logLine(msg, ok) {
   const d = document.createElement("div");
   const t = new Date().toTimeString().slice(0, 8);
   d.innerHTML = `<span class="t">${t}</span> ` +
-    (ok === undefined ? msg : `<span class="${ok ? "okl" : "errl"}">${msg}</span>`);
+    (ok === undefined ? esc(msg) : `<span class="${ok ? "okl" : "errl"}">${esc(msg)}</span>`);
   const log = $("log");
   log.appendChild(d);
   while (log.childElementCount > 200) log.removeChild(log.firstChild);
@@ -474,7 +479,7 @@ function buildLamps(host, kind, clickable) {
     const l = document.createElement("div");
     l.className = "lamp" + (clickable ? " clickable" : "");
     l.dataset.pin = pin;
-    l.innerHTML = `<span class="dot"></span><span class="pname" title="${ioName(kind, pin)}">${ioName(kind, pin)}</span>`;
+    l.innerHTML = `<span class="dot"></span><span class="pname" title="${esc(ioName(kind, pin))}">${esc(ioName(kind, pin))}</span>`;
     if (clickable) {
       l.onclick = () => {
         const on = l.classList.contains("on");
@@ -673,11 +678,11 @@ async function loadPrograms() {
   const res = await api("/api/programs");
   const ul = $("progList");
   ul.innerHTML = "";
-  if (!res.ok || !res.programs) { ul.innerHTML = `<li style="color:var(--crit)">${res.error || "unavailable"}</li>`; return; }
+  if (!res.ok || !res.programs) { ul.innerHTML = `<li style="color:var(--crit)">${esc(res.error || "unavailable")}</li>`; return; }
   res.programs.forEach((p) => {
     const li = document.createElement("li");
     li.dataset.name = p.name;
-    li.innerHTML = `<span>${p.name}</span><span class="sz">${(p.size / 1024).toFixed(1)}k</span>`;
+    li.innerHTML = `<span>${esc(p.name)}</span><span class="sz">${(p.size / 1024).toFixed(1)}k</span>`;
     li.title = "click to load";
     li.onclick = () => {
       if (window.confirm(`Load ${p.name}? (a fresh installation may power the arm off)`)) {
@@ -702,19 +707,19 @@ async function loadCellModel() {
   $("doLamps").dataset.built = ""; $("diLamps").dataset.built = "";
   const repl = (joints.joints || []).filter((j) => j.replacement_suspected).map((j) => JN[j.joint]);
   el.innerHTML = `<dl style="margin:0">
-    <dt>Robot</dt><dd>${idy.model || "?"} · ${idy.serial || "?"} · ${idy.urcontrol_version || ""}</dd>
+    <dt>Robot</dt><dd>${esc(idy.model || "?")} · ${esc(idy.serial || "?")} · ${esc(idy.urcontrol_version || "")}</dd>
     <dt>Calibration</dt><dd class="${joints.calibration_mismatch ? "warntag" : ""}">
       ${joints.calibration_mismatch
         ? "MISMATCH — joint " + (joints.mismatched_joint_ids || []).join(",") +
           (repl.length ? " (" + repl.join(", ") + " replaced)" : "") + " · TCP accuracy degraded"
         : "matches installed joints"}</dd>
     <dt>Active TCP</dt><dd class="${inst.flange_tcp === false ? "warntag" : ""}">
-      ${inst.active_tcp || "?"}${inst.flange_tcp === false ? " · NON-FLANGE — author motion as script nodes" : inst.flange_tcp ? " · at flange" : ""}</dd>
-    <dt>Payload</dt><dd>${inst.payload ? inst.payload.mass + " kg · " + (inst.payload.name || "") : "?"}</dd>
+      ${esc(inst.active_tcp || "?")}${inst.flange_tcp === false ? " · NON-FLANGE — author motion as script nodes" : inst.flange_tcp ? " · at flange" : ""}</dd>
+    <dt>Payload</dt><dd>${inst.payload ? esc(inst.payload.mass) + " kg · " + esc(inst.payload.name || "") : "?"}</dd>
     <dt>Safety limits (normal)</dt><dd>${inst.safety_limits && inst.safety_limits.normal
       ? "TCP ≤ " + inst.safety_limits.normal.max_tcp_speed + " m/s · force ≤ " + inst.safety_limits.normal.max_force + " N" : "?"}</dd>
     <dt>Controller disk</dt><dd class="${store.used_percent >= 85 ? "warntag" : ""}">${store.used_percent !== undefined ? store.used_percent + "% used · " + store.available_mb + " MB free" : "?"}</dd>
-    <dt>URCaps</dt><dd>${(sys.urcaps && sys.urcaps.urcaps || []).join("<br>") || "none"}</dd>
+    <dt>URCaps</dt><dd>${(sys.urcaps && sys.urcaps.urcaps || []).map(esc).join("<br>") || "none"}</dd>
   </dl>`;
 }
 
