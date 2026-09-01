@@ -22,7 +22,7 @@ jobs:
         with:
           enable-cache: true
       - name: install deps
-        run: uv sync --extra perception --extra mcp
+        run: uv sync --extra perception
       - name: ruff check
         run: uv run ruff check urctl perception scripts tests
       - name: ruff format
@@ -34,13 +34,19 @@ jobs:
           shellcheck scripts/*.sh
 
   unit:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # Oldest supported (pyproject requires-python), a middle LTS-ish
-        # version, and the current release (what dev machines run).
+        # Python span on Linux/amd64 (oldest supported, middle, current) …
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.12", "3.14"]
+        # … plus one modern Python on every other OS/architecture the
+        # toolkit claims: Windows, macOS (arm64), Linux (arm64).
+        include:
+          - { os: windows-latest, python-version: "3.14" }
+          - { os: macos-latest, python-version: "3.14" }
+          - { os: ubuntu-24.04-arm, python-version: "3.14" }
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
@@ -51,7 +57,7 @@ jobs:
         # Core is stdlib-only; the extras exercise the optional integrations.
         # opencv/numpy wheels can lag new CPython releases, so extras are
         # best-effort off the oldest/newest edges: fall back to core deps.
-        run: uv sync --extra perception --extra mcp || uv sync
+        run: uv sync --extra perception || uv sync
       - name: unit tests
         run: uv run pytest -m "not integration" -q
 
@@ -106,7 +112,7 @@ jobs:
         with:
           enable-cache: true
       - name: install deps
-        run: uv sync --extra perception --extra mcp
+        run: uv sync --extra perception
       - name: start URSim
         run: |
           docker compose up -d

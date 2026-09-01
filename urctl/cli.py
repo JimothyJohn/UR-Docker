@@ -442,6 +442,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):  # legacy Windows codepages: replace, don't crash
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
 
     # `tools` needs no connection — print and exit.
     if args.cmd == "tools":

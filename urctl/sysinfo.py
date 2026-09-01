@@ -93,7 +93,14 @@ class SshRunner:
 
     def _base_cmd(self) -> list[str]:
         import os
+        import shutil
 
+        if shutil.which("ssh") is None:
+            raise RunnerError(
+                "'ssh' not found on PATH — install an OpenSSH client "
+                "(Windows: Settings > Optional features > OpenSSH Client; "
+                "macOS/Linux: ships with the OS)"
+            )
         ssh = [
             "ssh",
             "-p",
@@ -134,6 +141,10 @@ class DockerRunner:
         return f"docker:{self.container}"
 
     def run(self, command: str) -> str:
+        import shutil
+
+        if shutil.which("docker") is None:
+            raise RunnerError("'docker' not found on PATH — install Docker (Desktop) to reach URSim")
         proc = subprocess.run(
             ["docker", "exec", self.container, "sh", "-c", command],
             capture_output=True,

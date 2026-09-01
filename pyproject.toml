@@ -11,8 +11,9 @@ license = { file = "LICENSE" }
 dependencies = []
 
 [project.optional-dependencies]
-# `urctl-mcp` MCP server.
-mcp = ["mcp>=1.0"]
+# The `urctl-mcp` MCP server is pure stdlib since the JSON-RPC rewrite; the
+# extra is kept as a no-op so existing `pip install 'ur-docker[mcp]'` works.
+mcp = []
 # Classic-CV perception backend (blob detection) + numpy/OpenCV Frame interop.
 perception = ["numpy>=1.24", "opencv-python>=4.8", "pillow>=10.0"]
 # Learned monocular depth (Depth Anything V2) backend.

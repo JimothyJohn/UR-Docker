@@ -10,7 +10,7 @@ Everything below is **verified working** against both targets:
 
 | Target | Platform | Notes |
 | ------ | -------- | ----- |
-| URSim 5.12.5 container | e-Series sim | `localhost`, docker exec for files |
+| URSim 5.26.0 LTS container | e-Series sim | `localhost`, docker exec for files |
 | UR10e `20225201277` @ 192.168.1.50 | real e-Series, URControl 82.0.34 G5 | SSH (key enrolled) for files |
 
 ## 1. The three read surfaces
@@ -163,6 +163,8 @@ programs on the controller (`urctl programs`) are the operator's context.
 
 ## 4. The agent/MCP surface
 
+`urctl-mcp` is **pure stdlib** — MCP's stdio transport is newline-delimited
+JSON-RPC 2.0, spoken directly (`urctl/mcp_server.py`); no SDK install needed.
 `urctl tools` prints all 20 tools as JSON-schema'd capabilities;
 `urctl call <tool> --json '{...}'` dispatches one; `urctl-mcp` serves the
 same registry over MCP (stdio). The three harness additions:

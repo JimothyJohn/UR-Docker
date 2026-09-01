@@ -36,6 +36,7 @@ yourself. Do not bind it to a routable interface.
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 import webbrowser
@@ -243,7 +244,7 @@ def serve(
     server = ThreadingHTTPServer(("127.0.0.1", port), GuiHandler)
     server.app = GuiApp(config, dry_run=dry_run)  # type: ignore[attr-defined]
     url = f"http://127.0.0.1:{server.server_address[1]}/"
-    print(f"urctl gui → {url}   (robot: {config.host}, Ctrl-C to stop)")
+    print(f"urctl gui -> {url}   (robot: {config.host}, Ctrl-C to stop)")
     if open_browser:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:
@@ -257,6 +258,9 @@ def serve(
 
 def main(argv: list[str] | None = None) -> int:
     """Standalone ``urctl-gui`` console script."""
+    for stream in (sys.stdout, sys.stderr):  # legacy Windows codepages: replace, don't crash
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     import argparse
 
     ap = argparse.ArgumentParser(prog="urctl-gui", description="local web control panel for a UR robot")

@@ -31,7 +31,7 @@ jobs:
           fi
       - name: full unit suite
         run: |
-          uv sync --extra perception --extra mcp
+          uv sync --extra perception
           uv run pytest -m "not integration" -q
       - name: build
         run: uv build

@@ -8,7 +8,7 @@ me real time to discover.
 
 ## What this repo is
 
-A Docker-Compose'd PolyScope simulator (URSim 5.12.5, e-Series) plus a
+A Docker-Compose'd PolyScope simulator (URSim 5.26.0 LTS, e-Series) plus a
 small set of host-side tools that talk to it the way you'd talk to a real
 controller. Goal: make experiments with URScript, the Dashboard API, and
 PolyScope program files reproducible without needing a real robot.
@@ -45,6 +45,14 @@ the MoveJ-node-vs-script-node authoring choice below. `urctl programs` lists
 what the operator can load. All three are also agent tools
 (`ur_rtde_state`/`ur_system_snapshot`/`ur_list_programs`) and therefore MCP
 tools.
+
+**Portability:** the runtime — `urctl`, the GUI, and `urctl-mcp` (rewritten
+as stdlib JSON-RPC/stdio; the `mcp` extra is now an empty no-op) — has **zero
+dependencies** and runs on Windows/macOS/Linux, amd64/arm64 (CI tests all
+four). External binaries are only reached for by the *filesystem* layer and
+checked with clear errors: `ssh` (real robot; ships with all three OSes) and
+`docker` (URSim). CLI entry points reconfigure stdout with errors="replace" so
+legacy Windows codepages never crash on unicode.
 
 **Local GUI (`urctl gui` / `urctl-gui`):** a loopback-only web cockpit
 (`urctl/webapp.py` + `urctl/webui/index.html`, stdlib server, SSE telemetry at
