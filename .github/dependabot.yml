@@ -1,0 +1,37 @@
+# Automated dependency maintenance. Three ecosystems:
+#   - uv:            pyproject.toml + uv.lock (dev deps + optional extras)
+#   - github-actions: the workflow action pins
+#   - docker-compose: the URSim / PolyScope X simulator images
+# Minor + patch bumps are grouped into one weekly PR per ecosystem so the
+# noise stays low; majors arrive individually. Auto-merge for the safe subset
+# is handled by .github/workflows/dependabot-auto-merge.yml.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      python-minor-and-patch:
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "python"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
+    labels: ["dependencies", "ci"]
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      # Simulator image bumps change controller behavior (new PolyScope /
+      # URControl versions) — monthly, and never auto-merged: they need a
+      # run-integration pass and a human eye.
+      interval: "monthly"
+    labels: ["dependencies", "simulator"]

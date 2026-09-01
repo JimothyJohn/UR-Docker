@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>urctl cockpit</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>&#129470;</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Industrial cockpit, deliberately single-theme dark (a control panel, not a document). */
+  :root {
+    --ground: #0D1319; --panel: #141C25; --raised: #1A2430; --inset: #090E13;
+    --line: #283542; --line-soft: #1F2A36;
+    --text: #D7E1EB; --strong: #F1F6FA; --muted: #7F91A3; --faint: #576A7C;
+    --accent: #4FBBE2; --accent-dim: #2A7794;
+    --ok: #57B87C; --warn: #DFA43E; --crit: #E06552; --info: #7E93E8;
+    --ok-soft: rgba(87,184,124,.14); --warn-soft: rgba(223,164,62,.14);
+    --crit-soft: rgba(224,101,82,.16); --accent-soft: rgba(79,187,226,.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--text);
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; font-size: 14px;
+    display: flex; flex-direction: column;
+  }
+  .mono, code { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+  h1, h2, .disp, button, .chip { font-family: "Chakra Petch", "IBM Plex Sans", sans-serif; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 8px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  h1 { margin: 0; font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: var(--strong); }
+  h1 .accent { color: var(--accent); }
+  #host { color: var(--muted); font-size: 12.5px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+  .chip {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 3px; border: 1px solid var(--line);
+    background: var(--raised); color: var(--muted); white-space: nowrap;
+  }
+  .chip.ok   { color: var(--ok);   border-color: var(--ok);   background: var(--ok-soft); }
+  .chip.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .chip.crit { color: var(--crit); border-color: var(--crit); background: var(--crit-soft); }
+  #stopBtn {
+    background: var(--crit); color: #fff; border: 0; border-radius: 4px;
+    font-size: 13px; font-weight: 700; letter-spacing: .1em; padding: 8px 22px; cursor: pointer;
+  }
+  #stopBtn:hover { filter: brightness(1.12); }
+
+  /* ---------- banners ---------- */
+  #banners { display: flex; flex-direction: column; }
+  .banner { padding: 7px 16px; font-size: 13px; font-weight: 500; display: none; align-items: center; gap: 12px; }
+  .banner.show { display: flex; }
+  .banner.crit { background: var(--crit-soft); color: var(--crit); border-bottom: 1px solid var(--crit); }
+  .banner.warn { background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid var(--warn); }
+  .banner button {
+    background: transparent; border: 1px solid currentColor; color: inherit; border-radius: 3px;
+    font-size: 11px; font-weight: 600; letter-spacing: .06em; padding: 3px 12px; cursor: pointer;
+  }
+
+  /* ---------- layout ---------- */
+  main {
+    flex: 1; display: grid; gap: 10px; padding: 10px;
+    grid-template-columns: minmax(340px, 1.25fr) minmax(300px, 1fr) minmax(280px, 1fr);
+    grid-template-rows: minmax(340px, auto) minmax(200px, 1fr);
+    grid-template-areas: "arm jog io" "term term progs";
+    min-height: 0;
+  }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto;
+           grid-template-areas: "arm jog" "io progs" "term term"; }
+  }
+  @media (max-width: 720px) {
+    main { grid-template-columns: 1fr; grid-template-areas: "arm" "jog" "io" "progs" "term"; }
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden;
+  }
+  .panel > .head {
+    display: flex; align-items: center; gap: 10px; padding: 7px 12px;
+    border-bottom: 1px solid var(--line-soft); flex: none;
+  }
+  .panel > .head h2 {
+    margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .panel > .head .aux { margin-left: auto; font-size: 11px; color: var(--faint); }
+  .panel > .body { padding: 10px 12px; overflow: auto; flex: 1; min-height: 0; }
+
+  #armPanel { grid-area: arm; } #jogPanel { grid-area: jog; } #ioPanel { grid-area: io; }
+  #progPanel { grid-area: progs; } #termPanel { grid-area: term; }
+
+  /* ---------- arm view ---------- */
+  #armPanel .body { display: flex; flex-direction: column; padding: 0; }
+  #armCanvas { width: 100%; flex: 1; min-height: 220px; display: block; cursor: grab; touch-action: none; }
+  #armReadout {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 14px;
+    border-top: 1px solid var(--line-soft); padding: 8px 12px; font-size: 12px;
+  }
+  #armReadout .lbl { color: var(--faint); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+  #armReadout .val { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; color: var(--strong); }
+  table.joints { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.joints th {
+    text-align: left; color: var(--faint); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; font-weight: 600; padding: 2px 8px 4px 0;
+  }
+  table.joints td { padding: 2px 8px 2px 0; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.joints td.name { color: var(--muted); font-family: "IBM Plex Sans", sans-serif; }
+  .tempbar { display: inline-block; width: 44px; height: 5px; background: var(--inset); border-radius: 2px; vertical-align: 2px; margin-left: 6px; overflow: hidden; }
+  .tempbar i { display: block; height: 100%; background: var(--accent); }
+
+  /* ---------- jog ---------- */
+  .joggrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+  button.jog, button.act {
+    background: var(--raised); border: 1px solid var(--line); color: var(--text);
+    border-radius: 4px; font-size: 12.5px; font-weight: 600; padding: 9px 4px; cursor: pointer;
+  }
+  button.jog:hover, button.act:hover { border-color: var(--accent); color: var(--accent); }
+  button.jog:disabled, button.act:disabled { opacity: .38; cursor: not-allowed; }
+  button.act.primary { border-color: var(--accent-dim); color: var(--accent); }
+  .jogrow { display: flex; gap: 6px; align-items: center; margin-bottom: 5px; }
+  .jogrow .jname { width: 56px; color: var(--muted); font-size: 12px; }
+  .jogrow button { flex: none; width: 40px; padding: 5px 0; }
+  .jogrow .jval { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--strong); }
+  .fieldrow { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; flex-wrap: wrap; }
+  .fieldrow label { color: var(--muted); font-size: 12px; }
+  select, input[type=text] {
+    background: var(--inset); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 5px 8px; font-size: 12.5px; font-family: inherit;
+  }
+  input[type=range] { accent-color: var(--accent); flex: 1; }
+  .speedval { font-family: "IBM Plex Mono", monospace; color: var(--strong); width: 48px; text-align: right; }
+
+  /* ---------- io ---------- */
+  .iosec { margin-bottom: 12px; }
+  .iosec h3 { margin: 0 0 6px; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .lamps { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lamp {
+    display: flex; flex-direction: column; align-items: center; gap: 3px; width: 58px;
+    padding: 6px 2px; background: var(--raised); border: 1px solid var(--line); border-radius: 4px;
+    font-size: 10px; color: var(--muted); cursor: default; user-select: none;
+  }
+  .lamp .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--inset); border: 1px solid var(--line); }
+  .lamp.on .dot { background: var(--ok); border-color: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .lamp.clickable { cursor: pointer; }
+  .lamp.clickable:hover { border-color: var(--accent); }
+  .lamp .pname { max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .analogrow { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
+  .analogrow .mono { color: var(--strong); }
+
+  /* ---------- programs ---------- */
+  #progList { list-style: none; margin: 0; padding: 0; }
+  #progList li {
+    display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 4px;
+    font-size: 12.5px; cursor: pointer; border: 1px solid transparent;
+  }
+  #progList li:hover { background: var(--raised); }
+  #progList li.loaded { border-color: var(--accent-dim); background: var(--accent-soft); }
+  #progList li .sz { margin-left: auto; color: var(--faint); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+  .progctl { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line-soft); }
+  .progctl button { flex: 1; }
+  #progState { font-size: 11px; color: var(--muted); }
+
+  /* ---------- terminal ---------- */
+  #termPanel .body { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { #termPanel .body { grid-template-columns: 1fr; } }
+  #log { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; line-height: 1.5;
+         background: var(--inset); border: 1px solid var(--line-soft); border-radius: 4px;
+         padding: 8px 10px; overflow-y: auto; min-height: 120px; max-height: 240px; }
+  #log .t { color: var(--faint); } #log .okl { color: var(--ok); } #log .errl { color: var(--crit); }
+  .sendrow { display: flex; gap: 6px; margin-top: 8px; }
+  .sendrow input { flex: 1; }
+  .cellmodel { font-size: 12px; }
+  .cellmodel dt { color: var(--faint); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; margin-top: 8px; }
+  .cellmodel dd { margin: 1px 0 0; font-family: "IBM Plex Mono", monospace; color: var(--strong); }
+  .cellmodel .warntag { color: var(--warn); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>urctl <span class="accent">cockpit</span></h1>
+  <span id="host" class="mono">connecting…</span>
+  <div class="chips">
+    <span class="chip" id="chipRobot">ROBOT —</span>
+    <span class="chip" id="chipSafety">SAFETY —</span>
+    <span class="chip" id="chipProgram">PROG —</span>
+    <span class="chip" id="chipControl">CTRL —</span>
+    <span class="chip" id="chipStream">STREAM —</span>
+    <button id="stopBtn" title="Dashboard stop — halts the running program">STOP</button>
+  </div>
+</header>
+
+<div id="banners">
+  <div class="banner crit" id="banProtective">
+    ⚠ PROTECTIVE STOP latched — motion blocked until cleared.
+    <button data-tool="ur_bring_up" data-confirm="Clear the protective stop and re-arm the robot?">Unlock &amp; re-arm</button>
+  </div>
+  <div class="banner warn" id="banLocal">
+    Pendant is in LOCAL control — a real e-Series silently ignores remote motion. Flip the top-right pendant indicator to REMOTE.
+  </div>
+  <div class="banner warn" id="banStream"><span id="banStreamMsg">Telemetry stream disconnected — retrying…</span></div>
+</div>
+
+<main>
+  <!-- ============ ARM VIEW ============ -->
+  <section class="panel" id="armPanel">
+    <div class="head"><h2>Arm</h2><span class="aux">drag to orbit · UR10e kinematics</span></div>
+    <div class="body">
+      <canvas id="armCanvas"></canvas>
+      <div id="armReadout">
+        <div><div class="lbl">TCP&nbsp;xyz&nbsp;(m)</div><div class="val" id="roTcp">—</div></div>
+        <div><div class="lbl">TCP&nbsp;rot&nbsp;(rad)</div><div class="val" id="roRot">—</div></div>
+        <div><div class="lbl">Force&nbsp;(N)</div><div class="val" id="roForce">—</div></div>
+        <div><div class="lbl">Speed&nbsp;scale</div><div class="val" id="roScale">—</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ JOG ============ -->
+  <section class="panel" id="jogPanel">
+    <div class="head"><h2>Jog &amp; Motion</h2><span class="aux" id="jogStatus"></span></div>
+    <div class="body">
+      <div class="fieldrow">
+        <label>step</label>
+        <select id="stepSel">
+          <option value="0.001">1 mm</option>
+          <option value="0.01" selected>10 mm</option>
+          <option value="0.05">50 mm</option>
+        </select>
+        <label>joint step</label>
+        <select id="jstepSel">
+          <option value="0.0174533">1°</option>
+          <option value="0.0872665" selected>5°</option>
+          <option value="0.2617994">15°</option>
+        </select>
+      </div>
+      <div class="joggrid">
+        <button class="jog" data-axis="1" data-dir="1">Y+</button>
+        <button class="jog" data-axis="2" data-dir="1">Z+</button>
+        <button class="jog" data-axis="0" data-dir="1">X+</button>
+        <button class="jog" data-axis="1" data-dir="-1">Y−</button>
+        <button class="jog" data-axis="2" data-dir="-1">Z−</button>
+        <button class="jog" data-axis="0" data-dir="-1">X−</button>
+      </div>
+      <div id="jointJog"></div>
+      <div class="fieldrow">
+        <label>speed</label>
+        <input type="range" id="speedSlider" min="5" max="100" value="100">
+        <span class="speedval" id="speedVal">100%</span>
+      </div>
+      <div class="joggrid" style="margin-top:6px">
+        <button class="act" id="freedriveBtn">Freedrive</button>
+        <button class="act" data-tool="ur_move_home" data-confirm="movej to the safe home pose?">Home</button>
+        <button class="act primary" data-tool="ur_bring_up" data-confirm="Power on + brake release?">Bring up</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ IO ============ -->
+  <section class="panel" id="ioPanel">
+    <div class="head"><h2>I/O</h2><span class="aux">DO click = toggle</span></div>
+    <div class="body">
+      <div class="iosec"><h3>Digital out</h3><div class="lamps" id="doLamps"></div></div>
+      <div class="iosec"><h3>Digital in</h3><div class="lamps" id="diLamps"></div></div>
+      <div class="iosec"><h3>Analog</h3><div id="analog"></div></div>
+      <div class="iosec"><h3>Drivetrain</h3><div id="power" class="analogrow-wrap"></div></div>
+    </div>
+  </section>
+
+  <!-- ============ PROGRAMS ============ -->
+  <section class="panel" id="progPanel">
+    <div class="head"><h2>Programs</h2><span class="aux" id="progState">—</span></div>
+    <div class="body"><ul id="progList"><li style="color:var(--faint)">loading…</li></ul></div>
+    <div class="progctl">
+      <button class="act" id="playBtn" data-tool="ur_play" data-confirm="Play the loaded program? (needs Remote mode)">Play</button>
+      <button class="act" data-tool="ur_pause">Pause</button>
+      <button class="act" data-tool="ur_stop">Stop</button>
+    </div>
+  </section>
+
+  <!-- ============ TERMINAL ============ -->
+  <section class="panel" id="termPanel">
+    <div class="head"><h2>Console</h2><span class="aux">every action is safety-checked + audit-logged</span></div>
+    <div class="body">
+      <div>
+        <div id="log"></div>
+        <div class="sendrow">
+          <input type="text" id="scriptInput" class="mono" placeholder="URScript… e.g. set_standard_digital_out(0, True)" spellcheck="false">
+          <button class="act" id="scriptBtn">Run</button>
+        </div>
+        <div class="sendrow">
+          <input type="text" id="popupInput" placeholder="Message to the operator's pendant…">
+          <button class="act" id="popupBtn">Popup</button>
+        </div>
+      </div>
+      <div class="cellmodel" id="cellModel">loading cell model…</div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* ============================= state ============================= */
+const S = {
+  latest: null,          // last telemetry sample
+  dashState: null,       // last /api/state
+  busy: false,           // one action in flight at a time
+  ioNames: { digital_out: [], digital_in: [] },
+  loadedProgram: null,
+  freedrive: false,
+  isLocalSim: false,
+};
+const $ = (id) => document.getElementById(id);
+// Escape before any innerHTML interpolation. Controller-sourced strings
+// (program names, IO names, error text) are data, not markup — a program
+// named "<img onerror=…>.urp" must render as its name, not execute.
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const JN = ["Base", "Shoulder", "Elbow", "Wrist 1", "Wrist 2", "Wrist 3"];
+const deg = (r) => (r * 180 / Math.PI);
+
+/* ============================= api ============================= */
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+async function runTool(tool, params, label) {
+  if (S.busy) { logLine("busy — wait for the current action", false); return null; }
+  setBusy(true);
+  logLine((label || tool) + " …");
+  try {
+    const res = await api("/api/action", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool, params: params || {} }),
+    });
+    logResult(label || tool, res);
+    return res;
+  } catch (e) {
+    logLine(String(e), false); return null;
+  } finally { setBusy(false); refreshState(); }
+}
+function setBusy(b) {
+  S.busy = b;
+  document.querySelectorAll("button.jog, button.act").forEach((el) => { el.disabled = b; });
+  $("jogStatus").textContent = b ? "executing…" : "";
+}
+function logLine(msg, ok) {
+  const d = document.createElement("div");
+  const t = new Date().toTimeString().slice(0, 8);
+  d.innerHTML = `<span class="t">${t}</span> ` +
+    (ok === undefined ? esc(msg) : `<span class="${ok ? "okl" : "errl"}">${esc(msg)}</span>`);
+  const log = $("log");
+  log.appendChild(d);
+  while (log.childElementCount > 200) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+function logResult(label, res) {
+  if (res.ok) { logLine(label + " ✓", true); return; }
+  let why = res.error || "";
+  if (res.safety && res.safety.violations) {
+    why = "safety: " + res.safety.violations.map((v) => v.rule || v.field || JSON.stringify(v)).join(", ");
+  } else if (res.protective_stop) { why = "protective stop tripped (singularity?)"; }
+  else if (res.landed === null || res.landed === undefined) { why = why || "did not confirm (LOCAL mode on a real robot?)"; }
+  logLine(label + " ✗ " + why, false);
+}
+
+/* ============================= header / banners ============================= */
+function chip(el, text, cls) { el.textContent = text; el.className = "chip" + (cls ? " " + cls : ""); }
+function updateHeader() {
+  const t = S.latest, d = S.dashState;
+  if (t) {
+    chip($("chipRobot"), "ROBOT " + (t.robot_mode_name || "?"), t.robot_mode_name === "RUNNING" ? "ok" : "warn");
+    const sm = t.safety_mode_name || (t.safety_flags && t.safety_flags.normal_mode ? "NORMAL" : "?");
+    chip($("chipSafety"), "SAFETY " + sm, sm === "NORMAL" ? "ok" : sm === "REDUCED" ? "warn" : "crit");
+    const ps = t.safety_flags && (t.safety_flags.protective_stopped || t.safety_flags.fault ||
+               t.safety_flags.emergency_stopped || t.safety_flags.violation);
+    $("banProtective").classList.toggle("show", !!ps);
+    chip($("chipProgram"), "PROG " + (t.runtime_state_name || "?"), t.runtime_state_name === "PLAYING" ? "ok" : "");
+  }
+  if (d) {
+    const cm = d.control_mode || "?";
+    chip($("chipControl"), "CTRL " + cm, cm === "REMOTE" ? "ok" : (S.isLocalSim ? "" : "warn"));
+    $("banLocal").classList.toggle("show", cm === "LOCAL" && !S.isLocalSim);
+    const m = (d.program_state || "").match(/^(\w+)\s*(.*)$/);
+    if (m) {
+      $("progState").textContent = m[1] + (m[2] ? " · " + m[2] : "");
+      S.loadedProgram = (m[2] || "").replace(/\.urp$/, "").trim() || null;
+      markLoaded();
+    }
+  }
+}
+
+/* ============================= telemetry stream ============================= */
+function connectStream() {
+  const es = new EventSource("/api/stream");
+  es.onopen = () => { chip($("chipStream"), "STREAM LIVE", "ok"); $("banStream").classList.remove("show"); };
+  es.onmessage = (ev) => {
+    const s = JSON.parse(ev.data);
+    if (s.stream_error) {
+      $("banStreamMsg").textContent = "Telemetry: " + s.stream_error;
+      $("banStream").classList.add("show");
+      return;
+    }
+    S.latest = s; renderTelemetry(s); updateHeader();
+  };
+  es.onerror = () => {
+    chip($("chipStream"), "STREAM DOWN", "crit");
+    $("banStreamMsg").textContent = "Telemetry stream disconnected — retrying…";
+    $("banStream").classList.add("show");
+  };
+}
+
+function renderTelemetry(s) {
+  if (s.tcp) {
+    $("roTcp").textContent = s.tcp.slice(0, 3).map((v) => v.toFixed(3)).join("  ");
+    $("roRot").textContent = s.tcp.slice(3).map((v) => v.toFixed(2)).join("  ");
+  }
+  if (s.tcp_force) {
+    const f = Math.hypot(s.tcp_force[0], s.tcp_force[1], s.tcp_force[2]);
+    $("roForce").textContent = f.toFixed(1);
+  }
+  if (s.target_speed_fraction !== undefined && s.target_speed_fraction !== null) {
+    // slider target; live scaling drops to 0 whenever nothing is moving
+    $("roScale").textContent = Math.round(s.target_speed_fraction * 100) + "%" +
+      (s.speed_scaling ? " · live " + Math.round(s.speed_scaling * 100) + "%" : "");
+    if (!S.sliderSynced) {  // initialize the slider from the robot once
+      S.sliderSynced = true;
+      $("speedSlider").value = Math.round(s.target_speed_fraction * 100);
+      $("speedVal").textContent = $("speedSlider").value + "%";
+    }
+  }
+  renderJointJog(s); renderIO(s); drawArm(s.joints);
+}
+
+/* ============================= joint jog rows ============================= */
+function renderJointJog(s) {
+  const host = $("jointJog");
+  if (!host.dataset.built) {
+    host.dataset.built = "1";
+    JN.forEach((name, i) => {
+      const row = document.createElement("div");
+      row.className = "jogrow";
+      row.innerHTML = `<span class="jname">${name}</span>
+        <button class="jog" data-joint="${i}" data-dir="-1">−</button>
+        <button class="jog" data-joint="${i}" data-dir="1">+</button>
+        <span class="jval" id="jv${i}">—</span>`;
+      host.appendChild(row);
+    });
+  }
+  if (s.joints) {
+    s.joints.forEach((q, i) => {
+      const el = $("jv" + i);
+      let extra = "";
+      if (s.joint_temperatures) {
+        const temp = s.joint_temperatures[i];
+        const pct = Math.min(100, Math.max(0, (temp - 20) / 45 * 100));
+        extra = ` <span class="tempbar" title="${temp.toFixed(1)} °C"><i style="width:${pct}%"></i></span>`;
+      }
+      el.innerHTML = deg(q).toFixed(1) + "°" + extra;
+    });
+  }
+}
+
+/* ============================= IO panel ============================= */
+function ioName(kind, pin) {
+  const named = (S.ioNames[kind] || []).find((e) => e.pin === pin);
+  return named ? named.name : "DO DI".split(" ")[kind === "digital_out" ? 0 : 1] + pin;
+}
+function buildLamps(host, kind, clickable) {
+  host.innerHTML = "";
+  for (let pin = 0; pin < 8; pin++) {
+    const l = document.createElement("div");
+    l.className = "lamp" + (clickable ? " clickable" : "");
+    l.dataset.pin = pin;
+    l.innerHTML = `<span class="dot"></span><span class="pname" title="${esc(ioName(kind, pin))}">${esc(ioName(kind, pin))}</span>`;
+    if (clickable) {
+      l.onclick = () => {
+        const on = l.classList.contains("on");
+        runTool("ur_set_digital_output", { pin, value: !on },
+          (on ? "clear " : "set ") + ioName(kind, pin));
+      };
+    }
+    host.appendChild(l);
+  }
+}
+function renderIO(s) {
+  const doHost = $("doLamps"), diHost = $("diLamps");
+  if (!doHost.dataset.built) { doHost.dataset.built = diHost.dataset.built = "1"; buildLamps(doHost, "digital_out", true); buildLamps(diHost, "digital_in", false); }
+  const set = (host, word) => {
+    if (word === undefined || word === null) return;
+    host.querySelectorAll(".lamp").forEach((l) => {
+      l.classList.toggle("on", !!(word >> +l.dataset.pin & 1));
+    });
+  };
+  set(doHost, s.digital_outputs); set(diHost, s.digital_inputs);
+  const fmt = (v, unit, dp) => (v === null || v === undefined) ? "—" : v.toFixed(dp === undefined ? 2 : dp) + unit;
+  $("analog").innerHTML =
+    `<div class="analogrow"><span>AI0 / AI1</span><span class="mono">${fmt(s.analog_in && s.analog_in[0], " V")} · ${fmt(s.analog_in && s.analog_in[1], " V")}</span></div>` +
+    `<div class="analogrow"><span>AO0 / AO1</span><span class="mono">${fmt(s.analog_out && s.analog_out[0], "")} · ${fmt(s.analog_out && s.analog_out[1], "")}</span></div>` +
+    `<div class="analogrow"><span>Tool</span><span class="mono">${fmt(s.tool_output_voltage, " V", 0)} · ${fmt(s.tool_current, " A")} · ${fmt(s.tool_temperature, " °C", 1)}</span></div>`;
+  $("power").innerHTML =
+    `<div class="analogrow"><span>Robot</span><span class="mono">${fmt(s.robot_voltage, " V", 1)} · ${fmt(s.robot_current, " A")}</span></div>` +
+    `<div class="analogrow"><span>Max joint current</span><span class="mono">${s.joint_currents ? Math.max(...s.joint_currents.map(Math.abs)).toFixed(2) + " A" : "—"}</span></div>` +
+    `<div class="analogrow"><span>Max joint temp</span><span class="mono">${s.joint_temperatures ? Math.max(...s.joint_temperatures).toFixed(1) + " °C" : "—"}</span></div>`;
+}
+
+/* ============================= arm rendering (UR10e FK) ============================= */
+/* Standard DH: T_i = Rz(theta) Tz(d) Tx(a) Rx(alpha). UR10e table. */
+const DH = [
+  { d: 0.1807, a: 0, al: Math.PI / 2 },
+  { d: 0, a: -0.6127, al: 0 },
+  { d: 0, a: -0.57155, al: 0 },
+  { d: 0.17415, a: 0, al: Math.PI / 2 },
+  { d: 0.11985, a: 0, al: -Math.PI / 2 },
+  { d: 0.11655, a: 0, al: 0 },
+];
+function matMul(A, B) {
+  const C = new Array(16).fill(0);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++)
+    for (let k = 0; k < 4; k++) C[i * 4 + j] += A[i * 4 + k] * B[k * 4 + j];
+  return C;
+}
+function dhT(th, d, a, al) {
+  const ct = Math.cos(th), st = Math.sin(th), ca = Math.cos(al), sa = Math.sin(al);
+  return [ct, -st * ca, st * sa, a * ct,
+          st, ct * ca, -ct * sa, a * st,
+          0, sa, ca, d,
+          0, 0, 0, 1];
+}
+function fkPoints(q) {
+  let T = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+  const pts = [[0, 0, 0]];
+  for (let i = 0; i < 6; i++) {
+    T = matMul(T, dhT(q[i], DH[i].d, DH[i].a, DH[i].al));
+    pts.push([T[3], T[7], T[11]]);
+  }
+  return pts;
+}
+const view = { az: -0.9, el: 0.42, dist: 2.6 };
+let trail = [];
+function project(p, w, h) {
+  const ca = Math.cos(view.az), sa = Math.sin(view.az);
+  const ce = Math.cos(view.el), se = Math.sin(view.el);
+  const x1 = ca * p[0] + sa * p[1];
+  const y1 = -sa * p[0] + ca * p[1];
+  const z1 = p[2];
+  const y2 = ce * y1 + se * z1;   // depth
+  const z2 = -se * y1 + ce * z1;  // up
+  const scale = Math.min(w, h) / view.dist;
+  return [w / 2 + x1 * scale, h * 0.72 - z2 * scale, y2];
+}
+function drawArm(q) {
+  const cv = $("armCanvas");
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  if (cv.width !== w * devicePixelRatio) { cv.width = w * devicePixelRatio; cv.height = h * devicePixelRatio; }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  // ground grid
+  ctx.strokeStyle = "rgba(79,187,226,0.10)"; ctx.lineWidth = 1;
+  for (let gx = -1; gx <= 1; gx += 0.25) {
+    let p1 = project([gx, -1, 0], w, h), p2 = project([gx, 1, 0], w, h);
+    ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
+    p1 = project([-1, gx, 0], w, h); p2 = project([1, gx, 0], w, h);
+    ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
+  }
+  if (!q) return;
+  const pts = fkPoints(q).map((p) => project(p, w, h));
+  // TCP trail
+  trail.push(pts[6]); if (trail.length > 150) trail.shift();
+  ctx.strokeStyle = "rgba(79,187,226,0.35)"; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  trail.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+  ctx.stroke();
+  // links — painter order by depth is overkill for a stick arm; draw base→tool
+  const linkW = [9, 8, 7, 5.5, 5, 4.5];
+  for (let i = 0; i < 6; i++) {
+    ctx.strokeStyle = i < 3 ? "#8FA8BC" : "#B9CBDA";
+    ctx.lineWidth = linkW[i]; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i + 1][0], pts[i + 1][1]); ctx.stroke();
+  }
+  // joints
+  pts.forEach((p, i) => {
+    ctx.fillStyle = i === 6 ? "#4FBBE2" : "#2E3E4E";
+    ctx.strokeStyle = i === 6 ? "#4FBBE2" : "#7F91A3";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(p[0], p[1], i === 6 ? 5 : 6.5, 0, 7); ctx.fill(); ctx.stroke();
+  });
+  // base plate
+  ctx.fillStyle = "#2E3E4E";
+  const b = project([0, 0, 0], w, h);
+  ctx.fillRect(b[0] - 16, b[1], 32, 4);
+}
+(function orbit() {
+  const cv = $("armCanvas");
+  let drag = null;
+  cv.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    view.az += (e.clientX - drag[0]) * 0.008;
+    view.el = Math.min(1.4, Math.max(-0.2, view.el + (e.clientY - drag[1]) * 0.006));
+    drag = [e.clientX, e.clientY];
+    if (S.latest) drawArm(S.latest.joints);
+  });
+  cv.addEventListener("pointerup", () => { drag = null; });
+  cv.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    view.dist = Math.min(5, Math.max(1.2, view.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
+    if (S.latest) drawArm(S.latest.joints);
+  }, { passive: false });
+})();
+
+/* ============================= jog actions ============================= */
+document.querySelectorAll("button.jog[data-axis]").forEach((b) => {
+  b.onclick = () => {
+    const step = parseFloat($("stepSel").value) * +b.dataset.dir;
+    const pose = [0, 0, 0, 0, 0, 0];
+    pose[+b.dataset.axis] = step;
+    runTool("ur_move_tcp", { pose, relative: true },
+      `jog ${"XYZ"[+b.dataset.axis]}${step > 0 ? "+" : "−"}${Math.abs(step * 1000)}mm`);
+  };
+});
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button.jog[data-joint]");
+  if (!b || !S.latest || !S.latest.joints) return;
+  const q = S.latest.joints.slice();
+  const step = parseFloat($("jstepSel").value) * +b.dataset.dir;
+  q[+b.dataset.joint] += step;
+  runTool("ur_move_joints", { joints: q },
+    `jog ${JN[+b.dataset.joint]} ${step > 0 ? "+" : "−"}${Math.abs(deg(step)).toFixed(0)}°`);
+});
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-tool]");
+  if (!b) return;
+  if (b.dataset.confirm && !window.confirm(b.dataset.confirm)) return;
+  runTool(b.dataset.tool, {}, b.textContent.trim());
+});
+$("stopBtn").onclick = () => runTool("ur_stop", {}, "STOP");
+$("speedSlider").oninput = () => { $("speedVal").textContent = $("speedSlider").value + "%"; };
+$("speedSlider").onchange = () =>
+  runTool("ur_set_speed_override", { fraction: +$("speedSlider").value / 100 },
+    "speed " + $("speedSlider").value + "%");
+$("freedriveBtn").onclick = async () => {
+  const res = await runTool("ur_freedrive", { enable: !S.freedrive },
+    S.freedrive ? "freedrive OFF" : "freedrive ON");
+  if (res && res.ok) {
+    S.freedrive = !S.freedrive;
+    $("freedriveBtn").style.borderColor = S.freedrive ? "var(--warn)" : "";
+    $("freedriveBtn").style.color = S.freedrive ? "var(--warn)" : "";
+  }
+};
+$("scriptBtn").onclick = () => {
+  const s = $("scriptInput").value.trim();
+  if (s) runTool("ur_run_script", { script: s }, "script");
+};
+$("scriptInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("scriptBtn").click(); });
+$("popupBtn").onclick = () => {
+  const t = $("popupInput").value.trim();
+  if (t) { runTool("ur_popup", { text: t }, "popup"); $("popupInput").value = ""; }
+};
+
+/* ============================= programs ============================= */
+function markLoaded() {
+  document.querySelectorAll("#progList li").forEach((li) => {
+    li.classList.toggle("loaded", !!S.loadedProgram &&
+      li.dataset.name.replace(/\.urp$/, "") === S.loadedProgram);
+  });
+}
+async function loadPrograms() {
+  const res = await api("/api/programs");
+  const ul = $("progList");
+  ul.innerHTML = "";
+  if (!res.ok || !res.programs) { ul.innerHTML = `<li style="color:var(--crit)">${esc(res.error || "unavailable")}</li>`; return; }
+  res.programs.forEach((p) => {
+    const li = document.createElement("li");
+    li.dataset.name = p.name;
+    li.innerHTML = `<span>${esc(p.name)}</span><span class="sz">${(p.size / 1024).toFixed(1)}k</span>`;
+    li.title = "click to load";
+    li.onclick = () => {
+      if (window.confirm(`Load ${p.name}? (a fresh installation may power the arm off)`)) {
+        runTool("ur_load_program", { name: p.name.replace(/\.urp$/, "") }, "load " + p.name);
+      }
+    };
+    ul.appendChild(li);
+  });
+  markLoaded();
+}
+
+/* ============================= cell model ============================= */
+async function loadCellModel() {
+  const res = await api("/api/snapshot");
+  const el = $("cellModel");
+  if (!res.ok || !res.system) { el.textContent = "cell model unavailable: " + (res.error || "?"); return; }
+  const sys = res.system;
+  const idy = sys.identity || {}, joints = sys.joints || {}, inst = sys.installation || {},
+        store = (sys.storage && sys.storage.root) || {};
+  S.ioNames = inst.io_names || {};
+  // rebuild lamps with real names now that we have them
+  $("doLamps").dataset.built = ""; $("diLamps").dataset.built = "";
+  const repl = (joints.joints || []).filter((j) => j.replacement_suspected).map((j) => JN[j.joint]);
+  el.innerHTML = `<dl style="margin:0">
+    <dt>Robot</dt><dd>${esc(idy.model || "?")} · ${esc(idy.serial || "?")} · ${esc(idy.urcontrol_version || "")}</dd>
+    <dt>Calibration</dt><dd class="${joints.calibration_mismatch ? "warntag" : ""}">
+      ${joints.calibration_mismatch
+        ? "MISMATCH — joint " + (joints.mismatched_joint_ids || []).join(",") +
+          (repl.length ? " (" + repl.join(", ") + " replaced)" : "") + " · TCP accuracy degraded"
+        : "matches installed joints"}</dd>
+    <dt>Active TCP</dt><dd class="${inst.flange_tcp === false ? "warntag" : ""}">
+      ${esc(inst.active_tcp || "?")}${inst.flange_tcp === false ? " · NON-FLANGE — author motion as script nodes" : inst.flange_tcp ? " · at flange" : ""}</dd>
+    <dt>Payload</dt><dd>${inst.payload ? esc(inst.payload.mass) + " kg · " + esc(inst.payload.name || "") : "?"}</dd>
+    <dt>Safety limits (normal)</dt><dd>${inst.safety_limits && inst.safety_limits.normal
+      ? "TCP ≤ " + inst.safety_limits.normal.max_tcp_speed + " m/s · force ≤ " + inst.safety_limits.normal.max_force + " N" : "?"}</dd>
+    <dt>Controller disk</dt><dd class="${store.used_percent >= 85 ? "warntag" : ""}">${store.used_percent !== undefined ? store.used_percent + "% used · " + store.available_mb + " MB free" : "?"}</dd>
+    <dt>URCaps</dt><dd>${(sys.urcaps && sys.urcaps.urcaps || []).map(esc).join("<br>") || "none"}</dd>
+  </dl>`;
+}
+
+/* ============================= boot ============================= */
+async function refreshState() {
+  try { S.dashState = await api("/api/state"); updateHeader(); } catch (e) { /* server gone */ }
+}
+(async function boot() {
+  const cfg = await api("/api/config");
+  S.isLocalSim = cfg.host === "localhost" || cfg.host === "127.0.0.1";
+  $("host").textContent = cfg.host + (cfg.dry_run ? "  [DRY RUN]" : "");
+  document.title = "urctl cockpit — " + cfg.host;
+  logLine("connected to " + cfg.host + (cfg.dry_run ? " (dry run — nothing is sent)" : ""));
+  connectStream();
+  refreshState();
+  setInterval(refreshState, 5000);
+  loadPrograms();
+  loadCellModel();
+  drawArm(null);
+  new ResizeObserver(() => drawArm(S.latest && S.latest.joints)).observe($("armCanvas"));
+})();
+</script>
+</body>
+</html>

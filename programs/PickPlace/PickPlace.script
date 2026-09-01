@@ -1,0 +1,66 @@
+# PickPlace — a basic pick-and-place cycle: grasp a part at one station,
+# carry it over, release it at another, return home. Emits textmsg
+# checkpoints (marker "pickplace/") so the cycle can be watched on the
+# Primary broadcast, the same way scripts/e2e_drive.py scrapes MotionDemo.
+#
+# The gripper is modeled as standard digital output 0 (True = closed). URSim
+# has no real gripper, so it just toggles the bit; on hardware, wire the
+# output to your gripper (or swap in its URCap call).
+#
+# The pick and place stations are derived at runtime from a reachable
+# reference configuration's TCP pose, with offsets in the base frame, so the
+# whole cycle stays inside the UR10 envelope regardless of cell layout. On a
+# real robot, replace `pick` / `place` with poses you taught in your workcell.
+
+def PickPlace():
+  textmsg("pickplace/start")
+
+  # ---- motion + process tunables ----
+  v_j  = 1.0      # joint speed       (rad/s)
+  a_j  = 1.2      # joint accel       (rad/s^2)
+  v_l  = 0.25     # linear speed      (m/s)
+  a_l  = 0.5      # linear accel      (m/s^2)
+  lift = 0.10     # vertical clearance above a station (m)
+
+  # Candle-ish home: straight up, wrists folded. Far from singularity.
+  home = [0.0, -1.5708, 0.0, -1.5708, 0.0, 0.0]
+
+  movej(home, a=a_j, v=v_j)
+  set_standard_digital_out(0, False)   # gripper open
+  textmsg("pickplace/gripper=open")
+
+  # Reachable reference config in the front workspace; read its TCP pose and
+  # build the stations relative to it (offsets are in the base frame).
+  ref = [0.0, -1.2217, 1.5708, -1.9199, -1.5708, 0.0]
+  movej(ref, a=a_j, v=v_j)
+  p_ref = get_actual_tcp_pose()
+
+  pick  = pose_add(p_ref, p[0.0, -0.15, -0.20, 0.0, 0.0, 0.0])  # left, lower
+  place = pose_add(p_ref, p[0.0,  0.15, -0.20, 0.0, 0.0, 0.0])  # right, lower
+  up    = p[0.0, 0.0, lift, 0.0, 0.0, 0.0]                      # base-frame lift
+
+  # ---- PICK ----
+  movej(pose_add(pick, up), a=a_j, v=v_j)   # approach above the part
+  textmsg("pickplace/at_pick_approach")
+  movel(pick, a=a_l, v=v_l)                 # descend straight down
+  set_standard_digital_out(0, True)         # close gripper / grasp
+  textmsg("pickplace/grasped")
+  sleep(0.5)                                # let the grip settle
+  movel(pose_add(pick, up), a=a_l, v=v_l)   # retract straight up
+  textmsg("pickplace/picked")
+
+  # ---- PLACE ----
+  movej(pose_add(place, up), a=a_j, v=v_j)  # carry to above the bin
+  textmsg("pickplace/at_place_approach")
+  movel(place, a=a_l, v=v_l)                # descend
+  set_standard_digital_out(0, False)        # open gripper / release
+  textmsg("pickplace/released")
+  sleep(0.5)
+  movel(pose_add(place, up), a=a_l, v=v_l)  # retract
+  textmsg("pickplace/placed")
+
+  movej(home, a=a_j, v=v_j)                 # back to home
+  textmsg("pickplace/done")
+end
+
+PickPlace()

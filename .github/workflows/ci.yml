@@ -1,0 +1,130 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A superseded push to the same PR cancels the older run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: install deps
+        run: uv sync --extra perception --extra mcp
+      - name: ruff check
+        run: uv run ruff check urctl perception scripts tests
+      - name: ruff format
+        run: uv run ruff format --check urctl perception scripts tests
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
+
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest supported (pyproject requires-python), a middle LTS-ish
+        # version, and the current release (what dev machines run).
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: install deps
+        # Core is stdlib-only; the extras exercise the optional integrations.
+        # opencv/numpy wheels can lag new CPython releases, so extras are
+        # best-effort off the oldest/newest edges: fall back to core deps.
+        run: uv sync --extra perception --extra mcp || uv sync
+      - name: unit tests
+        run: uv run pytest -m "not integration" -q
+
+  package:
+    # The wheel must carry the GUI's static assets (urctl/webui/) and the
+    # console scripts — this catches packaging regressions before a release.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: build sdist + wheel
+        run: uv build
+      - name: verify wheel contents
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          required = [
+              "urctl/webui/index.html",   # the GUI's static assets
+              "urctl/webapp.py",
+              "urctl/sysinfo.py",
+              "urctl/_urp_convert.py",    # build-time copy of scripts/urp_convert.py
+          ]
+          missing = [r for r in required if r not in names]
+          if missing:
+              sys.exit(f"wheel {wheel} is missing {missing}")
+          print(f"{wheel}: all required files present")
+          EOF
+      - name: smoke-install the wheel
+        run: |
+          uv venv /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/urctl --help > /dev/null
+          /tmp/smoke/bin/urctl-gui --help > /dev/null
+          /tmp/smoke/bin/urctl tools | python3 -c "import json,sys; assert len(json.load(sys.stdin)) >= 20"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  integration:
+    runs-on: ubuntu-latest
+    # The URSim container is large (>1 GB) and slow to start — only run on
+    # main and on PRs that carry the run-integration label.
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: install deps
+        run: uv sync --extra perception --extra mcp
+      - name: start URSim
+        run: |
+          docker compose up -d
+          # Wait for Dashboard + URControl to come up.
+          for i in $(seq 1 60); do
+            if (echo robotmode; echo quit) | nc -w 2 localhost 29999 2>/dev/null | grep -q 'Robotmode:'; then
+              echo "URSim is up"; break
+            fi
+            sleep 2
+          done
+      - name: integration tests
+        # Tests use sudo docker — GitHub runners don't need it, override.
+        env:
+          DOCKER: docker
+        run: uv run pytest -m integration
+      - name: dump polyscope log on failure
+        if: failure()
+        run: docker exec ur-docker-ursim-1 tail -100 /ursim/polyscope.log || true
+      - name: tear down
+        if: always()
+        run: docker compose down

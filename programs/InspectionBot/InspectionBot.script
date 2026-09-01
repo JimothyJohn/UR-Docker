@@ -1,0 +1,147 @@
+# InspectionBot — guided multi-station inspection routine for a UR e-Series cobot.
+# Inspired by nickarmenta/HelpfulBot's teach-by-prompt pattern: the operator
+# walks through PolyScope popups + freedrive moves instead of writing motion
+# code. The wizard captures:
+#
+#   1. Wiring: which digital input signals "part present", which outputs
+#      should be driven on PASS / FAIL.
+#   2. Timing: how long to dwell at each waypoint so an external vision
+#      system can capture / measure.
+#   3. A SAFE HOME pose (freedrive).
+#   4. Up to 8 inspection waypoints (freedrive, "add another?" loop).
+#
+# On cycle, when the part-present input goes high:
+#   - move home -> visit each waypoint with the configured dwell
+#   - after each waypoint, ask the operator pass/fail via popup
+#   - drive PASS or FAIL output high for 0.5 s
+#   - return home and wait for the part to be removed before re-arming.
+
+# ---- global state (populated by Wizard, consumed by RunProgram) -------------
+homePose       = p[0, 0, 0, 0, 0, 0]
+waypoints      = [p[0,0,0,0,0,0], p[0,0,0,0,0,0], p[0,0,0,0,0,0], p[0,0,0,0,0,0],
+                  p[0,0,0,0,0,0], p[0,0,0,0,0,0], p[0,0,0,0,0,0], p[0,0,0,0,0,0]]
+waypoint_count = 0
+partInput      = 0
+passOutput     = 0
+failOutput     = 0
+dwell          = 1.0
+travelAcc      = 1.0
+travelVel      = 0.5
+
+def Setup():
+  # Use payload/TCP from the Installation tab so the user doesn't reconfigure
+  # things they already set up once.
+  set_payload(get_target_payload(), get_target_payload_cog())
+end
+
+def Prompts():
+  partInput  = request_integer_from_primary_client("Which DIGITAL INPUT tells me a part is present?")
+  passOutput = request_integer_from_primary_client("Which DIGITAL OUTPUT should pulse HIGH on PASS?")
+  failOutput = request_integer_from_primary_client("Which DIGITAL OUTPUT should pulse HIGH on FAIL?")
+  dwell      = request_float_from_primary_client("Seconds to hold at each waypoint (vision capture window)?")
+end
+
+def TeachHome():
+  freedrive_mode()
+  popup("Drag me to a SAFE HOME pose — where I'll wait between parts. Press Continue when ready.",
+        "InspectionBot", False, False, blocking=True)
+  end_freedrive_mode()
+  homePose = get_actual_tcp_pose()
+end
+
+def TeachWaypoints():
+  local another = True
+  waypoint_count = 0
+  while (another == True and waypoint_count < 8):
+    freedrive_mode()
+    popup(str_cat("Move me to inspection point #", to_str(waypoint_count + 1)),
+          "InspectionBot", False, False, blocking=True)
+    end_freedrive_mode()
+    waypoints[waypoint_count] = get_actual_tcp_pose()
+    waypoint_count = waypoint_count + 1
+    if (waypoint_count >= 8):
+      popup("Hit the 8-waypoint limit — moving on.", "InspectionBot", False, False, blocking=True)
+      another = False
+    else:
+      another = request_boolean_from_primary_client(
+        str_cat(str_cat(to_str(waypoint_count), " waypoint(s) taught. "), "Add another?"))
+    end
+  end
+end
+
+def DryRun():
+  # One supervised lap so the operator can sanity-check before going live.
+  popup("I'll run the tour once now so you can verify. Watch me.",
+        "InspectionBot", False, False, blocking=True)
+  movej(homePose, a=travelAcc, v=travelVel)
+  local i = 0
+  while (i < waypoint_count):
+    movej(waypoints[i], a=travelAcc, v=travelVel)
+    sleep(dwell)
+    i = i + 1
+  end
+  movej(homePose, a=travelAcc, v=travelVel)
+end
+
+def Wizard():
+  Setup()
+  Prompts()
+  TeachHome()
+  TeachWaypoints()
+  DryRun()
+  popup("All set — SAVE this program so I remember your setup!",
+        "InspectionBot", False, False, blocking=True)
+end
+
+def Pulse(output):
+  set_digital_out(output, True)
+  sleep(0.5)
+  set_digital_out(output, False)
+end
+
+def InspectOnce():
+  local all_pass      = True
+  local i             = 0
+  local station_pass  = False
+  movej(homePose, a=travelAcc, v=travelVel)
+  while (i < waypoint_count):
+    movej(waypoints[i], a=travelAcc, v=travelVel)
+    sleep(dwell)
+    station_pass = request_boolean_from_primary_client(
+      str_cat(str_cat("Station #", to_str(i + 1)), ": did it PASS?"))
+    if (station_pass == False):
+      all_pass = False
+    end
+    i = i + 1
+  end
+  movej(homePose, a=travelAcc, v=travelVel)
+  if (all_pass == True):
+    textmsg("InspectionBot: result=PASS")
+    Pulse(passOutput)
+  else:
+    textmsg("InspectionBot: result=FAIL")
+    Pulse(failOutput)
+  end
+end
+
+def RunProgram():
+  local taught = request_boolean_from_primary_client("Have you already taught me the inspection points?")
+  if (taught == False or waypoint_count == 0):
+    Wizard()
+  end
+  popup("Running. I'll inspect every part that triggers the part-present input.",
+        "InspectionBot", False, False, blocking=True)
+  while (True):
+    if (get_digital_in(partInput) == True):
+      InspectOnce()
+      # Wait for the operator to clear the fixture before re-arming, so we
+      # don't double-trigger on a part that's still sitting there.
+      while (get_digital_in(partInput) == True):
+        sync()
+      end
+    end
+    sync()
+  end
+end
+
+RunProgram()

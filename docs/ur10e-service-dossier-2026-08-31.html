@@ -1,0 +1,845 @@
+<title>UR10e Service Dossier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* ============ tokens — dark-first (this is a control-room document) ============ */
+  :root {
+    --ground: #0E141B;
+    --surface: #151D27;
+    --raised: #1B2531;
+    --inset: #0A0F15;
+    --line: #2A3644;
+    --line-soft: #202B38;
+    --text: #D9E3ED;
+    --text-strong: #F2F7FB;
+    --muted: #8496A8;
+    --faint: #5C6E80;
+    --accent: #4FBBE2;
+    --accent-ink: #0B1218;
+    --accent-soft: rgba(79, 187, 226, 0.12);
+    --crit: #E06552;
+    --crit-soft: rgba(224, 101, 82, 0.12);
+    --warn: #DFA43E;
+    --warn-soft: rgba(223, 164, 62, 0.12);
+    --ok: #57B87C;
+    --ok-soft: rgba(87, 184, 124, 0.12);
+    --info: #7E93E8;
+    --info-soft: rgba(126, 147, 232, 0.12);
+    --plate-grid: rgba(217, 227, 237, 0.045);
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --sel-bg: rgba(79, 187, 226, 0.28);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --ground: #EEF1F4;
+      --surface: #FFFFFF;
+      --raised: #F6F8FA;
+      --inset: #101820;
+      --line: #CBD5DE;
+      --line-soft: #DEE5EB;
+      --text: #22303D;
+      --text-strong: #101C27;
+      --muted: #5B6D7E;
+      --faint: #8697A6;
+      --accent: #0F7FA9;
+      --accent-ink: #FFFFFF;
+      --accent-soft: rgba(15, 127, 169, 0.10);
+      --crit: #BE4432;
+      --crit-soft: rgba(190, 68, 50, 0.10);
+      --warn: #9A6D14;
+      --warn-soft: rgba(178, 128, 26, 0.13);
+      --ok: #2C7D4F;
+      --ok-soft: rgba(44, 125, 79, 0.11);
+      --info: #4A5FBF;
+      --info-soft: rgba(74, 95, 191, 0.10);
+      --plate-grid: rgba(34, 48, 61, 0.05);
+      --shadow: 0 8px 24px rgba(24, 40, 55, 0.10);
+      --sel-bg: rgba(15, 127, 169, 0.22);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #EEF1F4;
+    --surface: #FFFFFF;
+    --raised: #F6F8FA;
+    --inset: #101820;
+    --line: #CBD5DE;
+    --line-soft: #DEE5EB;
+    --text: #22303D;
+    --text-strong: #101C27;
+    --muted: #5B6D7E;
+    --faint: #8697A6;
+    --accent: #0F7FA9;
+    --accent-ink: #FFFFFF;
+    --accent-soft: rgba(15, 127, 169, 0.10);
+    --crit: #BE4432;
+    --crit-soft: rgba(190, 68, 50, 0.10);
+    --warn: #9A6D14;
+    --warn-soft: rgba(178, 128, 26, 0.13);
+    --ok: #2C7D4F;
+    --ok-soft: rgba(44, 125, 79, 0.11);
+    --info: #4A5FBF;
+    --info-soft: rgba(74, 95, 191, 0.10);
+    --plate-grid: rgba(34, 48, 61, 0.05);
+    --shadow: 0 8px 24px rgba(24, 40, 55, 0.10);
+    --sel-bg: rgba(15, 127, 169, 0.22);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  body {
+    margin: 0;
+    background:
+      linear-gradient(var(--plate-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--plate-grid) 1px, transparent 1px),
+      var(--ground);
+    background-size: 28px 28px, 28px 28px, auto;
+    color: var(--text);
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--sel-bg); }
+
+  h1, h2, h3, .disp {
+    font-family: "Chakra Petch", "IBM Plex Sans", sans-serif;
+    color: var(--text-strong);
+    text-wrap: balance;
+    letter-spacing: 0.01em;
+  }
+  code, pre, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
+    font-variant-ligatures: none;
+  }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px 96px; }
+
+  /* ============ data plate ============ */
+  header.plate {
+    margin: 40px 0 28px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    position: relative;
+  }
+  header.plate::before, header.plate::after,
+  .plate-inner::before, .plate-inner::after {
+    content: "";
+    position: absolute;
+    width: 9px; height: 9px;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+    background: var(--ground);
+  }
+  header.plate::before { top: 9px; left: 9px; }
+  header.plate::after  { top: 9px; right: 9px; }
+  .plate-inner::before { bottom: 9px; left: 9px; }
+  .plate-inner::after  { bottom: 9px; right: 9px; }
+  .plate-inner { padding: 34px 38px 30px; position: static; }
+  .eyebrow {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: clamp(30px, 5vw, 44px);
+    font-weight: 700;
+    line-height: 1.08;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .subtitle { color: var(--muted); margin: 0 0 26px; max-width: 60ch; }
+  .specs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+  .spec {
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 14px 12px;
+    background: var(--raised);
+  }
+  .spec dt {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 3px;
+    font-family: "Chakra Petch", sans-serif;
+  }
+  .spec dd { margin: 0; font-size: 14px; font-weight: 500; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+  .spec dd.mono { font-size: 13.5px; }
+  .live { color: var(--ok); }
+  .live::before { content: "●"; margin-right: 6px; font-size: 10px; vertical-align: 1px; }
+
+  /* ============ verdict strip ============ */
+  .verdict {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px;
+    margin: 0 0 40px;
+  }
+  .verdict-card {
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--vc, var(--line));
+    background: var(--surface);
+    padding: 14px 16px;
+  }
+  .verdict-card .n {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--vc, var(--text-strong));
+    font-variant-numeric: tabular-nums;
+  }
+  .verdict-card .l {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 6px;
+    font-family: "Chakra Petch", sans-serif;
+  }
+  .verdict-card .d { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+  /* ============ section frame ============ */
+  section { margin: 56px 0 0; }
+  .sect-head { display: flex; align-items: baseline; gap: 14px; border-bottom: 2px solid var(--line); padding-bottom: 10px; margin-bottom: 22px; }
+  .sect-head h2 { margin: 0; font-size: 21px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .sect-head .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--faint);
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  /* ============ nav rail ============ */
+  nav.rail {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--ground);
+    border-bottom: 1px solid var(--line);
+    margin: 0 -24px;
+    padding: 0 24px;
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+  }
+  nav.rail a {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-decoration: none;
+    color: var(--muted);
+    padding: 12px 14px 10px;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
+  nav.rail a:hover { color: var(--text-strong); }
+  nav.rail a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ============ findings ============ */
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .chip {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    padding: 6px 14px;
+    cursor: pointer;
+    border-radius: 999px;
+  }
+  .chip:hover { color: var(--text-strong); border-color: var(--muted); }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+  details.finding {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--sev, var(--line));
+    background: var(--surface);
+    margin-bottom: 14px;
+  }
+  details.finding[hidden] { display: none; }
+  details.finding > summary {
+    list-style: none;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 14px;
+    padding: 15px 18px;
+  }
+  details.finding > summary::-webkit-details-marker { display: none; }
+  details.finding > summary:hover { background: var(--raised); }
+  .fid {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    color: var(--faint);
+  }
+  .ftitle { font-family: "Chakra Petch", sans-serif; font-weight: 600; font-size: 16px; color: var(--text-strong); }
+  .sev-pill {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--sev);
+    background: var(--sev-soft);
+    border: 1px solid var(--sev);
+    padding: 3px 10px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .disclose {
+    color: var(--faint);
+    font-size: 18px;
+    line-height: 1;
+    transition: transform 0.18s ease;
+  }
+  details[open] .disclose { transform: rotate(90deg); }
+  .fbody { padding: 4px 20px 22px; border-top: 1px solid var(--line-soft); }
+  .fbody p { max-width: 72ch; }
+  .fbody h4 {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--muted);
+    margin: 24px 0 8px;
+  }
+  .fbody h4:first-child { margin-top: 18px; }
+
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; font-size: 14px; margin: 8px 0; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-variant-numeric: tabular-nums; }
+
+  pre.log {
+    background: var(--inset);
+    color: #C7D4E0;
+    border: 1px solid var(--line);
+    padding: 13px 16px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    overflow-x: auto;
+    margin: 8px 0;
+  }
+  pre.log .hl { color: #F0A090; }
+  pre.log .dim { color: #66788A; }
+  code.inline {
+    background: var(--raised);
+    border: 1px solid var(--line-soft);
+    padding: 1px 6px;
+    font-size: 0.85em;
+    border-radius: 3px;
+    color: var(--text-strong);
+  }
+
+  .manual-ref {
+    border: 1px solid var(--line);
+    background: var(--accent-soft);
+    border-left: 4px solid var(--accent);
+    padding: 14px 18px;
+    margin: 10px 0;
+  }
+  .manual-ref .mr-head {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .manual-ref blockquote {
+    margin: 8px 0;
+    padding-left: 14px;
+    border-left: 2px solid var(--line);
+    color: var(--text);
+    font-style: italic;
+    max-width: 70ch;
+  }
+  .manual-ref .cite { font-size: 12.5px; color: var(--muted); font-family: "IBM Plex Mono", monospace; }
+
+  .callout-warn {
+    border: 1px solid var(--warn);
+    background: var(--warn-soft);
+    padding: 12px 16px;
+    margin: 10px 0;
+    font-size: 14px;
+    max-width: 78ch;
+  }
+  .callout-warn strong { color: var(--warn); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); }
+  th {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 11.5px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    text-align: left;
+    color: var(--muted);
+    background: var(--raised);
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  td { padding: 8px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; font-family: "IBM Plex Mono", monospace; font-size: 13px; }
+  .swap { color: var(--warn); font-weight: 600; }
+
+  /* ============ code census bars ============ */
+  .census-row { display: grid; grid-template-columns: 110px 1fr 90px; align-items: center; gap: 12px; padding: 5px 0; }
+  .census-row .cc { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--text-strong); }
+  .census-row .cc.known { color: var(--crit); }
+  .bar-track { height: 14px; background: var(--raised); border: 1px solid var(--line-soft); position: relative; }
+  .bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: 0.75; }
+  .bar-fill.known { background: var(--crit); opacity: 0.9; }
+  .census-row .ct { font-variant-numeric: tabular-nums; text-align: right; font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); }
+  .census-note { font-size: 13px; color: var(--muted); margin-top: 12px; max-width: 76ch; }
+
+  /* ============ checklist ============ */
+  .task {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    padding: 14px 18px;
+    margin-bottom: 10px;
+  }
+  .task input[type="checkbox"] {
+    appearance: none;
+    width: 22px; height: 22px;
+    border: 2px solid var(--muted);
+    background: var(--raised);
+    cursor: pointer;
+    margin-top: 2px;
+    display: grid;
+    place-content: center;
+  }
+  .task input[type="checkbox"]::before {
+    content: "";
+    width: 12px; height: 12px;
+    transform: scale(0);
+    background: var(--ok);
+    transition: transform 0.12s ease;
+    clip-path: polygon(14% 44%, 0 62%, 42% 100%, 100% 16%, 84% 2%, 40% 70%);
+  }
+  .task input[type="checkbox"]:checked { border-color: var(--ok); }
+  .task input[type="checkbox"]:checked::before { transform: scale(1.35); }
+  .task.done .t-title { text-decoration: line-through; color: var(--muted); }
+  .t-title { font-weight: 600; color: var(--text-strong); }
+  .t-sub { font-size: 13.5px; color: var(--muted); margin-top: 2px; max-width: 80ch; }
+  .t-meta {
+    display: inline-block;
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-right: 8px;
+    vertical-align: 1px;
+  }
+  .t-meta.now { background: var(--crit-soft); color: var(--crit); border: 1px solid var(--crit); }
+  .t-meta.soon { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn); }
+  .t-meta.plan { background: var(--info-soft); color: var(--info); border: 1px solid var(--info); }
+  .check-note { font-size: 12.5px; color: var(--faint); margin-top: 14px; }
+
+  footer {
+    margin-top: 72px;
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  footer .mono { font-size: 12px; }
+
+  @media (max-width: 640px) {
+    .plate-inner { padding: 26px 20px 24px; }
+    details.finding > summary { grid-template-columns: 1fr auto; }
+    .fid, .disclose { display: none; }
+    .census-row { grid-template-columns: 90px 1fr 70px; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="plate">
+  <div class="plate-inner">
+    <p class="eyebrow">Robot Health &amp; Service Report — 31 Aug 2026</p>
+    <h1>UR10e Service Dossier</h1>
+    <p class="subtitle">Log survey of the cell robot at <span class="mono">192.168.1.50</span>, cross-referenced against the Universal&nbsp;Robots <a href="https://s3-eu-west-1.amazonaws.com/ur-support-site/41382/e-Series_Service_Manual_en.pdf">e-Series Service Handbook (SW 5.25)</a>.</p>
+    <dl class="specs">
+      <div class="spec"><dt>Model</dt><dd>UR10 e-Series</dd></div>
+      <div class="spec"><dt>Serial</dt><dd class="mono">20225201277</dd></div>
+      <div class="spec"><dt>Controller</dt><dd class="mono">URControl 82.0.34 G5</dd></div>
+      <div class="spec"><dt>Robot / Safety</dt><dd class="live">RUNNING · NORMAL</dd></div>
+      <div class="spec"><dt>Control Mode</dt><dd>LOCAL</dd></div>
+      <div class="spec"><dt>Disk (rootfs)</dt><dd>87% used · 222 MB free</dd></div>
+      <div class="spec"><dt>Session Boot</dt><dd class="mono">2026-08-31 21:35</dd></div>
+      <div class="spec"><dt>Log History</dt><dd>Nov 2025 → present</dd></div>
+    </dl>
+  </div>
+</header>
+
+<nav class="rail" id="rail">
+  <a href="#verdict">Verdict</a>
+  <a href="#findings">Findings</a>
+  <a href="#census">Error Codes</a>
+  <a href="#maintenance">Inspection Plan</a>
+  <a href="#actions">Action List</a>
+  <a href="#sources">Sources</a>
+</nav>
+
+<!-- ==================== VERDICT ==================== -->
+<section id="verdict">
+  <div class="sect-head"><h2>Verdict</h2><span class="tag">current session: clean — no faults since boot</span></div>
+  <div class="verdict">
+    <div class="verdict-card" style="--vc: var(--crit)">
+      <div class="n">1</div>
+      <div class="l">Needs Service</div>
+      <div class="d">Wrist 3 replaced; kinematic calibration no longer valid</div>
+    </div>
+    <div class="verdict-card" style="--vc: var(--warn)">
+      <div class="n">1</div>
+      <div class="l">Fix Soon</div>
+      <div class="d">Root filesystem at 87% — ~65 MB of logs reclaimable</div>
+    </div>
+    <div class="verdict-card" style="--vc: var(--info)">
+      <div class="n">1</div>
+      <div class="l">Monitor</div>
+      <div class="d">Aug 11 incident cluster + recurring singularity stops</div>
+    </div>
+    <div class="verdict-card" style="--vc: var(--ok)">
+      <div class="n">1</div>
+      <div class="l">Benign</div>
+      <div class="d">Boot noise, URCap warnings, display-driver chatter</div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== FINDINGS ==================== -->
+<section id="findings">
+  <div class="sect-head"><h2>Findings</h2><span class="tag">4 items · click to expand</span></div>
+
+  <div class="filters" role="group" aria-label="Filter findings by severity">
+    <button class="chip" data-filter="all" aria-pressed="true">All</button>
+    <button class="chip" data-filter="crit" aria-pressed="false">Needs Service</button>
+    <button class="chip" data-filter="warn" aria-pressed="false">Fix Soon</button>
+    <button class="chip" data-filter="info" aria-pressed="false">Monitor</button>
+    <button class="chip" data-filter="ok" aria-pressed="false">Benign</button>
+  </div>
+
+  <!-- F-01 -->
+  <details class="finding" data-sev="crit" style="--sev: var(--crit); --sev-soft: var(--crit-soft)" open>
+    <summary>
+      <span class="fid">F-01</span>
+      <span class="ftitle">Wrist 3 joint replaced — kinematic calibration is stale</span>
+      <span class="sev-pill">Needs Service</span>
+      <span class="disclose">›</span>
+    </summary>
+    <div class="fbody">
+      <h4>Evidence</h4>
+      <pre class="log">2026-08-31_21:36:48  <span class="hl">ERROR - The checksum of the joint, with id 5, and the
+                     kinematic calibration checksum do not match</span>   <span class="dim">(URControl, every boot)</span></pre>
+      <div class="tablewrap"><table>
+        <tr><th>Joint</th><th>Serial</th><th>Selftest FW</th><th>Era</th></tr>
+        <tr><td>0 — Base</td><td class="num">221110150442</td><td class="num">33.0.7</td><td>Original build</td></tr>
+        <tr><td>1 — Shoulder</td><td class="num">221110148242</td><td class="num">33.0.7</td><td>Original build</td></tr>
+        <tr><td>2 — Elbow</td><td class="num">221120049734</td><td class="num">33.0.7</td><td>Original build</td></tr>
+        <tr><td>3 — Wrist 1</td><td class="num">221110073522</td><td class="num">33.0.7</td><td>Original build</td></tr>
+        <tr><td>4 — Wrist 2</td><td class="num">221100242623</td><td class="num">33.0.7</td><td>Original build</td></tr>
+        <tr><td class="swap">5 — Wrist 3</td><td class="num swap">222070489722</td><td class="num swap">37.1.17</td><td class="swap">Replacement part</td></tr>
+      </table></div>
+      <p>Joint 5 carries a different serial series and newer selftest firmware than the other five joints, and the arm's factory kinematic calibration (<code class="inline">calibration.conf</code>, dated Apr 2022) predates the swap. The controller flags the mismatch on every boot.</p>
+
+      <h4>What the service manual says</h4>
+      <div class="manual-ref">
+        <div class="mr-head">§ 5.2.12 — Dual Robot Calibration</div>
+        <blockquote>"If a joint is replaced on a calibrated robot the calibration is no longer valid. Performing a Dual Robot Calibration after replacement of a joint allows the robot to continue in the production line without modifying waypoints in the robot program."</blockquote>
+        <div class="cite">Service Handbook p. 54 · requires 2 same-size robots + Dual Robot Calibration Tooling (part no. 185500)</div>
+      </div>
+      <div class="manual-ref">
+        <div class="mr-head">§ 5.2.11 — Zeroing of Joints</div>
+        <blockquote>"When a joint has been replaced and verified, it may be necessary to zero the joint so that it is aligned with the rest of the robot arm… Automatically — Dual robot calibration — this is the recommended method… Manually — Access Expert mode and use a spirit level, to level the joint."</blockquote>
+        <div class="cite">Service Handbook p. 50 · Wrist 3 zero position: tool connector pointing upward, two bolts in tool holes + spirit level</div>
+      </div>
+      <div class="manual-ref">
+        <div class="mr-head">§ 5.2.13 — Program Correction by Key Waypoints</div>
+        <blockquote>"…helps adjusting programs waypoints when a program is moved from an uncalibrated robot to another. The technique can also be used to make programs work after replacements of joints."</blockquote>
+        <div class="cite">Service Handbook p. 54 · does not support Use-Joint-Angles move nodes — those need manual correction</div>
+      </div>
+
+      <h4>Impact &amp; recommendation</h4>
+      <p>Cartesian (TCP) accuracy is degraded until the arm is recalibrated — joint-space moves are unaffected. This independently validates this repo's practice of shipping <strong>zero-kinematics URPs</strong> and emitting motion as raw URScript <code class="inline">movej()</code> script nodes rather than native MoveJ/Waypoint nodes. If this cell ever needs calibrated Cartesian precision (vision-guided picks, tight-tolerance placement), schedule a Dual Robot Calibration through your UR distributor; otherwise document the limitation and continue with joint-space teach poses.</p>
+    </div>
+  </details>
+
+  <!-- F-02 -->
+  <details class="finding" data-sev="warn" style="--sev: var(--warn); --sev-soft: var(--warn-soft)">
+    <summary>
+      <span class="fid">F-02</span>
+      <span class="ftitle">Root filesystem at 87% — controller has 222 MB of headroom</span>
+      <span class="sev-pill">Fix Soon</span>
+      <span class="disclose">›</span>
+    </summary>
+    <div class="fbody">
+      <h4>Evidence</h4>
+      <pre class="log">/dev/mmcblk1p3   1.7G  1.4G  <span class="hl">222M  87%</span>  /
+
+Reclaimable:
+  /root/flightreports/        31 MB   <span class="dim">5 auto-recordings (Aug 11) + config backup (Aug 4)</span>
+  /root/log_history.bak       31 MB   <span class="dim">rotated log history, Nov 2025</span>
+  /root/polyscope-1.log      2.1 MB   <span class="dim">rotated GUI log, Jun 2026</span></pre>
+      <p>Low headroom on the control-box eMMC eventually breaks program saves, support-file export, and — critically — PolyScope software updates. Archive first, then delete: the Aug 11 flight recordings are the diagnostic record of finding F-03.</p>
+
+      <h4>What the service manual says</h4>
+      <div class="manual-ref">
+        <div class="mr-head">§ 6.3 — Using Support File</div>
+        <blockquote>"Go to Log tab, insert a USB stick, and click on Support File… This backup requires around 1 Gb memory, please use a USB stick of 2 Gb or more capacity."</blockquote>
+        <div class="cite">Service Handbook p. 89 · the Support File bundles logs + flight reports for UR Log Viewer</div>
+      </div>
+      <div class="manual-ref">
+        <div class="mr-head">§ 6.4 — Using Magic Files</div>
+        <blockquote>"URmagic log file — copies the entire log history file to USB stick. URmagic backup programs — copies all programs and installation files to USB stick."</blockquote>
+        <div class="cite">Service Handbook p. 90 · download from universal-robots.com/support; large history files take up to two minutes</div>
+      </div>
+
+      <h4>Impact &amp; recommendation</h4>
+      <p>Pull a Support File (or <code class="inline">scp</code> the flight reports off over SSH — faster from this workstation), then delete <code class="inline">flightreports/*.zip</code> and <code class="inline">log_history.bak</code>. That recovers ~65 MB and drops usage to roughly 83%. Longer term, make the Support File part of the biannual inspection so the archive exists before you need the space.</p>
+    </div>
+  </details>
+
+  <!-- F-03 -->
+  <details class="finding" data-sev="info" style="--sev: var(--info); --sev-soft: var(--info-soft)">
+    <summary>
+      <span class="fid">F-03</span>
+      <span class="ftitle">Aug 11 incident cluster + 6 recorded singularity protective stops</span>
+      <span class="sev-pill">Monitor</span>
+      <span class="disclose">›</span>
+    </summary>
+    <div class="fbody">
+      <h4>Evidence — timeline of 2026-08-11</h4>
+      <pre class="log">14:52  <span class="hl">Unhandled GUI exception</span> (URDialogCreator — program-tree edit outside
+       an UndoableChange scope)                       <span class="dim">polyscope.log</span>
+17:36  "Incident reporting skipped <span class="hl">(too frequent incidents)</span>"
+17:36  Flight recording auto-saved (8.3 MB)
+19:45  Flight recording auto-saved (9.0 MB)
+19:46  Flight recording auto-saved (8.9 MB)
+19:52  <span class="hl">Could not find inverse kinematics</span> ×9 — targets near
+       P(-0.045, -1.513, 0.722)                        <span class="dim">polyscope.log</span></pre>
+      <p>Full log history (Nov 2025 → now) also shows <strong>6 × C154A0</strong> — the protective stop thrown when a <code class="inline">movel</code> passes near a singularity. Both symptoms match failure modes already documented in this repo: MoveJ-node IK resolving through the active (non-flange) TCP, and Cartesian moves launched from near-singular poses.</p>
+
+      <h4>What the service manual says</h4>
+      <div class="manual-ref">
+        <div class="mr-head">§ 7.6.1 — Protective Stop: Preventive Measures</div>
+        <blockquote>"Protective stops are indications of issues, including program or production issues — not only safety issues. An application which results in daily protective stops is not designed correctly and needs to be modified… Protective stops must never be acknowledged and reset automatically."</blockquote>
+        <div class="cite">Service Handbook p. 113–114 · auto-acknowledge/reset voids the warranty and masks fault detection</div>
+      </div>
+      <div class="manual-ref">
+        <div class="mr-head">§ 7.2.7 — Flight Records</div>
+        <blockquote>"This will open 6 new windows with real-time data graphs for the selected Flight Record. Each opened window contains data for the respective joint and the data of the exact moment of the fault… Position, Velocity, Acceleration, Current, Torque."</blockquote>
+        <div class="cite">Service Handbook p. 99 · open the archived recordings in UR Log Viewer to see exactly what tripped on Aug 11</div>
+      </div>
+
+      <h4>Impact &amp; recommendation</h4>
+      <p>Nothing is broken today — the current session is clean. But the pattern (IK failures + repeat C154A0) says programs on this cell are being authored through poses the kinematics can't serve. Keep motion in joint space near singular regions, <code class="inline">movej</code> to a dexterous pose before any <code class="inline">movel</code>, and open the archived flight recordings in UR Log Viewer before deleting them (F-02) if you want the root cause of the Aug 11 stops on record.</p>
+    </div>
+  </details>
+
+  <!-- F-04 -->
+  <details class="finding" data-sev="ok" style="--sev: var(--ok); --sev-soft: var(--ok-soft)">
+    <summary>
+      <span class="fid">F-04</span>
+      <span class="ftitle">Benign noise — safe to ignore</span>
+      <span class="sev-pill">Benign</span>
+      <span class="disclose">›</span>
+    </summary>
+    <div class="fbody">
+      <h4>Catalogued and dismissed</h4>
+      <div class="tablewrap"><table>
+        <tr><th>Observation</th><th>Where</th><th>Why it's benign</th></tr>
+        <tr><td>URCap compatibility warnings (<code class="inline">myur-urcap</code>, Robotiq gripper pom parse)</td><td>polyscope.log, boot</td><td>Version-check cosmetics; both URCaps load and run</td></tr>
+        <tr><td>i915 display FIFO-underrun errors</td><td>kern.log</td><td>Standard chatter on these control-box GPUs; no functional effect</td></tr>
+        <tr><td>NTFS USB stick mounted read-only ("volume is dirty")</td><td>kern.log, Aug 5</td><td>The stick needs chkdsk, not the robot</td></tr>
+        <tr><td>RTDE client <span class="mono">192.168.4.232</span> unclean disconnect, 21:39</td><td>URControl.log</td><td>This workstation's LAN address — a monitoring connection closed abruptly</td></tr>
+        <tr><td>Failed SSH logins, 21:53</td><td>btmp / auth.log</td><td>This survey's own pre-key auth attempts; fail2ban is active (10-try / 10-min ban policy)</td></tr>
+        <tr><td>"Energy Eater" / "Fan Control" config-default warnings</td><td>URControl.log, boot</td><td>Missing optional config keys fall back to defaults by design</td></tr>
+      </table></div>
+    </div>
+  </details>
+</section>
+
+<!-- ==================== ERROR CODE CENSUS ==================== -->
+<section id="census">
+  <div class="sect-head"><h2>Error-Code Census</h2><span class="tag">log_history.txt · Nov 2025 → Aug 2026 · log scale</span></div>
+  <div id="bars"></div>
+  <p class="census-note">Bars are log-scaled — C171A12 outnumbers everything else 10:1. The history file stores codes without message text; to translate a code, open a Support File in the <strong>UR Log Viewer</strong> (§ 7.2.8 "Log Start" shows description, category, source and timestamp per entry) or search the code on the UR support site. <span style="color: var(--crit); font-weight: 600;">C154A0</span> is the one verified fault-class here: protective stop from a near-singularity Cartesian move (see F-03). C0A0 entries are program state messages (pause/play), not faults. The C171/C303/C313 volume is dominated by info-level communication events logged at every session — worth a Log Viewer pass if you're curious, not a fire.</p>
+</section>
+
+<!-- ==================== MAINTENANCE ==================== -->
+<section id="maintenance">
+  <div class="sect-head"><h2>Inspection Plan</h2><span class="tag">Service Handbook § 4.1.1 · p. 11</span></div>
+  <p style="max-width: 76ch;">The manual's recommended cadence for the arm, adapted to this cell. Items marked ⚠ must also be re-checked after any heavy collision — and this robot has recorded protective stops, so treat the next inspection as due.</p>
+  <div class="tablewrap"><table>
+    <tr><th>#</th><th>Inspection</th><th>Type</th><th>Cadence</th></tr>
+    <tr><td class="num">1</td><td>Blue lids on all joints (cracks / damage) ⚠</td><td>Visual</td><td>Biannually</td></tr>
+    <tr><td class="num">2</td><td>Blue lid screws (in place, torqued to 0.4 Nm)</td><td>Functional</td><td>Biannually</td></tr>
+    <tr><td class="num">3</td><td>Flat rings (wear / damage)</td><td>Visual</td><td>Biannually</td></tr>
+    <tr><td class="num">4</td><td>Robot cable (damage along its length)</td><td>Visual</td><td>Monthly</td></tr>
+    <tr><td class="num">5</td><td>Robot cable connection at control box</td><td>Visual</td><td>Monthly</td></tr>
+    <tr><td class="num">6</td><td>Robot arm mounting bolts ⚠</td><td>Functional</td><td>Biannually</td></tr>
+    <tr><td class="num">7</td><td>Tool mounting bolts ⚠</td><td>Functional</td><td>Biannually</td></tr>
+    <tr><td class="num">8</td><td>Screws / bolts on joints ⚠</td><td>Functional</td><td>Biannually</td></tr>
+  </table></div>
+  <div class="callout-warn"><strong>Never use compressed air</strong> to clean the arm — the manual is explicit that it can damage joint components (§ 4.1.2). Inspect from the ZERO position with the control box powered off and disconnected.</div>
+</section>
+
+<!-- ==================== ACTIONS ==================== -->
+<section id="actions">
+  <div class="sect-head"><h2>Action List</h2><span class="tag">checkboxes persist in this browser</span></div>
+
+  <label class="task"><input type="checkbox" data-task="archive-flight">
+    <span><span class="t-meta now">Now</span><span class="t-title">Archive the Aug 11 flight recordings off the controller</span>
+    <span class="t-sub">5 zips in <code class="inline">/root/flightreports/</code> (31 MB). <code class="inline">scp</code> them to the workstation, or pull a full Support File to USB per § 6.3. They're the evidence for F-03 — archive before deleting.</span></span>
+  </label>
+
+  <label class="task"><input type="checkbox" data-task="free-disk">
+    <span><span class="t-meta now">Now</span><span class="t-title">Free ~65 MB on the root filesystem</span>
+    <span class="t-sub">After archiving: delete <code class="inline">flightreports/*.zip</code>, <code class="inline">log_history.bak</code>, and <code class="inline">polyscope-1.log</code>. Target: back under 85% used (F-02).</span></span>
+  </label>
+
+  <label class="task"><input type="checkbox" data-task="review-flight">
+    <span><span class="t-meta soon">Soon</span><span class="t-title">Open the flight recordings in UR Log Viewer</span>
+    <span class="t-sub">§ 7.2.7 — double-click a Flight Record for per-joint position / velocity / current / torque graphs at the exact fault moment. Confirms what actually tripped on Aug 11 (F-03).</span></span>
+  </label>
+
+  <label class="task"><input type="checkbox" data-task="singularity">
+    <span><span class="t-meta soon">Soon</span><span class="t-title">Audit cell programs for near-singularity Cartesian moves</span>
+    <span class="t-sub">6 × C154A0 on record. Rule: <code class="inline">movej</code> to a dexterous, elbow-bent pose before any <code class="inline">movel</code>; keep motion in joint space near reach limits. Never script an auto-reset of a protective stop — § 7.6.1 says that voids the warranty.</span></span>
+  </label>
+
+  <label class="task"><input type="checkbox" data-task="calibration">
+    <span><span class="t-meta plan">Plan</span><span class="t-title">Decide the calibration path for the replaced Wrist 3</span>
+    <span class="t-sub">If calibrated TCP accuracy matters for this cell: Dual Robot Calibration via the distributor (§ 5.2.12, tooling p/n 185500). If not: document the limitation and keep authoring joint-space, zero-kinematics programs (F-01). Program Correction by Key Waypoints (§ 5.2.13) can rescue existing waypoint programs.</span></span>
+  </label>
+
+  <label class="task"><input type="checkbox" data-task="inspection">
+    <span><span class="t-meta plan">Plan</span><span class="t-title">Run the § 4.1.1 inspection round</span>
+    <span class="t-sub">Protective stops count as collision-class events for the ⚠ items — check tool bolts, mounting bolts and joint screws, plus lids / rings / cable per the table above.</span></span>
+  </label>
+
+  <p class="check-note">Checklist state is stored locally in this browser only — it resets if site data is cleared and isn't shared with other viewers.</p>
+</section>
+
+<!-- ==================== SOURCES ==================== -->
+<section id="sources">
+  <div class="sect-head"><h2>Sources</h2></div>
+  <p>Primary reference: <a href="https://s3-eu-west-1.amazonaws.com/ur-support-site/41382/e-Series_Service_Manual_en.pdf">Universal Robots e-Series Service Handbook, SW 5.25</a> (126 pp) — §§ 4.1 Inspection, 5.2.10–5.2.13 Joint Verification / Zeroing / Calibration, 6.3–6.5 Support File &amp; Backup, 7.2 Log Viewer &amp; Flight Records, 7.6 Protective Stop. Also: UR support article 18939 (protective stop flowchart), universal-robots.com/support.</p>
+  <footer>
+    Controller files examined over SSH on 2026-08-31: <span class="mono">/tmp/log/urcontrol/current · /root/polyscope.log · /root/log_history.txt (10 MB, Nov 2025→) · /root/.urcontrol/joint_info.txt · robot_calibration_summary.txt · /var/log/{kern.log, critical, auth.log, fail2ban.log}</span>. Live state read via <span class="mono">urctl state</span> (Dashboard 29999 + Primary 30001). All timestamps are controller-local.
+  </footer>
+</section>
+
+</div>
+
+<script>
+  // ---- error-code census (log-scaled bars) ----
+  var CODES = [
+    { code: "C171A12", n: 79378 },
+    { code: "C171A5",  n: 6852 },
+    { code: "C0A0",    n: 2691 },
+    { code: "C303A1",  n: 943 },
+    { code: "C313A3",  n: 888 },
+    { code: "C313A1-6",n: 886, approx: true },
+    { code: "C171A4",  n: 848 },
+    { code: "C303A2",  n: 737 },
+    { code: "C286A1",  n: 601 },
+    { code: "C303A8",  n: 433 },
+    { code: "C275A6",  n: 229 },
+    { code: "C154A0",  n: 6, known: true }
+  ];
+  (function () {
+    var host = document.getElementById("bars");
+    var max = Math.log10(80000);
+    CODES.forEach(function (c) {
+      var row = document.createElement("div");
+      row.className = "census-row";
+      var pct = Math.max(2.5, (Math.log10(c.n + 1) / max) * 100);
+      row.innerHTML =
+        '<span class="cc' + (c.known ? " known" : "") + '">' + c.code + "</span>" +
+        '<div class="bar-track"><div class="bar-fill' + (c.known ? " known" : "") + '" style="width:' + pct.toFixed(1) + '%"></div></div>' +
+        '<span class="ct">' + (c.approx ? "~" : "") + c.n.toLocaleString("en-US") + "</span>";
+      host.appendChild(row);
+    });
+  })();
+
+  // ---- severity filter ----
+  (function () {
+    var chips = document.querySelectorAll(".chip");
+    var findings = document.querySelectorAll("details.finding");
+    chips.forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        chips.forEach(function (c) { c.setAttribute("aria-pressed", "false"); });
+        chip.setAttribute("aria-pressed", "true");
+        var f = chip.dataset.filter;
+        findings.forEach(function (d) {
+          d.hidden = f !== "all" && d.dataset.sev !== f;
+        });
+      });
+    });
+  })();
+
+  // ---- checklist persistence (per-viewer convenience) ----
+  (function () {
+    var KEY = "ur10e-dossier-tasks";
+    var state = {};
+    try { state = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { state = {}; }
+    document.querySelectorAll(".task input[type=checkbox]").forEach(function (box) {
+      var id = box.dataset.task;
+      if (state[id]) { box.checked = true; box.closest(".task").classList.add("done"); }
+      box.addEventListener("change", function () {
+        box.closest(".task").classList.toggle("done", box.checked);
+        state[id] = box.checked;
+        try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
+      });
+    });
+  })();
+
+  // ---- scrollspy for the rail ----
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll("#rail a"));
+    var map = {};
+    links.forEach(function (a) { map[a.getAttribute("href").slice(1)] = a; });
+    if (!("IntersectionObserver" in window)) return;
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          links.forEach(function (a) { a.classList.remove("active"); });
+          var a = map[en.target.id];
+          if (a) a.classList.add("active");
+        }
+      });
+    }, { rootMargin: "-15% 0px -70% 0px" });
+    document.querySelectorAll("section[id]").forEach(function (s) { obs.observe(s); });
+  })();
+</script>

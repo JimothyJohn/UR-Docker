@@ -1,0 +1,74 @@
+name: release
+
+# CD: pushing a version tag (v0.2.0) builds the sdist + wheel, attaches them
+# to a GitHub Release, and — if a PyPI trusted publisher is configured for
+# this repo (PyPI → project → Publishing → GitHub Actions, environment
+# "pypi") — publishes to PyPI. The PyPI step is skipped gracefully until that
+# one-time setup is done, so tagging is safe from day one.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: tag matches package version
+        run: |
+          pkg=$(uv run python -c "import urctl; print(urctl.__version__)")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "::error::tag v$tag != urctl.__version__ $pkg — bump urctl/__init__.py"
+            exit 1
+          fi
+      - name: full unit suite
+        run: |
+          uv sync --extra perception --extra mcp
+          uv run pytest -m "not integration" -q
+      - name: build
+        run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: create GitHub release with artifacts
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    # Deliberately bound to an environment so publishing can be gated with
+    # required reviewers, and so PyPI trusted publishing has a stable subject.
+    environment: pypi
+    permissions:
+      id-token: write  # OIDC for PyPI trusted publishing — no API token secrets
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: publish to PyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

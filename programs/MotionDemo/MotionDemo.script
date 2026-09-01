@@ -1,0 +1,31 @@
+# MotionDemo — fully non-interactive movement program used by the E2E
+# driver (scripts/e2e_drive.py). Visits three joint-space poses, emits
+# textmsg checkpoints the driver scrapes out of the Primary broadcast,
+# and returns home. Safe for URSim; on real hardware, sanity-check the
+# poses against your workcell before running.
+
+def MotionDemo():
+  textmsg("e2e/motiondemo/start")
+
+  # Candle-ish home: straight up, wrists folded. Far from singularity,
+  # comfortably inside joint limits for every e-Series model.
+  home = [0.0, -1.5708, 0.0, -1.5708, 0.0, 0.0]
+
+  # Two small perturbations around home; verifies forward + reverse motion.
+  poseA = [ 0.3, -1.4,  0.5, -1.6,  0.1,  0.2]
+  poseB = [-0.3, -1.7, -0.5, -1.4, -0.1, -0.2]
+
+  movej(home, a=0.8, v=0.5)
+  textmsg("e2e/motiondemo/at_home")
+
+  movej(poseA, a=0.8, v=0.5)
+  textmsg("e2e/motiondemo/at_poseA=", get_actual_joint_positions())
+
+  movej(poseB, a=0.8, v=0.5)
+  textmsg("e2e/motiondemo/at_poseB=", get_actual_joint_positions())
+
+  movej(home, a=0.8, v=0.5)
+  textmsg("e2e/motiondemo/done")
+end
+
+MotionDemo()
