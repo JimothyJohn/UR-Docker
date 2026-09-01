@@ -60,7 +60,7 @@ services:
   # only the e-Series sim. Start it with `docker compose --profile polyscopex up`
   # or `make simx-up`, then open http://localhost:8000 in Chrome.
   ursim-px:
-    image: universalrobots/ursim_polyscopex:10.13.0
+    image: universalrobots/ursim_polyscopex:10.14.0-0.10.777
     profiles: ["polyscopex"]
     stdin_open: true
     tty: true
