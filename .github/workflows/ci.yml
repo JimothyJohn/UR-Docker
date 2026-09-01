@@ -90,7 +90,7 @@ jobs:
           /tmp/smoke/bin/urctl --help > /dev/null
           /tmp/smoke/bin/urctl-gui --help > /dev/null
           /tmp/smoke/bin/urctl tools | python3 -c "import json,sys; assert len(json.load(sys.stdin)) >= 20"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
