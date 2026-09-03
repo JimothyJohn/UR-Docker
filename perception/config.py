@@ -34,6 +34,15 @@ DEFAULT_DEVICE_INDEX = 0
 # torch / OpenCV and raise a clear install hint if missing.
 DEFAULT_DEPTH_BACKEND = "stub"
 DEFAULT_BLOB_BACKEND = "stub"
+# Click-to-segment backend for RGB-D frames: "stub" (color + depth region
+# growing, pure Python) or "sam" (Segment Anything via the `sam` extra).
+DEFAULT_SEGMENT_BACKEND = "stub"
+
+# RealSense selection. Empty serial = first attached camera. The RealSense
+# streams run at their own rate (D435 color+depth do 30 fps at 640x480; 15 is
+# also valid) independent of the pure-Python pipeline's `fps` above.
+DEFAULT_RS_SERIAL = ""
+DEFAULT_RS_FPS = 30
 
 # The stub depth estimator emits a normalized 0..1 map; near/far scale it into
 # metres so downstream consumers always see physical units. These bracket a
@@ -108,6 +117,9 @@ class PerceptionConfig:
     blob_min_chroma: int = DEFAULT_BLOB_MIN_CHROMA
     blob_link_tolerance: int = DEFAULT_BLOB_LINK_TOLERANCE
     blob_split_touching: bool = DEFAULT_BLOB_SPLIT_TOUCHING
+    segment_backend: str = DEFAULT_SEGMENT_BACKEND
+    rs_serial: str = DEFAULT_RS_SERIAL
+    rs_fps: int = DEFAULT_RS_FPS
 
     @classmethod
     def from_env(cls, **overrides) -> PerceptionConfig:
@@ -129,6 +141,9 @@ class PerceptionConfig:
             "blob_min_chroma": _env_int("PERCEPTION_BLOB_MIN_CHROMA", DEFAULT_BLOB_MIN_CHROMA),
             "blob_link_tolerance": _env_int("PERCEPTION_BLOB_LINK_TOLERANCE", DEFAULT_BLOB_LINK_TOLERANCE),
             "blob_split_touching": _env_bool("PERCEPTION_BLOB_SPLIT_TOUCHING", DEFAULT_BLOB_SPLIT_TOUCHING),
+            "segment_backend": _env_str("PERCEPTION_SEGMENT_BACKEND", DEFAULT_SEGMENT_BACKEND),
+            "rs_serial": _env_str("PERCEPTION_RS_SERIAL", DEFAULT_RS_SERIAL),
+            "rs_fps": _env_int("PERCEPTION_RS_FPS", DEFAULT_RS_FPS),
         }
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]

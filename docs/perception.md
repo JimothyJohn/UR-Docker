@@ -95,6 +95,14 @@ Config is read from `PERCEPTION_*` env vars (`PERCEPTION_WIDTH`,
 640×480 @ 15 fps. Enough resolution for meaningful centroids; slow enough that
 the pure-Python stubs keep up without a GPU. All overridable.
 
+## RGB-D from a RealSense (metric depth, no model)
+
+`perception/realsense.py` reads an Intel RealSense D4xx directly (ctypes over
+librealsense's C API) — real metric depth instead of the monocular estimate,
+aligned to the colour image. `perception gui` is the live cockpit
+(hover-to-measure, click-to-segment, capture); `perception rs-capture` is the
+one-shot. See [`realsense.md`](realsense.md).
+
 ## Integration seam (intentionally not wired yet)
 
 The blob output stops at `centroid_px + depth_m` on purpose. Turning a blob into

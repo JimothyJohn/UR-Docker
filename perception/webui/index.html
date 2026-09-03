@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>perception · RGB-D cockpit</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>&#128247;</text></svg>">
+<style>
+  /* Same industrial cockpit palette as urctl/webui — one family of tools. */
+  :root {
+    --ground: #0D1319; --panel: #141C25; --raised: #1A2430; --inset: #090E13;
+    --line: #283542; --line-soft: #1F2A36;
+    --text: #D7E1EB; --strong: #F1F6FA; --muted: #7F91A3; --faint: #576A7C;
+    --accent: #4FBBE2; --accent-dim: #2A7794;
+    --ok: #57B87C; --warn: #DFA43E; --crit: #E06552; --info: #7E93E8;
+    --ok-soft: rgba(87,184,124,.14); --warn-soft: rgba(223,164,62,.14);
+    --crit-soft: rgba(224,101,82,.16); --accent-soft: rgba(79,187,226,.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--text);
+         font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; font-size: 14px;
+         display: flex; flex-direction: column; }
+  .mono, code, table { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1, h2, button, .chip { font-family: "Chakra Petch", "IBM Plex Sans", system-ui, sans-serif; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 16px; background: var(--panel);
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: var(--strong); }
+  h1 .accent { color: var(--accent); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+  .chip { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; padding: 3px 10px;
+          border-radius: 3px; border: 1px solid var(--line); background: var(--raised); color: var(--muted); white-space: nowrap; }
+  .chip.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+  .chip.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .chip.crit { color: var(--crit); border-color: var(--crit); background: var(--crit-soft); }
+  .banner { display: none; padding: 7px 16px; font-size: 13px; font-weight: 500; gap: 12px; align-items: center; }
+  .banner.show { display: flex; }
+  .banner.crit { background: var(--crit-soft); color: var(--crit); border-bottom: 1px solid var(--crit); }
+  main { flex: 1; display: grid; gap: 10px; padding: 10px; min-height: 0;
+         grid-template-columns: minmax(360px, 1.4fr) minmax(360px, 1.4fr) minmax(280px, .9fr);
+         grid-template-rows: auto auto; grid-template-areas: "color depth side" "color depth side"; }
+  @media (max-width: 1200px) { main { grid-template-columns: 1fr 1fr; grid-template-areas: "color depth" "side side"; } }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; grid-template-areas: "color" "depth" "side"; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; display: flex;
+           flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+  .panel > .head { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line-soft); }
+  .panel > .head h2 { margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  .panel > .head .right { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+  .panel > .body { padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
+  .stage { position: relative; background: var(--inset); border: 1px solid var(--line-soft); border-radius: 4px; overflow: hidden;
+           aspect-ratio: 4 / 3; cursor: crosshair; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: auto; }
+  .stage .readout { position: absolute; left: 8px; bottom: 8px; background: rgba(9,14,19,.82); border: 1px solid var(--line);
+                    border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--strong); pointer-events: none; }
+  #colorPanel { grid-area: color; } #depthPanel { grid-area: depth; } #side { grid-area: side; }
+  button { background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+           font-size: 12px; font-weight: 600; letter-spacing: .06em; padding: 7px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--strong); }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--strong); }
+  button.danger { border-color: var(--crit); color: var(--crit); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=text], input[type=number] { background: var(--inset); color: var(--strong); border: 1px solid var(--line);
+                                         border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+  input[type=number] { width: 70px; }
+  label { font-size: 12px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td { padding: 3px 4px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  td:first-child { color: var(--muted); width: 42%; }
+  .hint { font-size: 11.5px; color: var(--faint); }
+  .kbd { font-family: inherit; font-size: 11px; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; color: var(--muted); }
+  #toast { position: fixed; right: 14px; bottom: 14px; background: var(--raised); border: 1px solid var(--accent);
+           border-radius: 5px; padding: 8px 12px; font-size: 13px; display: none; max-width: 420px; }
+  #toast.show { display: block; }
+  ul.sets { margin: 0; padding-left: 18px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>perception <span class="accent">·</span> RGB-D cockpit</h1>
+  <span id="cam" class="mono" style="color:var(--muted);font-size:12.5px">connecting…</span>
+  <div class="chips">
+    <span id="chipKind" class="chip">camera</span>
+    <span id="chipUsb" class="chip">usb ?</span>
+    <span id="chipFps" class="chip">0.0 fps</span>
+    <span id="chipSeq" class="chip">seq 0</span>
+    <span id="chipSeg" class="chip">seg ?</span>
+    <button id="pauseBtn" title="space">Pause</button>
+  </div>
+</header>
+<div id="banner" class="banner crit"><span id="bannerText"></span></div>
+
+<main>
+  <section id="colorPanel" class="panel">
+    <div class="head"><h2>Color</h2><div class="right"><span id="colorMeta">–</span></div></div>
+    <div class="body">
+      <div class="stage" id="colorStage">
+        <canvas id="colorCv"></canvas><canvas id="colorOv"></canvas>
+        <div class="readout" id="colorReadout">click an object to segment it</div>
+      </div>
+      <div class="hint">Click = segment under the cursor · <span class="kbd">n</span> nearest object · <span class="kbd">esc</span> clear · <span class="kbd">c</span> capture</div>
+    </div>
+  </section>
+
+  <section id="depthPanel" class="panel">
+    <div class="head"><h2>Depth</h2>
+      <div class="right">
+        <label>near</label><input id="near" type="number" step="0.05" value="0.20">
+        <label>far</label><input id="far" type="number" step="0.05" value="2.00">
+        <label>m</label><button id="autoRange" title="fit range to the current frame">auto</button>
+      </div>
+    </div>
+    <div class="body">
+      <div class="stage" id="depthStage">
+        <canvas id="depthCv"></canvas><canvas id="depthOv"></canvas>
+        <div class="readout" id="depthReadout">hover to measure</div>
+      </div>
+      <div class="hint">Colour = metres (near→far). Dark grey = no depth. Readout gives the camera-frame point X/Y/Z of the pixel under the cursor.</div>
+    </div>
+  </section>
+
+  <aside id="side" class="panel">
+    <div class="head"><h2>Object</h2><div class="right"><span id="segMeta">–</span></div></div>
+    <div class="body">
+      <div class="row">
+        <button id="nearestBtn">Nearest object</button>
+        <button id="clearBtn" class="danger">Clear</button>
+      </div>
+      <table id="features"><tbody><tr><td colspan="2" class="hint">No segment yet.</td></tr></tbody></table>
+      <div class="head" style="padding:7px 0 0;border:0"><h2>Capture</h2></div>
+      <div class="row">
+        <input id="setName" type="text" value="object" placeholder="set name" style="flex:1">
+        <label><input id="withMask" type="checkbox" checked> with mask</label>
+        <button id="captureBtn" class="primary">Capture</button>
+      </div>
+      <div class="hint">Writes color_NNNNN.png, depth_NNNNN.png (16-bit), mask_NNNNN.png and meta_NNNNN.json under <code id="root">captures/</code>.</div>
+      <ul id="sets" class="sets"></ul>
+      <div class="head" style="padding:7px 0 0;border:0"><h2>Camera</h2></div>
+      <table id="camTable"><tbody></tbody></table>
+    </div>
+  </aside>
+</main>
+<div id="toast"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const colorCv = $('colorCv'), colorOv = $('colorOv'), depthCv = $('depthCv'), depthOv = $('depthOv');
+  const cctx = colorCv.getContext('2d'), dctx = depthCv.getContext('2d');
+  const coctx = colorOv.getContext('2d'), doctx = depthOv.getContext('2d');
+  let seq = 0, running = true, latest = null, features = null, maskImg = null, maskSeq = 0, hover = null;
+  let inflight = false, lut = buildLut();
+
+  // ---- utilities ----------------------------------------------------------------
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  function toast(msg, ms = 2600) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms); }
+  function banner(msg) { const b = $('banner'); if (msg) { $('bannerText').textContent = msg; b.classList.add('show'); } else b.classList.remove('show'); }
+  function fmt(v, d = 3) { return (v === null || v === undefined) ? '–' : (typeof v === 'number' ? v.toFixed(d) : String(v)); }
+  function buildLut() {
+    // turbo-like anchors, interpolated to 256 entries; index 0..255 = near..far
+    const a = [[48,18,59],[70,107,229],[27,208,213],[163,255,62],[245,193,52],[220,52,23],[122,4,3]];
+    const out = new Uint8Array(256 * 3);
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255 * (a.length - 1), k = Math.min(a.length - 2, Math.floor(t)), f = t - k;
+      for (let c = 0; c < 3; c++) out[i * 3 + c] = Math.round(a[k][c] * (1 - f) + a[k + 1][c] * f);
+    }
+    return out;
+  }
+  async function inflate(bytes) {
+    const ds = new DecompressionStream('deflate');
+    const buf = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+    return new Uint16Array(buf);  // little-endian, matches RS2_FORMAT_Z16 on every host we run on
+  }
+  function parseContainer(buf) {
+    const dv = new DataView(buf), dec = new TextDecoder();
+    if (dec.decode(new Uint8Array(buf, 0, 4)) !== 'RGBD') throw new Error('bad frame container');
+    const hl = dv.getUint32(4); const header = JSON.parse(dec.decode(new Uint8Array(buf, 8, hl)));
+    let i = 8 + hl; const pl = dv.getUint32(i); const png = new Uint8Array(buf, i + 4, pl); i += 4 + pl;
+    const dl = dv.getUint32(i); const depth = new Uint8Array(buf, i + 4, dl);
+    return { header, png, depth };
+  }
+
+  // ---- frame loop -----------------------------------------------------------------
+  async function loop() {
+    while (true) {
+      if (!running) { await sleep(120); continue; }
+      try {
+        const r = await fetch(`/api/rgbd?after=${seq}&timeout_ms=1500`);
+        if (r.status === 503) { const j = await r.json(); banner(j.last_error || 'waiting for the first frame…'); await sleep(500); continue; }
+        if (!r.ok) throw new Error(`frame fetch ${r.status}`);
+        const f = parseContainer(await r.arrayBuffer());
+        if (f.header.seq === seq) continue;   // long-poll timed out: nothing new
+        seq = f.header.seq;
+        banner(null);
+        await render(f);
+      } catch (e) { banner(`stream: ${e.message}`); await sleep(500); }
+    }
+  }
+  async function render(f) {
+    const h = f.header;
+    const [bmp, depth] = await Promise.all([createImageBitmap(new Blob([f.png], { type: 'image/png' })), inflate(f.depth)]);
+    if (colorCv.width !== h.width || colorCv.height !== h.height) {
+      for (const c of [colorCv, colorOv, depthCv, depthOv]) { c.width = h.width; c.height = h.height; }
+    }
+    cctx.drawImage(bmp, 0, 0); bmp.close && bmp.close();
+    latest = { header: h, depth };
+    drawDepth();
+    drawOverlays();
+    $('chipSeq').textContent = `seq ${h.seq}`;
+    $('chipFps').textContent = `${(h.fps || 0).toFixed(1)} fps`;
+    $('colorMeta').textContent = `${h.width}×${h.height} · #${h.frame_number} · ${h.aligned ? 'aligned' : 'raw depth'}`;
+  }
+  function drawDepth() {
+    if (!latest) return;
+    const { header: h, depth } = latest, w = h.depth_width, hh = h.depth_height;
+    const near = parseFloat($('near').value) || 0.2, far = Math.max(near + 0.01, parseFloat($('far').value) || 2.0);
+    const scale = h.depth_scale_m, span = far - near;
+    const img = dctx.createImageData(w, hh), px = img.data;
+    for (let i = 0, j = 0; i < depth.length; i++, j += 4) {
+      const d = depth[i];
+      if (d === 0) { px[j] = 40; px[j + 1] = 40; px[j + 2] = 48; px[j + 3] = 255; continue; }
+      let t = (d * scale - near) / span; t = t < 0 ? 0 : (t > 1 ? 1 : t);
+      const k = Math.round(t * 255) * 3;
+      px[j] = lut[k]; px[j + 1] = lut[k + 1]; px[j + 2] = lut[k + 2]; px[j + 3] = 255;
+    }
+    dctx.putImageData(img, 0, 0);
+  }
+  $('autoRange').onclick = () => {
+    if (!latest) return;
+    const { header: h, depth } = latest; const vals = [];
+    for (let i = 0; i < depth.length; i += 7) if (depth[i]) vals.push(depth[i]);
+    if (!vals.length) return;
+    vals.sort((a, b) => a - b);
+    $('near').value = (vals[Math.floor(vals.length * 0.02)] * h.depth_scale_m).toFixed(2);
+    $('far').value = (vals[Math.floor(vals.length * 0.98)] * h.depth_scale_m).toFixed(2);
+    drawDepth();
+  };
+  $('near').onchange = $('far').onchange = drawDepth;
+
+  // ---- measurement + overlays -----------------------------------------------------
+  function pixelFromEvent(ev, cv) {
+    const r = cv.getBoundingClientRect();
+    const u = Math.floor((ev.clientX - r.left) / r.width * cv.width), v = Math.floor((ev.clientY - r.top) / r.height * cv.height);
+    return (u >= 0 && v >= 0 && u < cv.width && v < cv.height) ? { u, v } : null;
+  }
+  function measure(u, v) {
+    if (!latest) return null;
+    const { header: h, depth } = latest, K = h.intrinsics;
+    const raw = depth[v * h.depth_width + u]; if (!raw) return { u, v, z: null };
+    const z = raw * h.depth_scale_m;
+    return { u, v, z, x: (u - K.ppx) / K.fx * z, y: (v - K.ppy) / K.fy * z };  // pinhole (D4xx colour intrinsics carry zero distortion)
+  }
+  function drawOverlays() {
+    for (const [ctx, cv] of [[coctx, colorOv], [doctx, depthOv]]) {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (maskImg) { ctx.globalAlpha = 0.45; ctx.drawImage(maskImg, 0, 0); ctx.globalAlpha = 1; }
+      if (features) {
+        const [x0, y0, x1, y1] = features.bbox, [cx, cy] = features.centroid_px;
+        ctx.strokeStyle = '#4FBBE2'; ctx.lineWidth = 2; ctx.strokeRect(x0 + .5, y0 + .5, x1 - x0, y1 - y0);
+        const th = features.orientation_deg * Math.PI / 180, L = Math.max(20, (x1 - x0 + y1 - y0) / 4);
+        ctx.strokeStyle = '#DFA43E'; ctx.beginPath(); ctx.moveTo(cx - Math.cos(th) * L, cy - Math.sin(th) * L); ctx.lineTo(cx + Math.cos(th) * L, cy + Math.sin(th) * L); ctx.stroke();
+        ctx.fillStyle = '#F1F6FA'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+      }
+      if (hover) {
+        ctx.strokeStyle = 'rgba(241,246,250,.85)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(hover.u + .5, 0); ctx.lineTo(hover.u + .5, cv.height); ctx.moveTo(0, hover.v + .5); ctx.lineTo(cv.width, hover.v + .5); ctx.stroke();
+      }
+    }
+  }
+  function onMove(ev, cv) {
+    const p = pixelFromEvent(ev, cv); hover = p; drawOverlays();
+    if (!p) return;
+    const m = measure(p.u, p.v);
+    const txt = !m ? '–' : (m.z === null ? `(${m.u}, ${m.v})  no depth` : `(${m.u}, ${m.v})  z ${m.z.toFixed(3)} m   X ${m.x.toFixed(3)}  Y ${m.y.toFixed(3)}  Z ${m.z.toFixed(3)}`);
+    $('depthReadout').textContent = txt;
+    if (!features) $('colorReadout').textContent = txt;
+  }
+  for (const cv of [colorOv, depthOv]) {
+    cv.addEventListener('mousemove', (ev) => onMove(ev, cv));
+    cv.addEventListener('mouseleave', () => { hover = null; drawOverlays(); });
+    cv.addEventListener('click', (ev) => { const p = pixelFromEvent(ev, cv); if (p) segmentAt(p.u, p.v); });
+  }
+
+  // ---- segmentation ---------------------------------------------------------------
+  async function post(url, body) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const j = await r.json(); if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`); return j;
+  }
+  function tintedMask(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => {
+        const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const x = c.getContext('2d');
+        x.drawImage(im, 0, 0); x.globalCompositeOperation = 'multiply'; x.fillStyle = '#4FBBE2'; x.fillRect(0, 0, c.width, c.height);
+        // black (0) stays black → make it transparent via luminosity → alpha
+        const d = x.getImageData(0, 0, c.width, c.height), p = d.data;
+        for (let i = 0; i < p.length; i += 4) p[i + 3] = p[i] + p[i + 1] + p[i + 2] > 30 ? 255 : 0;
+        x.putImageData(d, 0, 0); resolve(c);
+      };
+      im.onerror = reject; im.src = dataUrl;
+    });
+  }
+  async function adopt(j) {
+    features = j.features; maskSeq = j.seq;
+    maskImg = j.mask_png_b64 ? await tintedMask('data:image/png;base64,' + j.mask_png_b64) : null;
+    $('segMeta').textContent = `${j.segmenter} · ${j.elapsed_ms} ms · frame ${j.seq}`;
+    renderFeatures(); drawOverlays();
+    $('colorReadout').textContent = features ? `object @ (${features.centroid_px.map(v => v.toFixed(0)).join(', ')}) · ${fmt(features.depth.median_m)} m` : 'empty segment';
+  }
+  async function segmentAt(u, v) {
+    if (inflight) return; inflight = true;
+    try { await adopt(await post('/api/segment', { x: u, y: v })); } catch (e) { toast(`segment: ${e.message}`); } finally { inflight = false; }
+  }
+  async function nearest() {
+    if (inflight) return; inflight = true;
+    try { await adopt(await post('/api/nearest', { near_ratio: 1.2 })); } catch (e) { toast(`nearest: ${e.message}`); } finally { inflight = false; }
+  }
+  async function clearSeg() {
+    features = null; maskImg = null; maskSeq = 0; renderFeatures(); drawOverlays(); $('segMeta').textContent = '–';
+    $('colorReadout').textContent = 'click an object to segment it';
+    try { await post('/api/clear'); } catch (e) {}
+  }
+  function renderFeatures() {
+    const tb = $('features').tBodies[0];
+    if (!features) { tb.innerHTML = '<tr><td colspan="2" class="hint">No segment yet.</td></tr>'; return; }
+    const f = features, d = f.depth, g = f.grasp;
+    const rows = [
+      ['area', `${f.area_px} px · fill ${fmt(f.fill_ratio, 2)}`],
+      ['centroid px', f.centroid_px.map(v => v.toFixed(1)).join(', ')],
+      ['bbox', f.bbox.join(', ')],
+      ['mean RGB', f.mean_rgb.join(', ')],
+      ['depth median', d.median_m === null ? 'no depth' : `${fmt(d.median_m)} m  (min ${fmt(d.min_m)} · max ${fmt(d.max_m)} · ${d.valid_px} px)`],
+      ['point (cam) m', f.point_m ? f.point_m.map(v => v.toFixed(3)).join(', ') : '–'],
+      ['extent m', f.extent_m ? `${fmt(f.extent_m[0])} × ${fmt(f.extent_m[1])}  · thick ${fmt(d.thickness_m)}` : '–'],
+      ['orientation', `${fmt(f.orientation_deg, 1)}°  · elongation ${fmt(f.elongation, 2)}`],
+      ['axes m', f.major_axis_m !== null ? `${fmt(f.major_axis_m)} / ${fmt(f.minor_axis_m)}` : '–'],
+      ['grasp (assumed)', `yaw ${fmt(g.gripper_yaw_deg, 1)}° · opening ${fmt(g.opening_m)} m`],
+    ];
+    tb.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  }
+
+  // ---- capture ----------------------------------------------------------------------
+  async function capture() {
+    try {
+      const j = await post('/api/capture', { name: $('setName').value.trim() || 'object', include_mask: $('withMask').checked });
+      toast(`saved #${j.index} → ${j.dir}${j.with_mask ? ' (with mask)' : ''}`); refreshSets();
+    } catch (e) { toast(`capture: ${e.message}`); }
+  }
+  async function refreshSets() {
+    try {
+      const j = await (await fetch('/api/captures')).json();
+      $('root').textContent = j.root + '/';
+      $('sets').innerHTML = j.sets.map(s => `<li>${s.name} · ${s.count}</li>`).join('') || '<li class="hint">no captures yet</li>';
+    } catch (e) {}
+  }
+
+  // ---- info poll -------------------------------------------------------------------
+  async function info() {
+    try {
+      const j = await (await fetch('/api/info')).json(); const c = j.camera, d = c.device || {};
+      $('cam').textContent = `${d.name || c.kind}${d.serial ? ' · ' + d.serial : ''}`;
+      $('chipKind').textContent = c.kind; $('chipKind').className = 'chip ' + (c.kind === 'synthetic' ? 'warn' : (c.open ? 'ok' : 'crit'));
+      $('chipUsb').textContent = d.usb_type ? `usb ${d.usb_type}` : 'usb –'; $('chipUsb').className = 'chip ' + (d.usb_type && !String(d.usb_type).startsWith('3') ? 'warn' : '');
+      $('chipSeg').textContent = `seg ${j.segmenter}`;
+      if (j.last_error && !j.frame) banner(j.last_error);
+      const K = (c.intrinsics || {}).color, s = c.stream || {};
+      const rows = [['kind', c.kind], ['stream', `${s.width}×${s.height} @ ${s.fps} · ${s.aligned ? 'depth→colour' : 'unaligned'}`],
+        ['firmware', d.firmware || '–'], ['depth scale', c.depth_scale_m !== null ? `${c.depth_scale_m} m/unit` : '–'],
+        ['fx / fy', K ? `${K.fx.toFixed(1)} / ${K.fy.toFixed(1)}` : '–'], ['pp', K ? `${K.ppx.toFixed(1)}, ${K.ppy.toFixed(1)}` : '–'],
+        ['fov', K ? `${K.fov_deg[0].toFixed(1)}° × ${K.fov_deg[1].toFixed(1)}°` : '–'], ['sdk', c.sdk ? `${c.sdk.api_version}` : '–'],
+        ['frames', `${j.frames_read} in ${j.uptime_s}s`]];
+      $('camTable').tBodies[0].innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+    } catch (e) {}
+  }
+
+  // ---- wiring ----------------------------------------------------------------------
+  $('nearestBtn').onclick = nearest; $('clearBtn').onclick = clearSeg; $('captureBtn').onclick = capture;
+  $('pauseBtn').onclick = () => { running = !running; $('pauseBtn').textContent = running ? 'Pause' : 'Resume'; };
+  document.addEventListener('keydown', (ev) => {
+    if (ev.target.tagName === 'INPUT') return;
+    if (ev.key === 'c') capture(); else if (ev.key === 'n') nearest(); else if (ev.key === 'Escape') clearSeg();
+    else if (ev.key === ' ') { ev.preventDefault(); $('pauseBtn').click(); }
+  });
+  info(); setInterval(info, 2000); refreshSets(); loop();
+})();
+</script>
+</body>
+</html>

@@ -20,6 +20,8 @@ Thumbs.db
 
 # Local input artifacts (images, scratch data) — not part of the repo
 inputs/
+# RealSense captures (perception gui / rs-capture) — datasets live elsewhere
+captures/
 
 # PolyScope X sim's persisted applications/programs (host-side volume mount)
 .ursim-polyscopex/

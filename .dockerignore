@@ -1,0 +1,14 @@
+.git
+.venv
+venv
+captures
+inputs
+.ursim-polyscopex
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+hardware/*/out
+hardware/*/renders
+docs/*.png
+docs/*.html

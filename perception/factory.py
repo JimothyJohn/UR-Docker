@@ -11,9 +11,11 @@ from __future__ import annotations
 from .blobs import BlobDetector, StubBlobDetector
 from .config import PerceptionConfig
 from .depth import DepthEstimator, StubDepthEstimator
+from .segment import Segmenter, StubSegmenter
 
 DEPTH_BACKENDS = ("stub", "depth_anything")
 BLOB_BACKENDS = ("stub", "blob_cv")
+SEGMENT_BACKENDS = ("stub", "sam")
 
 
 def make_depth_estimator(config: PerceptionConfig) -> DepthEstimator:
@@ -41,3 +43,14 @@ def make_blob_detector(config: PerceptionConfig) -> BlobDetector:
 
         return CvBlobDetector(min_area=config.min_blob_area)
     raise ValueError(f"unknown blob backend {name!r}; choose from {BLOB_BACKENDS}")
+
+
+def make_segmenter(config: PerceptionConfig) -> Segmenter:
+    name = config.segment_backend
+    if name == "stub":
+        return StubSegmenter(link_tolerance=float(config.blob_link_tolerance))
+    if name == "sam":
+        from .backends.sam import SamSegmenter
+
+        return SamSegmenter()
+    raise ValueError(f"unknown segment backend {name!r}; choose from {SEGMENT_BACKENDS}")

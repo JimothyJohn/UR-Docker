@@ -18,12 +18,15 @@ mcp = []
 perception = ["numpy>=1.24", "opencv-python>=4.8", "pillow>=10.0"]
 # Learned monocular depth (Depth Anything V2) backend.
 depth = ["torch>=2.0", "transformers>=4.40", "numpy>=1.24", "pillow>=10.0"]
+# Segment Anything click-to-segment backend for the RealSense cockpit.
+sam = ["torch>=2.0", "transformers>=4.40", "numpy>=1.24", "pillow>=10.0"]
 
 [project.scripts]
 urctl = "urctl.cli:main"
 urctl-mcp = "urctl.mcp_server:main"
 urctl-gui = "urctl.webapp:main"
 perception = "perception.cli:main"
+perception-gui = "perception.webapp:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -46,6 +49,7 @@ dev = ["pytest>=8", "ruff>=0.6"]
 testpaths = ["tests"]
 markers = [
     "integration: test requires a running URSim simulator (deselect with -m 'not integration')",
+    "realsense: test needs a RealSense camera attached and openable (deselect with -m 'not realsense')",
 ]
 
 [tool.ruff]

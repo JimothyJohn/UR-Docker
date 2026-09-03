@@ -27,6 +27,8 @@ from .depth import DepthEstimator, DepthMap, StubDepthEstimator
 from .factory import make_blob_detector, make_depth_estimator
 from .frame import Frame, synthetic_frame
 from .pipeline import PerceptionPipeline, PerceptionResult
+from .rgbd import DepthImage, Intrinsics, RgbdFrame, synthetic_rgbd
+from .segment import Mask, ObjectFeatures, Segmenter, StubSegmenter, extract_features
 
 __all__ = [
     "PerceptionConfig",
@@ -42,4 +44,13 @@ __all__ = [
     "StubBlobDetector",
     "make_depth_estimator",
     "make_blob_detector",
+    "DepthImage",
+    "Intrinsics",
+    "RgbdFrame",
+    "synthetic_rgbd",
+    "Mask",
+    "ObjectFeatures",
+    "Segmenter",
+    "StubSegmenter",
+    "extract_features",
 ]

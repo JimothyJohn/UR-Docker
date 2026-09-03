@@ -54,6 +54,20 @@ checked with clear errors: `ssh` (real robot; ships with all three OSes) and
 `docker` (URSim). CLI entry points reconfigure stdout with errors="replace" so
 legacy Windows codepages never crash on unicode.
 
+**RealSense RGB-D (`perception rs-info` / `rs-capture` / `gui`, see
+`docs/realsense.md`):** `perception/realsense.py` binds librealsense's C API
+with ctypes (no `pyrealsense2`; zero deps kept), streams colour + depth aligned
+to colour, and the cockpit (`perception/webapp.py` + `perception/webui/`) does
+hover-to-measure, click-to-segment (`perception/segment.py`: colour+depth
+region growing, or SAM via the `sam` extra) and RealSenseTrainer-style captures
+(`perception/capture.py`). **macOS needs `sudo`** to open the camera (libusb
+must detach Apple's UVC driver — `failed to set power state` otherwise); Linux
+needs the udev rules. `--fake` runs everything on a synthetic scene. The
+target compute is a Jetson Orin next to the robot: `Dockerfile.perception` +
+`docker compose --profile perception`. The camera mounts on the tool flange via
+`hardware/d435-tool-bracket/` (parametric CadQuery, STL/STEP, spec in its
+README; nominal `T_flange_camera` seed in §3).
+
 **Local GUI (`urctl gui` / `urctl-gui`):** a loopback-only web cockpit
 (`urctl/webapp.py` + `urctl/webui/index.html`, stdlib server, SSE telemetry at
 12.5 Hz, live FK arm view) whose every button dispatches through the same tool

@@ -89,3 +89,26 @@ services:
     volumes:
       - ./.ursim-polyscopex/applications:/ur/bin/backend/applications
     restart: unless-stopped
+
+  # ---- perception service (RealSense capture + RGB-D cockpit) ------------------
+  # Built for the Jetson Orin that will sit next to the robot (linux/arm64) and
+  # for amd64 dev boxes. `docker compose --profile perception up -d`. Needs USB:
+  # privileged + /dev/bus/usb (Docker Desktop on macOS cannot pass USB through —
+  # on a Mac run `sudo uv run perception gui` natively instead). No auth: cell
+  # network only. Captures persist in ./captures on the host.
+  perception:
+    profiles: ["perception"]
+    build:
+      context: .
+      dockerfile: Dockerfile.perception
+    image: ur-utils/perception:local
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - ./captures:/captures
+    ports:
+      - "7621:7621"
+    environment:
+      - PERCEPTION_SEGMENT_BACKEND=${PERCEPTION_SEGMENT_BACKEND:-stub}
+      - PERCEPTION_RS_SERIAL=${PERCEPTION_RS_SERIAL:-}
+    restart: unless-stopped

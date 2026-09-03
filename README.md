@@ -82,7 +82,8 @@ with Robot(RobotConfig(host="10.0.0.5")) as robot:
 | Path | What it is |
 | ---- | ---------- |
 | `urctl/` | The toolkit: `Robot` facade, Dashboard/Primary/RTDE clients, safety envelope, audit log, tool registry, MCP server, GUI, guided program builder, `.urp`/`.installation` codecs, SSH/docker introspection |
-| `perception/` | Optional camera → pick-pose helpers (`pip install '.[perception]'`) |
+| `perception/` | Camera → pick-pose helpers: RealSense RGB-D capture + cockpit (`perception gui`, zero deps via ctypes; see `docs/realsense.md`), monocular stubs, optional OpenCV/SAM extras |
+| `hardware/` | Printable tool-flange bracket for the D435 (parametric CadQuery + spec) |
 | `programs/` | Sample PolyScope programs with their build scripts |
 | `scripts/` | Standalone helpers (`urp_convert.py`, `poweron.sh`) |
 | `docs/harness.md` | Architecture reference: every read/control surface and how the GUI/MCP sit on them |

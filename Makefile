@@ -25,6 +25,7 @@ export UR_HOST
 
 .PHONY: help sim-up sim-down sim-logs sim-shell sim-poweron \
         simx-up simx-down simx-logs simx-shell \
+        rs-info rs-gui rs-gui-fake rs-capture rs-test perception-build perception-up perception-down \
         test test-unit test-integration test-all \
         lint lint-py lint-sh fmt regen-urps install-dev
 
@@ -77,6 +78,34 @@ simx-state:  ## Read PolyScope X robot state via the Robot-API (JSON).
 
 simx-bring-up:  ## Power on + brake release the PolyScope X robot (needs Remote mode).
 	$(PX_ENV) $(PYTHON) -m urctl bring-up
+
+# ---- RealSense perception (docs/realsense.md) ----------------------------------
+# On macOS librealsense needs root to claim the camera's USB interface, hence
+# the `sudo` on the hardware targets; `rs-gui-fake` needs no camera at all.
+
+rs-info:  ## List attached RealSense cameras + SDK version (macOS: needs sudo).
+	sudo $(PYTHON) -m perception rs-info
+
+rs-gui:  ## RGB-D cockpit on the RealSense (browser, loopback).
+	sudo $(PYTHON) -m perception gui
+
+rs-gui-fake:  ## RGB-D cockpit on a synthetic scene (no camera).
+	$(PYTHON) -m perception gui --fake
+
+rs-capture:  ## One aligned RGB-D capture + nearest-object mask into captures/.
+	sudo $(PYTHON) -m perception rs-capture --out captures
+
+rs-test:  ## Hardware-in-the-loop RealSense tests (skips without a camera).
+	sudo $(PYTEST) -m realsense -q
+
+perception-build:  ## Build the perception service image (Jetson / Linux; compiles librealsense).
+	$(COMPOSE) --profile perception build
+
+perception-up:  ## Run the perception service (privileged, USB, cockpit on :7621).
+	$(COMPOSE) --profile perception up -d
+
+perception-down:  ## Stop the perception service.
+	$(COMPOSE) --profile perception down
 
 # ---- Tests ------------------------------------------------------------------
 

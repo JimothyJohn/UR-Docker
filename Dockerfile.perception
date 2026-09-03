@@ -1,0 +1,41 @@
+# perception service — RealSense capture + RGB-D cockpit, built for the Jetson
+# (linux/arm64) and for amd64 dev boxes. librealsense is compiled here with the
+# RSUSB (libusb) backend so no kernel patches are needed on the host.
+#
+#   docker compose --profile perception build
+#   docker compose --profile perception up -d      # privileged: needs /dev/bus/usb
+#
+# GPU/SAM: swap the base for an NVIDIA L4T PyTorch image and `pip install .[sam]`.
+
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+FROM ${PYTHON_IMAGE} AS librealsense
+ARG LIBREALSENSE_REF=v2.58.4
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git cmake g++ make pkg-config ca-certificates \
+        libusb-1.0-0-dev libssl-dev libudev-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch ${LIBREALSENSE_REF} https://github.com/realsenseai/librealsense.git /src \
+    || git clone --depth 1 --branch ${LIBREALSENSE_REF} https://github.com/IntelRealSense/librealsense.git /src
+RUN cmake -S /src -B /build -DCMAKE_BUILD_TYPE=Release -DFORCE_RSUSB_BACKEND=ON \
+        -DBUILD_EXAMPLES=OFF -DBUILD_GRAPHICAL_EXAMPLES=OFF -DBUILD_TOOLS=OFF \
+        -DBUILD_PYTHON_BINDINGS=OFF -DBUILD_WITH_CUDA=OFF -DBUILD_UNIT_TESTS=OFF \
+    && cmake --build /build -j"$(nproc)" --target realsense2 \
+    && cmake --install /build --prefix /opt/librealsense
+
+FROM ${PYTHON_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=librealsense /opt/librealsense/lib /opt/librealsense/lib
+COPY --from=librealsense /src/config/99-realsense-libusb.rules /etc/udev/rules.d/99-realsense-libusb.rules
+ENV REALSENSE_LIB=/opt/librealsense/lib/librealsense2.so \
+    LD_LIBRARY_PATH=/opt/librealsense/lib \
+    PERCEPTION_RS_FPS=30
+WORKDIR /app
+COPY pyproject.toml README.md LICENSE ./
+COPY urctl ./urctl
+COPY perception ./perception
+COPY scripts/urp_convert.py ./scripts/urp_convert.py
+RUN pip install --no-cache-dir . && python -c "import perception.realsense as r; print(r.load_api().version)"
+VOLUME ["/captures"]
+EXPOSE 7621
+CMD ["perception-gui", "--bind", "0.0.0.0", "--port", "7621", "--no-browser", "--out", "/captures"]

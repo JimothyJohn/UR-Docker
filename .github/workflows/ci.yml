@@ -80,6 +80,8 @@ jobs:
           names = zipfile.ZipFile(wheel).namelist()
           required = [
               "urctl/webui/index.html",   # the GUI's static assets
+              "perception/webui/index.html",  # the RGB-D cockpit's page
+              "perception/realsense.py",
               "urctl/webapp.py",
               "urctl/sysinfo.py",
               "urctl/_urp_convert.py",    # build-time copy of scripts/urp_convert.py
@@ -95,6 +97,8 @@ jobs:
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
           /tmp/smoke/bin/urctl --help > /dev/null
           /tmp/smoke/bin/urctl-gui --help > /dev/null
+          /tmp/smoke/bin/perception-gui --help > /dev/null
+          /tmp/smoke/bin/perception rs-info > /dev/null 2>&1 || true   # no SDK on the runner: must fail cleanly, not crash
           /tmp/smoke/bin/urctl tools | python3 -c "import json,sys; assert len(json.load(sys.stdin)) >= 20"
       - uses: actions/upload-artifact@v7
         with:

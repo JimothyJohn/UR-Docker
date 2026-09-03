@@ -5,6 +5,9 @@
     perceive --depth-backend depth_anything capture
     perceive tools                         # dump the agent tool schemas (JSON)
     perceive call perceive_synthetic --json '{"width":320,"height":240}'
+    perceive rs-info                       # RealSense devices + SDK (needs librealsense2)
+    perceive rs-capture --out captures     # one aligned RGB-D capture (+ nearest-object mask)
+    perceive gui --fake                    # the RGB-D cockpit (synthetic scene; drop --fake for the camera)
 
 Camera + backend selection come from ``--device`` / ``--width`` / ``--height``
 / ``--fps`` / ``--depth-backend`` / ``--blob-backend`` or the matching
@@ -24,6 +27,7 @@ import sys
 from .config import PerceptionConfig
 from .pipeline import PerceptionPipeline
 from .tools import ToolError, call_tool, get_tool_schemas
+from .webapp import DEFAULT_CAPTURE_ROOT, DEFAULT_PORT, add_camera_args, camera_from_args
 
 
 def _emit(result: dict) -> int:
@@ -52,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="stub | blob_cv (default: $PERCEPTION_BLOB_BACKEND or stub)",
     )
     ap.add_argument("--min-blob-area", type=int, default=None, help="drop blobs smaller than this (px)")
+    ap.add_argument(
+        "--segment-backend",
+        default=None,
+        help="stub | sam (default: $PERCEPTION_SEGMENT_BACKEND or stub) — click-to-segment in the gui",
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sy = sub.add_parser("synthetic", help="process a deterministic synthetic frame (no camera)")
@@ -75,6 +84,29 @@ def build_parser() -> argparse.ArgumentParser:
     ct.add_argument("name")
     ct.add_argument("--json", dest="json_args", default="{}", help="tool args as a JSON object")
 
+    ri = sub.add_parser("rs-info", help="list attached RealSense cameras + SDK version (no streaming)")
+    ri.add_argument("--library", default=None, help="path to librealsense2 (default: $REALSENSE_LIB / auto)")
+
+    rc = sub.add_parser("rs-capture", help="grab one aligned RGB-D frame from the RealSense and save it")
+    add_camera_args(rc)
+    rc.add_argument(
+        "--out", default=DEFAULT_CAPTURE_ROOT, help=f"capture root (default: {DEFAULT_CAPTURE_ROOT}/)"
+    )
+    rc.add_argument("--name", default="object", help="capture set name (default: object)")
+    rc.add_argument("--no-mask", action="store_true", help="skip the nearest-object mask")
+    rc.add_argument(
+        "--warmup", type=int, default=15, help="frames to discard for auto-exposure (default: 15)"
+    )
+
+    gu = sub.add_parser("gui", help="local RGB-D cockpit: live view, click-to-segment, capture")
+    add_camera_args(gu)
+    gu.add_argument(
+        "--out", default=DEFAULT_CAPTURE_ROOT, help=f"capture root (default: {DEFAULT_CAPTURE_ROOT}/)"
+    )
+    gu.add_argument("--bind", default="127.0.0.1", help="interface to bind (default: loopback only)")
+    gu.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port (default {DEFAULT_PORT})")
+    gu.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+
     return ap
 
 
@@ -94,7 +126,70 @@ def _config_from_args(args) -> PerceptionConfig:
         overrides["blob_backend"] = args.blob_backend
     if args.min_blob_area is not None:
         overrides["min_blob_area"] = args.min_blob_area
+    if getattr(args, "segment_backend", None) is not None:
+        overrides["segment_backend"] = args.segment_backend
     return PerceptionConfig.from_env(**overrides)
+
+
+def _realsense_command(args) -> int:
+    """The RealSense subcommands — kept apart so `perceive synthetic` never
+    touches the SDK loader."""
+    from .realsense import RealSenseError, list_devices, platform_hint
+
+    config = _config_from_args(args)
+    if args.cmd == "rs-info":
+        try:
+            from .realsense import load_api
+
+            api = load_api(args.library)
+            devices = list_devices(args.library)
+        except RealSenseError as exc:
+            hint = platform_hint(exc)
+            return _emit({"ok": False, "error": str(exc), "hint": hint or None})
+        return _emit({"ok": True, "sdk": {"path": api.path, "api_version": api.version}, "devices": devices})
+
+    if args.cmd == "gui":
+        from .webapp import serve
+
+        serve(
+            camera_from_args(args, config),
+            config=config,
+            capture_root=args.out,
+            bind=args.bind,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+        return 0
+
+    # rs-capture
+    from pathlib import Path
+
+    from .capture import CaptureStore
+    from .segment import StubSegmenter, extract_features
+
+    camera = camera_from_args(args, config)
+    try:
+        camera.open()
+        frame = None
+        for _ in range(max(0, args.warmup) + 1):
+            frame = camera.read()
+        assert frame is not None
+        mask = None if args.no_mask else StubSegmenter().nearest_object(frame)
+        feats = extract_features(mask, frame) if mask is not None and mask.area else None
+        result = CaptureStore(Path(args.out)).save(
+            args.name,
+            frame,
+            mask=mask if (mask is not None and mask.area) else None,
+            features=feats.as_dict() if feats else None,
+            device=camera.describe().get("device", {}),
+        )
+        result["frame"] = frame.summary()
+        result["features"] = feats.as_dict() if feats else None
+        return _emit(result)
+    except RealSenseError as exc:
+        return _emit({"ok": False, "error": str(exc), "hint": platform_hint(exc) or None})
+    finally:
+        camera.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -104,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "tools":
         print(json.dumps(get_tool_schemas(), indent=2))
         return 0
+    if args.cmd in ("rs-info", "rs-capture", "gui"):
+        return _realsense_command(args)
 
     pipe = PerceptionPipeline(_config_from_args(args))
 
