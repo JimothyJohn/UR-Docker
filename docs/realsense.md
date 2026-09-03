@@ -78,6 +78,11 @@ docker compose --profile perception build      # builds librealsense (RSUSB back
 docker compose --profile perception up -d      # privileged for USB; cockpit on :7621, bound 0.0.0.0
 ```
 
+Verified 2026-09-02: the image builds for `linux/arm64` (librealsense v2.58.4,
+RSUSB backend, ~10 min on Apple Silicon), the SDK loads inside it, and
+`perception rs-info` / `rs-capture --fake` run. USB itself was not exercised
+(Docker Desktop on macOS cannot pass the camera through).
+
 The container has no auth — it is a cell-network cockpit, like `urctl gui`.
 Keep it off routable networks or put it behind the Jetson's firewall.
 
