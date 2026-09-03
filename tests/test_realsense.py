@@ -29,6 +29,13 @@ from perception.realsense import (
 from perception.rgbd import Intrinsics
 
 COLOR_K = Intrinsics(64, 48, 60.0, 60.0, 32.0, 24.0, model="inverse_brown_conrady")
+
+
+def balanced(api) -> bool:
+    """Every handle returned except the process-wide context (kept alive by design)."""
+    return all(v == 0 for k, v in api.live.items() if k != "ctx") and api.live.get("ctx", 0) == 1
+
+
 DEPTH_K = Intrinsics(64, 48, 58.0, 58.0, 31.0, 23.5, model="brown_conrady")
 
 
@@ -36,15 +43,25 @@ class FakeApi:
     """Mimics :class:`perception.realsense.Api`'s pythonic surface with plain
     Python objects and counts every handle it hands out / takes back."""
 
-    def __init__(self, *, fail_start: str | None = None, frames: list[list[dict]] | None = None):
+    def __init__(
+        self,
+        *,
+        fail_start: str | None = None,
+        frames: list[list[dict]] | None = None,
+        usb_type: str = "3.2",
+        fail_wait: str | None = None,
+    ):
         self.path = "/fake/librealsense2.so"
         self.version = 25804
         self.fail_start = fail_start
+        self.fail_wait = fail_wait
+        self.usb_type = usb_type
         self.live: dict[str, int] = {}  # handle kind -> outstanding count
         self.log: list[str] = []
         self.frames = frames
         self.n = 0
         self.stride_pad = 0
+        self._ctx = None
 
     def _take(self, kind):
         self.live[kind] = self.live.get(kind, 0) + 1
@@ -64,6 +81,15 @@ class FakeApi:
     def delete_context(self, ctx):
         self._give("ctx")
 
+    def context(self):
+        if self._ctx is None:
+            self._ctx = self.create_context()
+        return self._ctx
+
+    def list_devices(self, ctx):
+        assert ctx == self._ctx, "enumeration must use the shared context"
+        return [self.device_info(None)]
+
     def start_pipeline(self, ctx, *, width, height, fps, serial):
         self.log.append(f"start:{width}x{height}@{fps}:{serial}")
         if self.fail_start:
@@ -81,7 +107,7 @@ class FakeApi:
         self._give("dev")
 
     def device_info(self, dev):
-        return {"name": "Fake D435", "serial": "123456", "firmware": "5.16", "usb_type": "3.2"}
+        return {"name": "Fake D435", "serial": "123456", "firmware": "5.16", "usb_type": self.usb_type}
 
     def depth_scale(self, dev):
         return 0.001
@@ -114,6 +140,8 @@ class FakeApi:
         self._give("align")
 
     def wait_for_frames(self, pipe, timeout_ms):
+        if self.fail_wait:
+            raise RealSenseError(self.fail_wait)
         return self._take("frameset")
 
     def align(self, block, queue, frameset, timeout_ms):
@@ -176,8 +204,9 @@ def test_open_read_close_is_handle_balanced():
         assert f.extra["serial"] == "123456"
         d = cam.describe()
         assert d["kind"] == "realsense" and d["open"] and d["sdk"]["api_version"] == 25804
-    assert all(v == 0 for v in api.live.values()), api.live
+    assert balanced(api), api.live
     assert "start:64x48@30:None" in api.log and "align" in api.log
+    assert cam.effective_fps == 30
 
 
 def test_unaligned_read_uses_depth_intrinsics_and_skips_align():
@@ -186,7 +215,7 @@ def test_unaligned_read_uses_depth_intrinsics_and_skips_align():
         f = cam.read()
     assert not f.aligned and f.intrinsics == DEPTH_K
     assert "align" not in api.log
-    assert all(v == 0 for v in api.live.values())
+    assert balanced(api)
 
 
 def test_serial_is_passed_through():
@@ -201,7 +230,7 @@ def test_start_failure_cleans_up_and_propagates():
     cam = RealSenseCamera(api=api)
     with pytest.raises(RealSenseError, match="No device"):
         cam.open()
-    assert all(v == 0 for v in api.live.values())
+    assert balanced(api)
     assert not cam.describe()["open"]
 
 
@@ -213,7 +242,7 @@ def test_read_before_open_and_missing_streams():
     with RealSenseCamera(width=64, height=48, api=api) as cam:
         with pytest.raises(RealSenseError, match="lacks color\\+depth"):
             cam.read()
-    assert all(v == 0 for v in api.live.values())  # the frameset was still released
+    assert balanced(api)  # the frameset was still released
 
 
 def test_padded_strides_are_removed():
@@ -270,3 +299,34 @@ def test_platform_hint():
     )
     assert "USB3" in platform_hint(RealSenseError("No device connected"))
     assert platform_hint(RealSenseError("something else")) == ""
+
+
+def test_context_is_shared_across_opens_and_enumeration():
+    api = FakeApi()
+    cam = RealSenseCamera(width=64, height=48, api=api)
+    with cam:
+        pass
+    with cam:  # reopen: no second context
+        cam.read()
+    assert api.live["ctx"] == 1 and balanced(api)
+
+
+def test_usb2_link_caps_fps_unless_forced(capsys):
+    api = FakeApi(usb_type="2.1")
+    with RealSenseCamera(width=64, height=48, api=api) as cam:
+        assert cam.effective_fps == 15 and cam.describe()["stream"]["fps"] == 15
+    assert any("@15:" in s for s in api.log)
+    assert "USB 2.1" in capsys.readouterr().err
+    api = FakeApi(usb_type="2.1")
+    with RealSenseCamera(width=64, height=48, fps=30, api=api) as cam:
+        assert cam.effective_fps == 30
+
+
+def test_first_frame_timeout_gets_a_hint():
+    api = FakeApi(fail_wait="Frame didn't arrive within 5000")
+    with RealSenseCamera(width=64, height=48, api=api) as cam:
+        with pytest.raises(RealSenseError) as ei:
+            cam.read()
+    msg = str(ei.value)
+    assert "first frameset never came" in msg and "re-plug" in msg and "64x48@30" in msg
+    assert "re-plug" in platform_hint(ei.value)

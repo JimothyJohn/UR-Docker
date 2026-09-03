@@ -134,6 +134,8 @@ class Api:
         self._declare()
         self.version = self._call("rs2_get_api_version")
         self._check_enums()
+        self._ctx = None
+        self._ctx_lock = threading.Lock()
 
     # -- declarations ------------------------------------------------------------
 
@@ -257,6 +259,23 @@ class Api:
 
     def delete_context(self, ctx) -> None:
         self.lib.rs2_delete_context(ctx)
+
+    def context(self):
+        """The process-wide ``rs2_context`` (created once, never deleted).
+
+        librealsense is built around one context per process: each context
+        claims the camera's USB interfaces through its own device watcher,
+        and on macOS's libusb backend those claims are released *late* — a
+        second context created seconds after the first (or after another
+        process released the camera) finds the depth interface still held,
+        logs ``cannot access depth sensor`` and starts a pipeline that never
+        delivers a frameset. Enumeration and streaming therefore share this
+        handle; the OS reclaims it at exit.
+        """
+        with self._ctx_lock:
+            if self._ctx is None:
+                self._ctx = self.create_context()
+            return self._ctx
 
     def list_devices(self, ctx) -> list[dict]:
         """Info dicts for every connected device (each device handle released)."""
@@ -504,7 +523,7 @@ class RealSenseCamera:
 
     width: int = 640
     height: int = 480
-    fps: int = 30
+    fps: int | None = None  # None = 30 on USB 3, 15 on a USB 2 link
     serial: str | None = None
     align: bool = True
     timeout_ms: int = 5000
@@ -515,22 +534,26 @@ class RealSenseCamera:
     info: dict = field(default_factory=dict, init=False)
     intrinsics: dict = field(default_factory=dict, init=False)
     depth_scale: float | None = field(default=None, init=False)
+    effective_fps: int | None = field(default=None, init=False)
     _ctx: Any = field(default=None, init=False, repr=False)
     _pipe: Any = field(default=None, init=False, repr=False)
     _profile: Any = field(default=None, init=False, repr=False)
     _align: Any = field(default=None, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _frames_read: int = field(default=0, init=False, repr=False)
 
     def open(self) -> None:
         if self._pipe is not None:
             return
+        self._frames_read = 0
         api = self.api if self.api is not None else load_api(self.library)
         self.api = api
         api.log_to_console(self.log_severity)
-        self._ctx = api.create_context()
+        self._ctx = api.context()
         try:
+            self.effective_fps = self._choose_fps(api)
             self._pipe, self._profile = api.start_pipeline(
-                self._ctx, width=self.width, height=self.height, fps=self.fps, serial=self.serial
+                self._ctx, width=self.width, height=self.height, fps=self.effective_fps, serial=self.serial
             )
             dev = api.profile_device(self._profile)
             try:
@@ -551,13 +574,48 @@ class RealSenseCamera:
             self.close()
             raise
 
+    def _choose_fps(self, api) -> int:
+        """Explicit ``fps`` wins; otherwise 30, or 15 when the camera reports a
+        USB 2 link (depth + colour at 640x480@30 exceeds USB 2's budget and
+        the SDK then simply never delivers a full frameset)."""
+        if self.fps:
+            return int(self.fps)
+        usb = None
+        try:
+            for d in api.list_devices(self._ctx):
+                if not self.serial or d.get("serial") == self.serial:
+                    usb = d.get("usb_type")
+                    break
+        except RealSenseError:
+            pass
+        if usb and str(usb).startswith("2"):
+            print(
+                f"realsense: USB {usb} link — capping the stream at 15 fps (pass fps=30 to force)",
+                file=sys.stderr,
+            )
+            return 15
+        return 30
+
     def read(self) -> RgbdFrame:
         """Block for the next color + depth pair (aligned when configured)."""
         if self._pipe is None:
             raise RealSenseError("camera is not open (call open() first)")
         api = self.api
         with self._lock:
-            frameset = api.wait_for_frames(self._pipe, self.timeout_ms)
+            try:
+                frameset = api.wait_for_frames(self._pipe, self.timeout_ms)
+            except RealSenseError as exc:
+                if "arrive" in str(exc) and self._frames_read == 0:
+                    raise RealSenseError(
+                        f"{exc} — the pipeline started but the first frameset never came "
+                        f"(usb {self.info.get('usb_type')}, "
+                        f"{self.width}x{self.height}@{self.effective_fps}). "
+                        "Usual cause: the camera's USB interfaces were still held by a previous open "
+                        "(another process, or one that just exited) — re-plug the camera and retry. "
+                        "On a USB 2 link keep fps at 15 or lower the resolution."
+                    ) from exc
+                raise
+            self._frames_read += 1
             if self._align is not None:
                 frameset = api.align(self._align[0], self._align[1], frameset, self.timeout_ms)
             try:
@@ -608,16 +666,19 @@ class RealSenseCamera:
                 api.stop_pipeline(self._pipe, self._profile)
             finally:
                 self._pipe = self._profile = None
-        if self._ctx is not None:
-            api.delete_context(self._ctx)
-            self._ctx = None
+        self._ctx = None  # shared with the process; never deleted here
 
     def describe(self) -> dict:
         return {
             "kind": "realsense",
             "open": self._pipe is not None,
             "device": self.info,
-            "stream": {"width": self.width, "height": self.height, "fps": self.fps, "aligned": self.align},
+            "stream": {
+                "width": self.width,
+                "height": self.height,
+                "fps": self.effective_fps or self.fps,
+                "aligned": self.align,
+            },
             "depth_scale_m": self.depth_scale,
             "intrinsics": {k: v.as_dict() for k, v in self.intrinsics.items()},
             "sdk": {
@@ -648,11 +709,7 @@ def list_devices(library: str | None = None) -> list[dict]:
     """Info for every connected RealSense (opens no streams)."""
     api = load_api(library)
     api.log_to_console("error")
-    ctx = api.create_context()
-    try:
-        return api.list_devices(ctx)
-    finally:
-        api.delete_context(ctx)
+    return api.list_devices(api.context())
 
 
 @dataclass
@@ -749,14 +806,14 @@ def open_camera(
     fake: bool = False,
     width: int = 640,
     height: int = 480,
-    fps: int = 30,
+    fps: int | None = None,
     serial: str | None = None,
     align: bool = True,
     library: str | None = None,
 ) -> RgbdCamera:
     """Factory used by the CLI/viewer: a real D4xx, or the synthetic stand-in."""
     if fake:
-        return SyntheticRgbdCamera(width=width, height=height, fps=min(fps, 15))
+        return SyntheticRgbdCamera(width=width, height=height, fps=min(fps or 15, 15))
     return RealSenseCamera(width=width, height=height, fps=fps, serial=serial, align=align, library=library)
 
 
@@ -774,6 +831,12 @@ def platform_hint(exc: BaseException) -> str:
         return (
             "librealsense could not claim the camera's USB interface. On Linux install the SDK's udev rules "
             "(99-realsense-libusb.rules) and re-plug the camera, or run as root / add the user to `plugdev`."
+        )
+    if "didn't arrive" in text or "did not arrive" in text:
+        return (
+            "the SDK opened the camera but delivered no frames. On macOS this is almost always a stale USB "
+            "claim from a previous open (another process, or one that just exited): unplug and re-plug the "
+            "camera, then retry. On a USB 2 link use 15 fps."
         )
     if "No device" in text or "device count" in text.lower():
         return (

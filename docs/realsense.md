@@ -90,8 +90,9 @@ Keep it off routable networks or put it behind the Jetson's firewall.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `failed to set power state` / `RS2_USB_STATUS_ACCESS` on macOS | libusb can't detach the built-in UVC driver | run under `sudo`; close any app holding the camera |
+| `failed to set power state` / `RS2_USB_STATUS_ACCESS` on macOS | libusb can't detach the built-in UVC driver — or a process that just exited still holds the interface | run under `sudo`; close any app holding the camera; if it was just released, wait a few seconds or re-plug |
+| `cannot access depth sensor` then `Frame didn't arrive within 5000` | the SDK could not claim the depth UVC interface when the device was built (a previous context/process still held it — macOS releases late), so the pipeline started half-alive | re-plug the camera and retry. The toolkit now shares **one** SDK context per process so enumeration + streaming in the same process can't trip this |
+| USB 2 link (`usb 2.x` in `rs-info` / the header) | depth + colour at 640×480@30 exceeds the USB 2 budget, the SDK just stops delivering | the camera auto-caps at 15 fps on USB 2 (`--rs-fps` forces); move to a direct USB 3 port for 30 |
 | same on Linux | udev rules missing | install librealsense's `99-realsense-libusb.rules`, re-plug |
 | `librealsense2 not found` | SDK not installed / not on the search path | `brew install librealsense`, or set `REALSENSE_LIB` |
-| `usb 2.x` chip in the header | camera on a USB 2 port/cable | depth at 640×480@30 needs USB 3; use the short USB-C 3.x cable |
 | stream stalls after a while | USB-C cable too long / hub | RealSense is picky: ≤ 2 m active-free cable, direct port |

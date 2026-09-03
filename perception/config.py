@@ -39,10 +39,10 @@ DEFAULT_BLOB_BACKEND = "stub"
 DEFAULT_SEGMENT_BACKEND = "stub"
 
 # RealSense selection. Empty serial = first attached camera. The RealSense
-# streams run at their own rate (D435 color+depth do 30 fps at 640x480; 15 is
-# also valid) independent of the pure-Python pipeline's `fps` above.
+# streams run at their own rate independent of the pure-Python pipeline's
+# `fps` above; 0 = auto (30 on USB 3, 15 on a USB 2 link).
 DEFAULT_RS_SERIAL = ""
-DEFAULT_RS_FPS = 30
+DEFAULT_RS_FPS = 0
 
 # The stub depth estimator emits a normalized 0..1 map; near/far scale it into
 # metres so downstream consumers always see physical units. These bracket a

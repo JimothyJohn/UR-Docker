@@ -388,7 +388,9 @@ def add_camera_args(ap) -> None:
     ap.add_argument(
         "--serial", default=None, help="RealSense serial (default: $PERCEPTION_RS_SERIAL or first)"
     )
-    ap.add_argument("--rs-fps", type=int, default=None, help="RealSense stream fps (default: 30)")
+    ap.add_argument(
+        "--rs-fps", type=int, default=None, help="RealSense stream fps (default: auto — 30, or 15 on USB 2)"
+    )
     ap.add_argument("--no-align", action="store_true", help="don't align depth to the color image")
     ap.add_argument("--library", default=None, help="path to librealsense2 (default: $REALSENSE_LIB / auto)")
 
@@ -398,7 +400,7 @@ def camera_from_args(args, config: PerceptionConfig) -> RgbdCamera:
         fake=bool(getattr(args, "fake", False)),
         width=config.width,
         height=config.height,
-        fps=args.rs_fps if getattr(args, "rs_fps", None) else config.rs_fps,
+        fps=(args.rs_fps if getattr(args, "rs_fps", None) else config.rs_fps) or None,
         serial=(args.serial if getattr(args, "serial", None) else config.rs_serial) or None,
         align=not getattr(args, "no_align", False),
         library=getattr(args, "library", None),
