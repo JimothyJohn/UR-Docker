@@ -47,6 +47,17 @@ DEFAULT_SAM_MODEL = ""
 # `fps` above; 0 = auto (30 on USB 3, 15 on a USB 2 link).
 DEFAULT_RS_SERIAL = ""
 DEFAULT_RS_FPS = 0
+# Depth stream resolution (independent of the colour size above; aligned depth
+# lands on the colour grid anyway). 848x480 is the D435's native stereo mode.
+DEFAULT_RS_DEPTH_WIDTH = 848
+DEFAULT_RS_DEPTH_HEIGHT = 480
+# librealsense post-processing on the depth frame (spatial + temporal in the
+# disparity domain; see perception.realsense.DepthFilters for the knobs).
+DEFAULT_RS_FILTERS = True
+# Depth-sensor options at open: a visual preset name ("none" = leave the sensor
+# as configured) and projector power ("max", "none", or mW).
+DEFAULT_RS_PRESET = "high_accuracy"
+DEFAULT_RS_LASER_POWER = "max"
 
 # The stub depth estimator emits a normalized 0..1 map; near/far scale it into
 # metres so downstream consumers always see physical units. These bracket a
@@ -125,6 +136,11 @@ class PerceptionConfig:
     sam_model: str = DEFAULT_SAM_MODEL
     rs_serial: str = DEFAULT_RS_SERIAL
     rs_fps: int = DEFAULT_RS_FPS
+    rs_depth_width: int = DEFAULT_RS_DEPTH_WIDTH
+    rs_depth_height: int = DEFAULT_RS_DEPTH_HEIGHT
+    rs_filters: bool = DEFAULT_RS_FILTERS
+    rs_preset: str = DEFAULT_RS_PRESET
+    rs_laser_power: str = DEFAULT_RS_LASER_POWER
 
     @classmethod
     def from_env(cls, **overrides) -> PerceptionConfig:
@@ -150,6 +166,11 @@ class PerceptionConfig:
             "sam_model": _env_str("PERCEPTION_SAM_MODEL", DEFAULT_SAM_MODEL),
             "rs_serial": _env_str("PERCEPTION_RS_SERIAL", DEFAULT_RS_SERIAL),
             "rs_fps": _env_int("PERCEPTION_RS_FPS", DEFAULT_RS_FPS),
+            "rs_depth_width": _env_int("PERCEPTION_RS_DEPTH_WIDTH", DEFAULT_RS_DEPTH_WIDTH),
+            "rs_depth_height": _env_int("PERCEPTION_RS_DEPTH_HEIGHT", DEFAULT_RS_DEPTH_HEIGHT),
+            "rs_filters": _env_bool("PERCEPTION_RS_FILTERS", DEFAULT_RS_FILTERS),
+            "rs_preset": _env_str("PERCEPTION_RS_PRESET", DEFAULT_RS_PRESET),
+            "rs_laser_power": _env_str("PERCEPTION_RS_LASER_POWER", DEFAULT_RS_LASER_POWER),
         }
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]

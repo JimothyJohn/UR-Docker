@@ -13,8 +13,19 @@ from perception.frame import Frame
 from perception.realsense import (
     FORMAT_RGB8,
     FORMAT_Z16,
+    LASER_MAX,
+    OPTION_EMITTER_ENABLED,
+    OPTION_FILTER_MAGNITUDE,
+    OPTION_FILTER_SMOOTH_ALPHA,
+    OPTION_HOLES_FILL,
+    OPTION_LASER_POWER,
+    OPTION_MIN_DISTANCE,
+    OPTION_VISUAL_PRESET,
     STREAM_COLOR,
     STREAM_DEPTH,
+    VISUAL_PRESETS,
+    DepthFilters,
+    DepthTuning,
     RealSenseCamera,
     RealSenseError,
     RealSenseLibraryNotFound,
@@ -50,6 +61,9 @@ class FakeApi:
         frames: list[list[dict]] | None = None,
         usb_type: str = "3.2",
         fail_wait: str | None = None,
+        unsupported: frozenset[int] = frozenset(),
+        refuse: frozenset[int] = frozenset(),
+        no_depth_sensor: bool = False,
     ):
         self.path = "/fake/librealsense2.so"
         self.version = 25804
@@ -62,6 +76,10 @@ class FakeApi:
         self.n = 0
         self.stride_pad = 0
         self._ctx = None
+        self.unsupported = unsupported  # sensor options rs2_supports_option says no to
+        self.refuse = refuse  # sensor options whose set raises
+        self.no_depth_sensor = no_depth_sensor
+        self.options: dict[str, dict[int, float]] = {}  # handle -> {option: value}
 
     def _take(self, kind):
         self.live[kind] = self.live.get(kind, 0) + 1
@@ -90,8 +108,9 @@ class FakeApi:
         assert ctx == self._ctx, "enumeration must use the shared context"
         return [self.device_info(None)]
 
-    def start_pipeline(self, ctx, *, width, height, fps, serial):
+    def start_pipeline(self, ctx, *, width, height, fps, serial, depth_width=None, depth_height=None):
         self.log.append(f"start:{width}x{height}@{fps}:{serial}")
+        self.log.append(f"depth:{depth_width or width}x{depth_height or height}")
         if self.fail_start:
             raise RealSenseError(self.fail_start)
         return self._take("pipe"), self._take("profile")
@@ -110,7 +129,48 @@ class FakeApi:
         return {"name": "Fake D435", "serial": "123456", "firmware": "5.16", "usb_type": self.usb_type}
 
     def depth_scale(self, dev):
-        return 0.001
+        return None if self.no_depth_sensor else 0.001
+
+    # -- options (sensor + processing blocks share rs2_options) ----------------
+    def depth_sensor(self, dev):
+        return None if self.no_depth_sensor else self._take("sensor")
+
+    def delete_sensor(self, sensor):
+        self._give("sensor")
+
+    def supports_option(self, handle, option):
+        return option not in self.unsupported
+
+    def option_range(self, handle, option):
+        return (0.0, 360.0, 30.0, 150.0) if option == OPTION_LASER_POWER else (0.0, 1.0, 1.0, 0.0)
+
+    def set_option(self, handle, option, value):
+        if option in self.refuse:
+            raise RealSenseError(f"rs2_set_option({option}): refused")
+        self.options.setdefault(handle, {})[option] = float(value)
+        self.log.append(f"set:{handle}:{option}={float(value):g}")
+
+    def get_option(self, handle, option):
+        return self.options.get(handle, {}).get(option, 0.0)
+
+    def create_filter(self, kind, options=None):
+        block, queue = self._take(f"filter:{kind}"), self._take("queue")
+        try:
+            for option, value in (options or {}).items():
+                self.set_option(block, option, value)
+        except RealSenseError:
+            self.delete_filter(block, queue)  # the real Api releases its own partial block
+            raise
+        return block, queue
+
+    def delete_filter(self, block, queue):
+        self._give("queue")
+        self._give(block.rsplit("#", 1)[0])
+
+    def process(self, block, queue, frameset, timeout_ms):
+        self._give("frameset")
+        self.log.append(f"process:{block.rsplit('#', 1)[0].split(':', 1)[1]}")
+        return self._take("frameset")
 
     def profile_streams(self, profile):
         return [
@@ -206,7 +266,10 @@ def test_open_read_close_is_handle_balanced():
         assert d["kind"] == "realsense" and d["open"] and d["sdk"]["api_version"] == 25804
     assert balanced(api), api.live
     assert "start:64x48@30:None" in api.log and "align" in api.log
+    assert "depth:848x480" in api.log  # depth streams at its native mode, colour at 64x48
     assert cam.effective_fps == 30
+    assert d["depth"]["width"] == 848
+    assert d["depth"]["filters"] == ["to_disparity", "spatial", "temporal", "to_depth"]
 
 
 def test_unaligned_read_uses_depth_intrinsics_and_skips_align():
@@ -345,3 +408,120 @@ def test_first_frame_timeout_gets_a_hint():
     msg = str(ei.value)
     assert "first frameset never came" in msg and "re-plug" in msg and "64x48@30" in msg
     assert "re-plug" in platform_hint(ei.value)
+
+
+# ----- depth quality: filter chain, sensor tuning, depth resolution ---------------
+
+
+def _chain_log(api) -> list[str]:
+    return [e for e in api.log if e.startswith("process:") or e == "align"]
+
+
+def test_default_filter_chain_runs_before_align_in_intel_order():
+    api = FakeApi()
+    with RealSenseCamera(width=64, height=48, api=api) as cam:
+        cam.read()
+        cam.read()
+    # disparity domain for spatial+temporal, back to depth, *then* align — per frame, in order
+    per_frame = ["process:to_disparity", "process:spatial", "process:temporal", "process:to_depth", "align"]
+    assert _chain_log(api) == per_frame * 2
+    assert balanced(api), api.live  # every block, queue and intermediate frameset released
+    # the SDK defaults land on the blocks
+    spatial = next(h for h in api.options if h.startswith("filter:spatial"))
+    temporal = next(h for h in api.options if h.startswith("filter:temporal"))
+    assert api.options[spatial][OPTION_FILTER_MAGNITUDE] == 2.0
+    assert api.options[spatial][OPTION_FILTER_SMOOTH_ALPHA] == 0.5
+    assert api.options[temporal][OPTION_FILTER_SMOOTH_ALPHA] == 0.4
+    assert api.options[temporal][OPTION_HOLES_FILL] == 3.0  # persistency index, not hole filling
+
+
+def test_filters_none_is_raw_depth():
+    api = FakeApi()
+    with RealSenseCamera(width=64, height=48, filters=None, api=api) as cam:
+        cam.read()
+        assert cam.describe()["depth"]["filters"] == []
+    assert _chain_log(api) == ["align"]
+    assert not any(k.startswith("filter:") for k in api.live)
+
+
+def test_filter_chain_composition():
+    assert [k for k, _ in DepthFilters().chain()] == ["to_disparity", "spatial", "temporal", "to_depth"]
+    assert [k for k, _ in DepthFilters(disparity=False).chain()] == ["spatial", "temporal"]
+    assert [k for k, _ in DepthFilters(spatial=False, temporal=False).chain()] == []
+    full = DepthFilters(hole_filling=2, min_m=0.2, max_m=1.5, temporal_persistence=8)
+    kinds = [k for k, _ in full.chain()]
+    assert kinds == ["threshold", "to_disparity", "spatial", "temporal", "to_depth", "hole_filling"]
+    opts = dict(full.chain())
+    assert opts["threshold"][OPTION_MIN_DISTANCE] == 0.2 and opts["hole_filling"][OPTION_HOLES_FILL] == 2.0
+    assert opts["temporal"][OPTION_HOLES_FILL] == 8.0
+    assert DepthFilters(temporal=False).as_dict()["chain"] == ["to_disparity", "spatial", "to_depth"]
+    # a filter that fails to configure tears down cleanly and aborts the open
+    api = FakeApi(refuse=frozenset({OPTION_FILTER_MAGNITUDE}))
+    cam = RealSenseCamera(width=64, height=48, api=api)
+    with pytest.raises(RealSenseError, match="refused"):
+        cam.open()
+    assert balanced(api), api.live
+
+
+def test_default_tuning_sets_preset_then_emitter_then_max_laser():
+    api = FakeApi()
+    with RealSenseCamera(width=64, height=48, api=api) as cam:
+        applied = cam.tuning_applied
+        assert cam.describe()["depth"]["tuning_applied"] is applied
+    sensor_sets = [e for e in api.log if e.startswith("set:sensor")]
+    assert sensor_sets == [
+        f"set:sensor#1:{OPTION_VISUAL_PRESET}={VISUAL_PRESETS['high_accuracy']}",
+        f"set:sensor#1:{OPTION_EMITTER_ENABLED}=1",
+        f"set:sensor#1:{OPTION_LASER_POWER}=360",  # LASER_MAX resolved against the sensor's range
+    ]
+    assert applied == {
+        "preset": {"ok": True, "value": "high_accuracy"},
+        "emitter": {"ok": True, "value": True},
+        "laser_power": {"ok": True, "value": 360.0},
+    }
+    assert balanced(api), api.live  # the sensor handle was released
+
+
+def test_tuning_is_best_effort_and_reported():
+    api = FakeApi(unsupported=frozenset({OPTION_LASER_POWER}), refuse=frozenset({OPTION_VISUAL_PRESET}))
+    with RealSenseCamera(width=64, height=48, api=api) as cam:
+        cam.read()  # still streams
+        applied = cam.tuning_applied
+    assert applied["preset"]["ok"] is False and "refused" in applied["preset"]["error"]
+    assert applied["laser_power"] == {"ok": False, "error": "unsupported by this sensor"}
+    assert applied["emitter"]["ok"] is True
+    assert balanced(api), api.live
+
+
+def test_tuning_none_and_partial_leave_the_sensor_alone():
+    api = FakeApi()
+    with RealSenseCamera(width=64, height=48, tuning=None, api=api) as cam:
+        assert cam.tuning_applied == {} and cam.describe()["depth"]["tuning"] is None
+    assert not any(e.startswith("set:sensor") for e in api.log)
+    api = FakeApi()
+    explicit = DepthTuning(preset=None, laser_power=90.0, emitter=None)
+    with RealSenseCamera(width=64, height=48, tuning=explicit, api=api) as cam:
+        assert cam.tuning_applied == {"laser_power": {"ok": True, "value": 90.0}}
+    assert [e for e in api.log if e.startswith("set:sensor")] == [f"set:sensor#1:{OPTION_LASER_POWER}=90"]
+    assert DepthTuning(laser_power=LASER_MAX).laser_power == LASER_MAX
+    with pytest.raises(ValueError, match="unknown visual preset"):
+        DepthTuning(preset="turbo")
+    with pytest.raises(ValueError, match="laser_power"):
+        DepthTuning(laser_power=-5.0)
+
+
+def test_no_depth_sensor_is_an_error_before_tuning():
+    api = FakeApi(no_depth_sensor=True)
+    with pytest.raises(RealSenseError, match="no depth sensor"):
+        RealSenseCamera(width=64, height=48, api=api).open()
+    assert balanced(api), api.live
+
+
+def test_depth_resolution_is_independent_of_colour():
+    api = FakeApi()
+    with RealSenseCamera(width=64, height=48, depth_width=32, depth_height=24, api=api) as cam:
+        assert cam.describe()["depth"]["width"] == 32
+    assert "depth:32x24" in api.log and "start:64x48@30:None" in api.log
+    real = open_camera(fake=False, width=640, height=480, depth_width=1280, depth_height=720, filters=None)
+    assert isinstance(real, RealSenseCamera) and (real.depth_width, real.depth_height) == (1280, 720)
+    assert real.filters is None and real.tuning is not None

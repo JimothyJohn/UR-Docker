@@ -37,6 +37,31 @@ SDK's `align` block so depth is re-projected into the colour image: pixel
 `(u, v)` names the same physical point in both, and the frame carries the
 colour intrinsics. `RgbdFrame.point_at(u, v)` gives camera-frame metres.
 
+## Depth quality (why the raw stream looks noisy, and what's on by default)
+
+A D435 pixel straight off the sensor jitters by millimetres at half a metre
+and by a centimetre or two at two metres — stereo error grows with the square
+of distance — so a single-pixel readout flickers. Three things now run by
+default to steady it, all through the same ctypes binding (no new deps):
+
+| Knob | Default | Flag / env | What it does |
+| --- | --- | --- | --- |
+| **Depth resolution** | 848×480 | `--depth-res WxH`, `PERCEPTION_RS_DEPTH_WIDTH/_HEIGHT` | The D435's native stereo mode; the ASIC derives 640×480 by downscaling, so 848×480 is the accuracy-optimal choice (Intel's D400 tuning guide). Colour stays at `--width/--height`; aligned depth lands on the colour grid regardless. |
+| **Post-processing chain** | on | `--no-depth-filters`, `PERCEPTION_RS_FILTERS=0` | `DepthFilters`: depth→disparity → **spatial** (edge-preserving smoothing) → **temporal** (per-pixel EMA over frames, persistence "valid in 2 of the last 4") → disparity→depth, applied to the depth frame *before* alignment in Intel's recommended order. Hole filling and a min/max threshold exist on the dataclass but are off — hole filling invents depth, which is wrong for measuring. |
+| **Sensor tuning** | `high_accuracy`, laser max | `--rs-preset NAME\|none`, `--laser-power MW\|max\|none`, `PERCEPTION_RS_PRESET`, `PERCEPTION_RS_LASER_POWER` | `DepthTuning`, set once at open: the *High Accuracy* visual preset raises the stereo confidence threshold (fewer pixels, far fewer wrong ones) and full projector power puts more texture on flat surfaces. Best effort — an unsupported or refused option is reported in `/api/info` → `camera.depth.tuning_applied`, never fatal. `none` leaves a sensor you tuned in realsense-viewer alone. |
+
+The filter blocks are `rs2_processing_block`s fed whole framesets, exactly like
+the `align` block, so each is one `rs2_process_frame` + queue wait per frame.
+The temporal filter is what steadies a static scene; it lags on moving objects
+by a few frames, which is the trade. `tests/test_realsense_hw.py::
+test_filtered_depth_is_steadier_than_raw` measures per-pixel temporal noise in
+a centre patch, raw vs default, on the attached camera
+(`sudo uv run pytest -m realsense -q -s` prints both numbers).
+
+What no filter fixes: anything under ~28 cm returns nothing; dark matte,
+shiny, or transparent surfaces defeat stereo; direct sunlight washes out the
+IR projector. 30–60 cm from the workpiece is the good zone for the bracket.
+
 The cockpit (`perception/webapp.py` + `perception/webui/index.html`) is a
 stdlib HTTP server, same shape as `urctl gui`. One thread pumps the camera;
 the page long-polls `/api/rgbd` for a binary container (JSON header + colour
@@ -125,3 +150,5 @@ later backend behind the same `Segmenter` seam but is not wired.
 | same on Linux | udev rules missing | install librealsense's `99-realsense-libusb.rules`, re-plug |
 | `librealsense2 not found` | SDK not installed / not on the search path | `brew install librealsense`, or set `REALSENSE_LIB` |
 | stream stalls after a while | USB-C cable too long / hub | RealSense is picky: ≤ 2 m active-free cable, direct port |
+| depth readout flickers by mm–cm on a static scene | raw stereo noise (grows with distance²); or the filters were turned off | leave the defaults on (see *Depth quality*); check `/api/info` → `camera.depth.filters` is non-empty and `tuning_applied` says `ok`; get the camera closer to the work |
+| `Couldn't resolve requests` / pipeline start fails right after this change | the depth sensor doesn't offer 848×480 (D405, some firmware) | `--depth-res 640x480` |

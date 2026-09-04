@@ -401,7 +401,9 @@
       $('chipSeg').textContent = `seg ${j.segmenter}`;
       if (j.last_error && !j.frame) banner(j.last_error);
       const K = (c.intrinsics || {}).color, s = c.stream || {};
+      const dp = c.depth || {}, ta = dp.tuning_applied || {}, tun = Object.keys(ta).map(k => `${k}=${ta[k].ok ? ta[k].value : 'x'}`).join(' ');
       const rows = [['kind', c.kind], ['stream', `${s.width}×${s.height} @ ${s.fps} · ${s.aligned ? 'depth→colour' : 'unaligned'}`],
+        ['depth', `${dp.width || s.width}×${dp.height || s.height} · ${(dp.filters || []).length ? dp.filters.join(' → ') : 'raw'}${tun ? ' · ' + tun : ''}`],
         ['firmware', d.firmware || '–'], ['depth scale', c.depth_scale_m !== null ? `${c.depth_scale_m} m/unit` : '–'],
         ['fx / fy', K ? `${K.fx.toFixed(1)} / ${K.fy.toFixed(1)}` : '–'], ['pp', K ? `${K.ppx.toFixed(1)}, ${K.ppy.toFixed(1)}` : '–'],
         ['fov', K ? `${K.fov_deg[0].toFixed(1)}° × ${K.fov_deg[1].toFixed(1)}°` : '–'], ['sdk', c.sdk ? `${c.sdk.api_version}` : '–'],

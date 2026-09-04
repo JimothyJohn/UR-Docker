@@ -284,3 +284,61 @@ def test_gui_main_help_and_fake_wiring(monkeypatch, tmp_path):
         and calls["bind"] == "127.0.0.1"
     )
     assert isinstance(calls["config"], PerceptionConfig) and Path(calls["capture_root"]).exists()
+
+
+def test_depth_flags_reach_the_camera(monkeypatch, tmp_path):
+    """--depth-res / --no-depth-filters / --rs-preset / --laser-power (and their
+    env twins) land on the RealSenseCamera the cockpit opens."""
+    import argparse
+
+    from perception.realsense import (
+        DEFAULT_DEPTH_FILTERS,
+        LASER_MAX,
+        DepthTuning,
+        RealSenseCamera,
+    )
+    from perception.webapp import camera_from_args, depth_tuning_from, parse_resolution
+
+    assert parse_resolution("848x480") == (848, 480) and parse_resolution("1280×720") == (1280, 720)
+    for bad in ("848", "0x480", "wxh", "-1x2"):
+        with pytest.raises(ValueError):
+            parse_resolution(bad)
+    assert depth_tuning_from("high_accuracy", "max") == DepthTuning()
+    assert depth_tuning_from("none", "none") is None and depth_tuning_from("", "") is None
+    assert depth_tuning_from("None", "90") == DepthTuning(preset=None, laser_power=90.0, emitter=True)
+    assert depth_tuning_from("default", "leave") == DepthTuning(
+        preset="default", laser_power=None, emitter=None
+    )
+    assert depth_tuning_from("high_density", "MAX").laser_power == LASER_MAX
+    with pytest.raises(ValueError, match="laser power"):
+        depth_tuning_from("default", "lots")
+    with pytest.raises(ValueError, match="unknown visual preset"):
+        depth_tuning_from("turbo", "max")
+
+    def ns(**kw):
+        base = dict(fake=False, rs_fps=None, serial=None, no_align=False, library="/nope")
+        base.update(kw)
+        return argparse.Namespace(**base)
+
+    cam = camera_from_args(ns(), PerceptionConfig.from_env())
+    assert isinstance(cam, RealSenseCamera)
+    assert (cam.depth_width, cam.depth_height) == (848, 480)
+    assert cam.filters is DEFAULT_DEPTH_FILTERS and cam.tuning == DepthTuning()
+
+    cam = camera_from_args(
+        ns(depth_res="640x480", no_depth_filters=True, rs_preset="none", laser_power="0"),
+        PerceptionConfig.from_env(),
+    )
+    assert (cam.depth_width, cam.depth_height) == (640, 480) and cam.filters is None
+    assert cam.tuning == DepthTuning(preset=None, laser_power=0.0, emitter=True)
+
+    monkeypatch.setenv("PERCEPTION_RS_DEPTH_WIDTH", "1280")
+    monkeypatch.setenv("PERCEPTION_RS_DEPTH_HEIGHT", "720")
+    monkeypatch.setenv("PERCEPTION_RS_FILTERS", "0")
+    monkeypatch.setenv("PERCEPTION_RS_PRESET", "high_density")
+    monkeypatch.setenv("PERCEPTION_RS_LASER_POWER", "none")
+    cam = camera_from_args(ns(), PerceptionConfig.from_env())
+    assert (cam.depth_width, cam.depth_height) == (1280, 720) and cam.filters is None
+    assert cam.tuning == DepthTuning(preset="high_density", laser_power=None, emitter=None)
+    # the synthetic camera ignores all of it
+    assert isinstance(camera_from_args(ns(fake=True), PerceptionConfig.from_env()), SyntheticRgbdCamera)

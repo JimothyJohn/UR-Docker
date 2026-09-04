@@ -53,7 +53,16 @@ from urllib.parse import parse_qs, urlparse
 from .capture import CaptureStore
 from .config import PerceptionConfig
 from .factory import SEGMENT_BACKENDS, make_segmenter
-from .realsense import RealSenseError, RgbdCamera, open_camera, platform_hint
+from .realsense import (
+    DEFAULT_DEPTH_FILTERS,
+    LASER_MAX,
+    VISUAL_PRESETS,
+    DepthTuning,
+    RealSenseError,
+    RgbdCamera,
+    open_camera,
+    platform_hint,
+)
 from .rgbd import RgbdFrame, pack_rgbd
 from .segment import Mask, StubSegmenter, extract_features, normalize_box
 
@@ -444,10 +453,74 @@ def add_camera_args(ap) -> None:
         "--rs-fps", type=int, default=None, help="RealSense stream fps (default: auto — 30, or 15 on USB 2)"
     )
     ap.add_argument("--no-align", action="store_true", help="don't align depth to the color image")
+    ap.add_argument(
+        "--depth-res",
+        default=None,
+        metavar="WxH",
+        help="depth stream resolution (default: $PERCEPTION_RS_DEPTH_WIDTH x _HEIGHT, 848x480 — the "
+        "D435's native mode; aligned depth is resampled onto the colour grid)",
+    )
+    ap.add_argument(
+        "--no-depth-filters",
+        action="store_true",
+        help="raw sensor depth: skip the SDK's spatial + temporal post-processing",
+    )
+    ap.add_argument(
+        "--rs-preset",
+        default=None,
+        help=f"depth visual preset at open: {'|'.join(sorted(VISUAL_PRESETS))}|none "
+        "(default: $PERCEPTION_RS_PRESET, high_accuracy; none = leave the sensor as is)",
+    )
+    ap.add_argument(
+        "--laser-power",
+        default=None,
+        metavar="MW",
+        help="projector power in mW, or max|none (default: $PERCEPTION_RS_LASER_POWER, max)",
+    )
     ap.add_argument("--library", default=None, help="path to librealsense2 (default: $REALSENSE_LIB / auto)")
 
 
+def parse_resolution(text: str) -> tuple[int, int]:
+    """``"848x480"`` → ``(848, 480)``; a clear error otherwise."""
+    try:
+        w, h = text.lower().replace("×", "x").split("x")
+        width, height = int(w), int(h)
+    except ValueError:
+        raise ValueError(f"resolution must look like 848x480, got {text!r}") from None
+    if width <= 0 or height <= 0:
+        raise ValueError(f"resolution must be positive, got {text!r}")
+    return width, height
+
+
+def depth_tuning_from(preset: str, laser_power: str) -> DepthTuning | None:
+    """The config/CLI strings → :class:`DepthTuning` (``None`` when both say leave-alone)."""
+    preset_l = (preset or "").strip().lower()
+    laser_l = (laser_power or "").strip().lower()
+    preset_v = None if preset_l in ("", "none", "leave") else preset_l
+    if laser_l in ("", "none", "leave"):
+        laser_v: float | None = None
+    elif laser_l == "max":
+        laser_v = LASER_MAX
+    else:
+        try:
+            laser_v = float(laser_l)
+        except ValueError:
+            raise ValueError(f"laser power must be max, none or mW, got {laser_power!r}") from None
+    if preset_v is None and laser_v is None:
+        return None
+    return DepthTuning(preset=preset_v, laser_power=laser_v, emitter=None if laser_v is None else True)
+
+
 def camera_from_args(args, config: PerceptionConfig) -> RgbdCamera:
+    depth_res = getattr(args, "depth_res", None)
+    depth_w, depth_h = (
+        parse_resolution(depth_res) if depth_res else (config.rs_depth_width, config.rs_depth_height)
+    )
+    filters_on = config.rs_filters and not getattr(args, "no_depth_filters", False)
+    tuning = depth_tuning_from(
+        getattr(args, "rs_preset", None) or config.rs_preset,
+        getattr(args, "laser_power", None) or config.rs_laser_power,
+    )
     return open_camera(
         fake=bool(getattr(args, "fake", False)),
         width=config.width,
@@ -456,6 +529,10 @@ def camera_from_args(args, config: PerceptionConfig) -> RgbdCamera:
         serial=(args.serial if getattr(args, "serial", None) else config.rs_serial) or None,
         align=not getattr(args, "no_align", False),
         library=getattr(args, "library", None),
+        depth_width=depth_w,
+        depth_height=depth_h,
+        filters=DEFAULT_DEPTH_FILTERS if filters_on else None,
+        tuning=tuning,
     )
 
 

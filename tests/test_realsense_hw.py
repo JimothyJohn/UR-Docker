@@ -54,3 +54,53 @@ def test_stream_aligned_frames_and_measure(devices):
     if m.area:
         ft = extract_features(m, f)
         assert ft is not None and ft.point_m is not None and ft.point_m[2] > 0
+
+
+def _temporal_noise(frames, box=40) -> float:
+    """Mean per-pixel std-dev (metres) over ``frames`` in a centre ``box``×``box``
+    patch, counting only pixels valid in every frame — pure Python, small patch."""
+    w, h = frames[0].depth.width, frames[0].depth.height
+    x0, y0 = w // 2 - box // 2, h // 2 - box // 2
+    cols = [
+        [f.depth.distance_m(x, y) for f in frames] for y in range(y0, y0 + box) for x in range(x0, x0 + box)
+    ]
+    stds = []
+    for series in cols:
+        if any(v is None for v in series):
+            continue
+        mean = sum(series) / len(series)
+        stds.append((sum((v - mean) ** 2 for v in series) / len(series)) ** 0.5)
+    assert len(stds) > box * box // 4, "too few pixels valid across the window — point the camera at a wall"
+    return sum(stds) / len(stds)
+
+
+def test_filtered_depth_is_steadier_than_raw(devices):
+    """The post-processing chain + native depth mode + High Accuracy preset must
+    cut frame-to-frame jitter on a static scene, and the chain must still hand
+    back Z16 depth aligned to the colour grid (i.e. the disparity round-trip
+    and the filter→align order are wired right)."""
+    raw = RealSenseCamera(
+        width=640, height=480, fps=30, depth_width=640, depth_height=480, filters=None, tuning=None
+    )
+    with raw:
+        for _ in range(15):
+            raw.read()
+        raw_frames = [raw.read() for _ in range(20)]
+    tuned = RealSenseCamera(width=640, height=480, fps=30)  # defaults: 848x480 depth, filters, tuning
+    with tuned:
+        assert tuned.tuning_applied["preset"]["ok"], tuned.tuning_applied
+        assert tuned.tuning_applied["laser_power"]["ok"], tuned.tuning_applied
+        assert tuned.intrinsics["depth"].width == 848 and tuned.intrinsics["color"].width == 640
+        for _ in range(15):
+            tuned.read()
+        tuned_frames = [tuned.read() for _ in range(20)]
+    f = tuned_frames[-1]
+    assert (
+        f.aligned
+        and (f.depth.width, f.depth.height) == (640, 480)
+        and f.intrinsics == tuned.intrinsics["color"]
+    )
+    assert f.depth.stats()["valid_fraction"] > 0.1
+    noise_raw, noise_tuned = _temporal_noise(raw_frames), _temporal_noise(tuned_frames)
+    print(f"temporal noise: raw {noise_raw * 1000:.2f} mm -> filtered {noise_tuned * 1000:.2f} mm")
+    assert noise_tuned < noise_raw

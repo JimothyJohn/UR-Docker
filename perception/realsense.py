@@ -17,8 +17,13 @@ Layers:
   color (RGB8) + depth (Z16) at one resolution/fps, depth **aligned to the
   color image** by the SDK's ``align`` processing block (so a pixel names the
   same physical point in both), plus device info, intrinsics and depth scale.
-  Takes an ``api`` argument so tests drive it with a fake; the hardware test
-  (``-m realsense``) runs it for real.
+  Depth streams at its own resolution (848x480 by default — the D435's native
+  depth mode) and runs through the SDK's post-processing chain
+  (:class:`DepthFilters`: disparity → spatial → temporal → depth [→ hole
+  filling]) *before* alignment, and the depth sensor gets a visual preset +
+  laser power (:class:`DepthTuning`) at open. Takes an ``api`` argument so
+  tests drive it with a fake; the hardware test (``-m realsense``) runs it for
+  real.
 * :class:`RealSenseSource` — the :class:`perception.sources.FrameSource`
   adapter (RGB frames only) so the existing pipeline can read from the D435.
 * :class:`SyntheticRgbdCamera` — same surface as :class:`RealSenseCamera`,
@@ -55,6 +60,21 @@ FORMAT_ANY, FORMAT_Z16, FORMAT_RGB8, FORMAT_BGR8 = 0, 1, 5, 6
 INFO_NAME, INFO_SERIAL, INFO_FIRMWARE, INFO_PHYSICAL_PORT, INFO_PRODUCT_ID = 0, 1, 2, 4, 7
 INFO_USB_TYPE, INFO_PRODUCT_LINE = 9, 10
 EXTENSION_DEPTH_SENSOR = 7
+# rs2_option (rs_option.h): sensor + processing-block options we touch.
+OPTION_VISUAL_PRESET, OPTION_LASER_POWER, OPTION_EMITTER_ENABLED = 12, 13, 18
+OPTION_MIN_DISTANCE, OPTION_MAX_DISTANCE = 33, 34
+OPTION_FILTER_MAGNITUDE, OPTION_FILTER_SMOOTH_ALPHA, OPTION_FILTER_SMOOTH_DELTA = 36, 37, 38
+OPTION_HOLES_FILL = 39  # hole-filling mode on the hole filter; *persistency index* on the temporal filter
+# rs2_rs400_visual_preset: the depth sensor's recommended option sets.
+VISUAL_PRESETS = {
+    "custom": 0,
+    "default": 1,
+    "hand": 2,
+    "high_accuracy": 3,
+    "high_density": 4,
+    "medium_density": 5,
+    "remove_ir_pattern": 6,
+}
 LOG_SEVERITY = {"debug": 0, "info": 1, "warn": 2, "error": 3, "fatal": 4, "none": 5}
 
 # What the library must say for each ordinal — the load-time drift check.
@@ -66,7 +86,25 @@ _ENUM_EXPECTATIONS = (
     ("rs2_camera_info_to_string", INFO_SERIAL, "Serial Number"),
     ("rs2_camera_info_to_string", INFO_USB_TYPE, "Usb Type Descriptor"),
     ("rs2_extension_to_string", EXTENSION_DEPTH_SENSOR, "Depth Sensor"),
+    ("rs2_option_to_string", OPTION_VISUAL_PRESET, "Visual Preset"),
+    ("rs2_option_to_string", OPTION_LASER_POWER, "Laser Power"),
+    ("rs2_option_to_string", OPTION_EMITTER_ENABLED, "Emitter Enabled"),
+    ("rs2_option_to_string", OPTION_FILTER_MAGNITUDE, "Filter Magnitude"),
+    ("rs2_option_to_string", OPTION_HOLES_FILL, "Holes Fill"),
+    ("rs2_rs400_visual_preset_to_string", VISUAL_PRESETS["high_accuracy"], "High Accuracy"),
 )
+
+# Processing blocks by short name -> (constructor, fixed args). Every one is fed
+# a whole frameset: the SDK filters the depth member and re-composes the set.
+_FILTER_FACTORIES: dict[str, tuple[str, tuple]] = {
+    "decimation": ("rs2_create_decimation_filter_block", ()),
+    "threshold": ("rs2_create_threshold", ()),
+    "to_disparity": ("rs2_create_disparity_transform_block", (1,)),
+    "spatial": ("rs2_create_spatial_filter_block", ()),
+    "temporal": ("rs2_create_temporal_filter_block", ()),
+    "to_depth": ("rs2_create_disparity_transform_block", (0,)),
+    "hole_filling": ("rs2_create_hole_filling_filter_block", ()),
+}
 
 _LIBRARY_CANDIDATES = (
     "/opt/homebrew/lib/librealsense2.dylib",
@@ -157,6 +195,15 @@ class Api:
             "rs2_format_to_string": (S, [I]),
             "rs2_camera_info_to_string": (S, [I]),
             "rs2_extension_to_string": (S, [I]),
+            "rs2_option_to_string": (S, [I]),
+            "rs2_rs400_visual_preset_to_string": (S, [I]),
+            "rs2_supports_option": (I, [P, I, PP]),
+            "rs2_get_option": (F, [P, I, PP]),
+            "rs2_set_option": (None, [P, I, F, PP]),
+            "rs2_get_option_range": (
+                None,
+                [P, I, ctypes.POINTER(F), ctypes.POINTER(F), ctypes.POINTER(F), ctypes.POINTER(F), PP],
+            ),
             "rs2_create_context": (P, [I, PP]),
             "rs2_delete_context": (None, [P]),
             "rs2_query_devices": (P, [P, PP]),
@@ -213,6 +260,12 @@ class Api:
             "rs2_get_frame_timestamp": (ctypes.c_double, [P, PP]),
             "rs2_get_frame_number": (ctypes.c_ulonglong, [P, PP]),
             "rs2_create_align": (P, [I, PP]),
+            "rs2_create_decimation_filter_block": (P, [PP]),
+            "rs2_create_threshold": (P, [PP]),
+            "rs2_create_disparity_transform_block": (P, [ctypes.c_ubyte, PP]),
+            "rs2_create_spatial_filter_block": (P, [PP]),
+            "rs2_create_temporal_filter_block": (P, [PP]),
+            "rs2_create_hole_filling_filter_block": (P, [PP]),
             "rs2_delete_processing_block": (None, [P]),
             "rs2_create_frame_queue": (P, [I, PP]),
             "rs2_delete_frame_queue": (None, [P]),
@@ -311,28 +364,77 @@ class Api:
                 info[key] = None
         return info
 
-    def depth_scale(self, dev) -> float | None:
-        """Metres per depth unit from the device's depth sensor (None if none)."""
+    def depth_sensor(self, dev):
+        """Handle of ``dev``'s depth sensor (release with :meth:`delete_sensor`), or None."""
         sensors = self._call("rs2_query_sensors", dev)
         try:
             for i in range(self._call("rs2_get_sensors_count", sensors)):
                 sensor = self._call("rs2_create_sensor", sensors, i)
-                try:
-                    if self._call("rs2_is_sensor_extendable_to", sensor, EXTENSION_DEPTH_SENSOR):
-                        return float(self._call("rs2_get_depth_scale", sensor))
-                finally:
-                    self.lib.rs2_delete_sensor(sensor)
+                if self._call("rs2_is_sensor_extendable_to", sensor, EXTENSION_DEPTH_SENSOR):
+                    return sensor
+                self.lib.rs2_delete_sensor(sensor)
         finally:
             self.lib.rs2_delete_sensor_list(sensors)
         return None
 
-    def start_pipeline(self, ctx, *, width: int, height: int, fps: int, serial: str | None):
-        """Start color RGB8 + depth Z16 streams; returns ``(pipeline, profile)``."""
+    def delete_sensor(self, sensor) -> None:
+        self.lib.rs2_delete_sensor(sensor)
+
+    def depth_scale(self, dev) -> float | None:
+        """Metres per depth unit from the device's depth sensor (None if none)."""
+        sensor = self.depth_sensor(dev)
+        if sensor is None:
+            return None
+        try:
+            return float(self._call("rs2_get_depth_scale", sensor))
+        finally:
+            self.lib.rs2_delete_sensor(sensor)
+
+    # ``rs2_options*`` is the base of both sensors and processing blocks in the C
+    # API, so one set of helpers serves the depth sensor and the filter chain.
+
+    def supports_option(self, handle, option: int) -> bool:
+        return bool(self._call("rs2_supports_option", handle, option))
+
+    def get_option(self, handle, option: int) -> float:
+        return float(self._call("rs2_get_option", handle, option))
+
+    def set_option(self, handle, option: int, value: float) -> None:
+        self._call("rs2_set_option", handle, option, float(value))
+
+    def option_range(self, handle, option: int) -> tuple[float, float, float, float]:
+        """``(min, max, step, default)`` of ``option`` on ``handle``."""
+        lo, hi, step, default = (ctypes.c_float() for _ in range(4))
+        self._call(
+            "rs2_get_option_range",
+            handle,
+            option,
+            ctypes.byref(lo),
+            ctypes.byref(hi),
+            ctypes.byref(step),
+            ctypes.byref(default),
+        )
+        return lo.value, hi.value, step.value, default.value
+
+    def start_pipeline(
+        self,
+        ctx,
+        *,
+        width: int,
+        height: int,
+        fps: int,
+        serial: str | None,
+        depth_width: int | None = None,
+        depth_height: int | None = None,
+    ):
+        """Start color RGB8 (``width x height``) + depth Z16 (``depth_width x
+        depth_height``, defaulting to the colour size); returns ``(pipeline, profile)``."""
+        dw, dh = depth_width or width, depth_height or height
         cfg = self._call("rs2_create_config")
         try:
             if serial:
                 self._call("rs2_config_enable_device", cfg, serial.encode())
-            self._call("rs2_config_enable_stream", cfg, STREAM_DEPTH, -1, width, height, FORMAT_Z16, fps)
+            self._call("rs2_config_enable_stream", cfg, STREAM_DEPTH, -1, dw, dh, FORMAT_Z16, fps)
             self._call("rs2_config_enable_stream", cfg, STREAM_COLOR, -1, width, height, FORMAT_RGB8, fps)
             pipe = self._call("rs2_create_pipeline", ctx)
             try:
@@ -397,9 +499,8 @@ class Api:
             "intrinsics": intr,
         }
 
-    def create_align_to_color(self):
-        """``(block, queue)`` for depth→color alignment; feed with :meth:`align`."""
-        block = self._call("rs2_create_align", STREAM_COLOR)
+    def _start_block(self, block):
+        """Attach a one-deep output queue to ``block`` → ``(block, queue)``."""
         try:
             queue = self._call("rs2_create_frame_queue", 1)
             self._call("rs2_start_processing_queue", block, queue)
@@ -408,9 +509,34 @@ class Api:
             raise
         return block, queue
 
+    def create_align_to_color(self):
+        """``(block, queue)`` for depth→color alignment; feed with :meth:`align`."""
+        return self._start_block(self._call("rs2_create_align", STREAM_COLOR))
+
     def delete_align(self, block, queue) -> None:
         self.lib.rs2_delete_frame_queue(queue)
         self.lib.rs2_delete_processing_block(block)
+
+    def create_filter(self, kind: str, options: dict[int, float] | None = None):
+        """``(block, queue)`` for one post-processing filter (a :data:`_FILTER_FACTORIES`
+        key) with ``options`` (``OPTION_*`` → value) applied; feed with :meth:`process`."""
+        ctor, fixed = _FILTER_FACTORIES[kind]
+        block, queue = self._start_block(self._call(ctor, *fixed))
+        try:
+            for option, value in (options or {}).items():
+                self.set_option(block, option, value)
+        except RealSenseError:
+            self.delete_filter(block, queue)
+            raise
+        return block, queue
+
+    def process(self, block, queue, frameset, timeout_ms: int):
+        """Run ``frameset`` through a filter block; **consumes** ``frameset`` and
+        returns the filtered frameset (same contract as :meth:`align`)."""
+        self._call("rs2_process_frame", block, frameset)
+        return self._call("rs2_wait_for_frame", queue, timeout_ms)
+
+    delete_filter = delete_align
 
     def wait_for_frames(self, pipe, timeout_ms: int):
         return self._call("rs2_pipeline_wait_for_frames", pipe, timeout_ms)
@@ -513,13 +639,136 @@ class RgbdCamera(Protocol):
     def describe(self) -> dict: ...
 
 
+# The D435's native depth mode. Its stereo ASIC matches at 848x480 and derives
+# the smaller modes by downscaling, so this is the accuracy-optimal choice
+# (Intel's D400 tuning guide); the colour stream can stay at 640x480 — aligned
+# depth lands on the colour grid regardless.
+DEFAULT_DEPTH_WIDTH, DEFAULT_DEPTH_HEIGHT = 848, 480
+LASER_MAX = -1.0  # DepthTuning.laser_power sentinel: whatever the sensor's range allows
+
+
+@dataclass(frozen=True)
+class DepthFilters:
+    """librealsense's post-processing chain, applied to the depth frame *before*
+    alignment in Intel's recommended order: (threshold →) depth→disparity →
+    spatial → temporal → disparity→depth (→ hole filling). Parameter defaults
+    are the SDK's own; ranges are in ``rs_processing.h``.
+
+    * **spatial** — edge-preserving smoothing across the image (``magnitude``
+      iterations 1..5, ``alpha`` 0.25..1 with lower = smoother, ``delta`` 1..50
+      depth units: the step that counts as an edge and is left alone).
+    * **temporal** — per-pixel exponential smoothing over frames (``alpha``
+      0..1 with lower = smoother, ``delta`` as above) plus a ``persistence``
+      index 0..8 controlling how many recent frames must agree before a pixel
+      is trusted (3 = valid in 2 of the last 4; 0 = off; 8 = always). This is
+      the one that steadies a static scene at the cost of lag on moving objects.
+    * **hole_filling** — ``None`` = off (the default: it *invents* depth where
+      the sensor had none, which is wrong for measurement); 0 = fill from the
+      left, 1 = farthest neighbour, 2 = nearest neighbour.
+    * **min_m / max_m** — the threshold filter; zeroes depth outside the band.
+    """
+
+    spatial: bool = True
+    spatial_magnitude: int = 2
+    spatial_alpha: float = 0.5
+    spatial_delta: int = 20
+    temporal: bool = True
+    temporal_alpha: float = 0.4
+    temporal_delta: int = 20
+    temporal_persistence: int = 3
+    hole_filling: int | None = None
+    disparity: bool = True
+    min_m: float | None = None
+    max_m: float | None = None
+
+    def chain(self) -> list[tuple[str, dict[int, float]]]:
+        """``[(filter kind, {OPTION_* : value})]`` in application order."""
+        out: list[tuple[str, dict[int, float]]] = []
+        if self.min_m is not None or self.max_m is not None:
+            opts: dict[int, float] = {}
+            if self.min_m is not None:
+                opts[OPTION_MIN_DISTANCE] = float(self.min_m)
+            if self.max_m is not None:
+                opts[OPTION_MAX_DISTANCE] = float(self.max_m)
+            out.append(("threshold", opts))
+        smoothing = self.spatial or self.temporal
+        if smoothing and self.disparity:
+            out.append(("to_disparity", {}))
+        if self.spatial:
+            out.append(
+                (
+                    "spatial",
+                    {
+                        OPTION_FILTER_MAGNITUDE: float(self.spatial_magnitude),
+                        OPTION_FILTER_SMOOTH_ALPHA: float(self.spatial_alpha),
+                        OPTION_FILTER_SMOOTH_DELTA: float(self.spatial_delta),
+                    },
+                )
+            )
+        if self.temporal:
+            out.append(
+                (
+                    "temporal",
+                    {
+                        OPTION_FILTER_SMOOTH_ALPHA: float(self.temporal_alpha),
+                        OPTION_FILTER_SMOOTH_DELTA: float(self.temporal_delta),
+                        OPTION_HOLES_FILL: float(self.temporal_persistence),
+                    },
+                )
+            )
+        if smoothing and self.disparity:
+            out.append(("to_depth", {}))
+        if self.hole_filling is not None:
+            out.append(("hole_filling", {OPTION_HOLES_FILL: float(self.hole_filling)}))
+        return out
+
+    def as_dict(self) -> dict:
+        return {"chain": [kind for kind, _ in self.chain()], **self.__dict__}
+
+
+@dataclass(frozen=True)
+class DepthTuning:
+    """Depth-sensor options set once at open (best effort — an unsupported or
+    refused option is recorded in ``RealSenseCamera.tuning_applied``, never
+    fatal). ``None`` for any field leaves the sensor as it is (what you want
+    when the camera was tuned in realsense-viewer).
+
+    * ``preset`` — a :data:`VISUAL_PRESETS` key. ``high_accuracy`` raises the
+      stereo confidence threshold: fewer pixels, far fewer wrong ones.
+    * ``laser_power`` — projector power in mW (D435: 0..360, default 150);
+      :data:`LASER_MAX` = the sensor's maximum. More texture on flat surfaces.
+    * ``emitter`` — projector on/off.
+    """
+
+    preset: str | None = "high_accuracy"
+    laser_power: float | None = LASER_MAX
+    emitter: bool | None = True
+
+    def __post_init__(self) -> None:
+        if self.preset is not None and self.preset not in VISUAL_PRESETS:
+            raise ValueError(f"unknown visual preset {self.preset!r}; one of {sorted(VISUAL_PRESETS)}")
+        if self.laser_power is not None and self.laser_power != LASER_MAX and self.laser_power < 0:
+            raise ValueError("laser_power must be >= 0 mW, LASER_MAX, or None")
+
+    def as_dict(self) -> dict:
+        return dict(self.__dict__)
+
+
+DEFAULT_DEPTH_FILTERS = DepthFilters()
+DEFAULT_DEPTH_TUNING = DepthTuning()
+
+
 @dataclass
 class RealSenseCamera:
     """One D4xx device streaming aligned color + depth at ``width x height @ fps``.
 
     ``serial`` picks a specific camera when several are attached (``None`` =
     the first). ``align`` re-projects depth into the color image (default; what
-    click-to-measure needs). ``api`` lets tests inject a fake SDK.
+    click-to-measure needs). Depth streams at ``depth_width x depth_height``
+    (default 848x480, see :data:`DEFAULT_DEPTH_WIDTH`) and, unless ``filters``
+    is ``None``, runs through :class:`DepthFilters` before alignment;
+    ``tuning`` (:class:`DepthTuning`, or ``None`` to leave the sensor alone)
+    is applied at open. ``api`` lets tests inject a fake SDK.
     """
 
     width: int = 640
@@ -527,6 +776,10 @@ class RealSenseCamera:
     fps: int | None = None  # None = 30 on USB 3, 15 on a USB 2 link
     serial: str | None = None
     align: bool = True
+    depth_width: int = DEFAULT_DEPTH_WIDTH
+    depth_height: int = DEFAULT_DEPTH_HEIGHT
+    filters: DepthFilters | None = DEFAULT_DEPTH_FILTERS
+    tuning: DepthTuning | None = DEFAULT_DEPTH_TUNING
     timeout_ms: int = 5000
     log_severity: str = "error"
     library: str | None = None
@@ -536,10 +789,12 @@ class RealSenseCamera:
     intrinsics: dict = field(default_factory=dict, init=False)
     depth_scale: float | None = field(default=None, init=False)
     effective_fps: int | None = field(default=None, init=False)
+    tuning_applied: dict = field(default_factory=dict, init=False)
     _ctx: Any = field(default=None, init=False, repr=False)
     _pipe: Any = field(default=None, init=False, repr=False)
     _profile: Any = field(default=None, init=False, repr=False)
     _align: Any = field(default=None, init=False, repr=False)
+    _filters: list = field(default_factory=list, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _frames_read: int = field(default=0, init=False, repr=False)
 
@@ -554,26 +809,70 @@ class RealSenseCamera:
         try:
             self.effective_fps = self._choose_fps(api)
             self._pipe, self._profile = api.start_pipeline(
-                self._ctx, width=self.width, height=self.height, fps=self.effective_fps, serial=self.serial
+                self._ctx,
+                width=self.width,
+                height=self.height,
+                fps=self.effective_fps,
+                serial=self.serial,
+                depth_width=self.depth_width,
+                depth_height=self.depth_height,
             )
             dev = api.profile_device(self._profile)
             try:
                 self.info = api.device_info(dev)
                 self.depth_scale = api.depth_scale(dev)
+                if self.depth_scale is None:
+                    raise RealSenseError("device has no depth sensor")
+                self.tuning_applied = self._apply_tuning(api, dev)
             finally:
                 api.delete_device(dev)
-            if self.depth_scale is None:
-                raise RealSenseError("device has no depth sensor")
             self.intrinsics = {}
             for sp in api.profile_streams(self._profile):
                 key = {STREAM_DEPTH: "depth", STREAM_COLOR: "color"}.get(sp["stream"])
                 if key and sp["intrinsics"] is not None:
                     self.intrinsics[key] = sp["intrinsics"]
+            if self.filters is not None:
+                for kind, options in self.filters.chain():
+                    self._filters.append(api.create_filter(kind, options))
             if self.align:
                 self._align = api.create_align_to_color()
         except Exception:
             self.close()
             raise
+
+    def _apply_tuning(self, api, dev) -> dict:
+        """Push :attr:`tuning` onto the depth sensor; ``{name: {ok, value|error}}``."""
+        applied: dict[str, dict] = {}
+        if self.tuning is None:
+            return applied
+        sensor = api.depth_sensor(dev)
+        if sensor is None:
+            return applied
+        t = self.tuning
+        # Preset first: presets rewrite laser power and the emitter, so the
+        # explicit values must land after it.
+        steps: list[tuple[str, int, float, Any]] = []
+        if t.preset is not None:
+            steps.append(("preset", OPTION_VISUAL_PRESET, float(VISUAL_PRESETS[t.preset]), t.preset))
+        if t.emitter is not None:
+            steps.append(("emitter", OPTION_EMITTER_ENABLED, 1.0 if t.emitter else 0.0, bool(t.emitter)))
+        if t.laser_power is not None:
+            steps.append(("laser_power", OPTION_LASER_POWER, float(t.laser_power), None))
+        try:
+            for name, option, value, shown in steps:
+                try:
+                    if not api.supports_option(sensor, option):
+                        applied[name] = {"ok": False, "error": "unsupported by this sensor"}
+                        continue
+                    if name == "laser_power" and value == LASER_MAX:
+                        value = api.option_range(sensor, option)[1]
+                    api.set_option(sensor, option, value)
+                    applied[name] = {"ok": True, "value": value if shown is None else shown}
+                except RealSenseError as exc:
+                    applied[name] = {"ok": False, "error": str(exc)}
+        finally:
+            api.delete_sensor(sensor)
+        return applied
 
     def _choose_fps(self, api) -> int:
         """Explicit ``fps`` wins; otherwise 30, or 15 when the camera reports a
@@ -617,6 +916,8 @@ class RealSenseCamera:
                     ) from exc
                 raise
             self._frames_read += 1
+            for block, queue in self._filters:
+                frameset = api.process(block, queue, frameset, self.timeout_ms)
             if self._align is not None:
                 frameset = api.align(self._align[0], self._align[1], frameset, self.timeout_ms)
             try:
@@ -662,6 +963,8 @@ class RealSenseCamera:
         if self._align is not None:
             api.delete_align(*self._align)
             self._align = None
+        while self._filters:
+            api.delete_filter(*self._filters.pop())
         if self._pipe is not None:
             try:
                 api.stop_pipeline(self._pipe, self._profile)
@@ -679,6 +982,13 @@ class RealSenseCamera:
                 "height": self.height,
                 "fps": self.effective_fps or self.fps,
                 "aligned": self.align,
+            },
+            "depth": {
+                "width": self.depth_width,
+                "height": self.depth_height,
+                "filters": [kind for kind, _ in self.filters.chain()] if self.filters is not None else [],
+                "tuning": self.tuning.as_dict() if self.tuning is not None else None,
+                "tuning_applied": self.tuning_applied,
             },
             "depth_scale_m": self.depth_scale,
             "intrinsics": {k: v.as_dict() for k, v in self.intrinsics.items()},
@@ -756,6 +1066,7 @@ class SyntheticRgbdCamera:
             "open": self._open,
             "device": {"name": "Synthetic RGB-D", "serial": "SYNTH", "usb_type": None},
             "stream": {"width": self.width, "height": self.height, "fps": self.fps, "aligned": True},
+            "depth": {"width": self.width, "height": self.height, "filters": [], "tuning": None},
             "depth_scale_m": 0.001,
             "intrinsics": {
                 "color": synthetic_rgbd(self.width, self.height, holes=False).intrinsics.as_dict()
@@ -811,11 +1122,26 @@ def open_camera(
     serial: str | None = None,
     align: bool = True,
     library: str | None = None,
+    depth_width: int = DEFAULT_DEPTH_WIDTH,
+    depth_height: int = DEFAULT_DEPTH_HEIGHT,
+    filters: DepthFilters | None = DEFAULT_DEPTH_FILTERS,
+    tuning: DepthTuning | None = DEFAULT_DEPTH_TUNING,
 ) -> RgbdCamera:
     """Factory used by the CLI/viewer: a real D4xx, or the synthetic stand-in."""
     if fake:
         return SyntheticRgbdCamera(width=width, height=height, fps=min(fps or 15, 15))
-    return RealSenseCamera(width=width, height=height, fps=fps, serial=serial, align=align, library=library)
+    return RealSenseCamera(
+        width=width,
+        height=height,
+        fps=fps,
+        serial=serial,
+        align=align,
+        library=library,
+        depth_width=depth_width,
+        depth_height=depth_height,
+        filters=filters,
+        tuning=tuning,
+    )
 
 
 def _is_root() -> bool:
