@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import sys
 import threading
 import time
@@ -511,11 +512,22 @@ def depth_tuning_from(preset: str, laser_power: str) -> DepthTuning | None:
     return DepthTuning(preset=preset_v, laser_power=laser_v, emitter=None if laser_v is None else True)
 
 
+def color_size_is_explicit(args) -> bool:
+    """Did the operator ask for a colour size (``--width/--height`` or
+    ``PERCEPTION_WIDTH/HEIGHT``)? Otherwise colour follows the depth size —
+    a D435 streaming 848x480 depth next to 640x480 colour returned black
+    colour frames (see ``realsense.DEFAULT_DEPTH_WIDTH``)."""
+    if getattr(args, "width", None) is not None or getattr(args, "height", None) is not None:
+        return True
+    return bool(os.environ.get("PERCEPTION_WIDTH") or os.environ.get("PERCEPTION_HEIGHT"))
+
+
 def camera_from_args(args, config: PerceptionConfig) -> RgbdCamera:
     depth_res = getattr(args, "depth_res", None)
     depth_w, depth_h = (
         parse_resolution(depth_res) if depth_res else (config.rs_depth_width, config.rs_depth_height)
     )
+    color_w, color_h = (config.width, config.height) if color_size_is_explicit(args) else (depth_w, depth_h)
     filters_on = config.rs_filters and not getattr(args, "no_depth_filters", False)
     tuning = depth_tuning_from(
         getattr(args, "rs_preset", None) or config.rs_preset,
@@ -523,8 +535,8 @@ def camera_from_args(args, config: PerceptionConfig) -> RgbdCamera:
     )
     return open_camera(
         fake=bool(getattr(args, "fake", False)),
-        width=config.width,
-        height=config.height,
+        width=color_w,
+        height=color_h,
         fps=(args.rs_fps if getattr(args, "rs_fps", None) else config.rs_fps) or None,
         serial=(args.serial if getattr(args, "serial", None) else config.rs_serial) or None,
         align=not getattr(args, "no_align", False),

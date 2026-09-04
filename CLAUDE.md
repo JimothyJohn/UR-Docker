@@ -57,9 +57,10 @@ legacy Windows codepages never crash on unicode.
 **RealSense RGB-D (`perception rs-info` / `rs-capture` / `gui`, see
 `docs/realsense.md`):** `perception/realsense.py` binds librealsense's C API
 with ctypes (no `pyrealsense2`; zero deps kept), streams colour + depth aligned
-to colour (depth at its native 848×480 through the SDK's spatial + temporal
-filter chain, sensor on the High Accuracy preset at full laser — `docs/realsense.md`
-§Depth quality; `--no-depth-filters` / `--rs-preset none` for raw), and the cockpit (`perception/webapp.py` + `perception/webui/`) does
+to colour (both sensors at the D435's native 848×480 — **mismatched sizes give
+black colour frames** — through the SDK's spatial + temporal filter chain,
+sensor on the High Accuracy preset at full laser; `docs/realsense.md` §Depth
+quality; `--no-depth-filters` / `--rs-preset none` for raw), and the cockpit (`perception/webapp.py` + `perception/webui/`) does
 hover-to-measure, click-to-segment (`perception/segment.py`: colour+depth
 region growing, or SAM via the `sam` extra) and RealSenseTrainer-style captures
 (`perception/capture.py`). **macOS needs `sudo`** to open the camera (libusb

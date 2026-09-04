@@ -32,22 +32,32 @@ def test_enumerates_a_d4xx(devices):
     assert d["serial"] and d["name"] and "RealSense" in d["name"]
 
 
+def _mean_brightness(frame) -> float:
+    data = frame.color.data
+    step = max(1, len(data) // 30000)
+    sample = data[::step]
+    return sum(sample) / len(sample)
+
+
 def test_stream_aligned_frames_and_measure(devices):
-    cam = RealSenseCamera(width=640, height=480, fps=30)
+    cam = RealSenseCamera(fps=30)  # defaults: 848x480 colour *and* depth
     with cam:
         assert cam.depth_scale and 0.0001 <= cam.depth_scale <= 0.01
         assert set(cam.intrinsics) == {"color", "depth"}
         frames = [cam.read() for _ in range(15)]  # let auto-exposure settle
     f = frames[-1]
-    assert f.aligned and (f.color.width, f.color.height) == (640, 480)
-    assert (f.depth.width, f.depth.height) == (640, 480)
+    assert f.aligned and (f.color.width, f.color.height) == (848, 480)
+    assert (f.depth.width, f.depth.height) == (848, 480)
+    # Regression (2026-09-04): 848x480 depth next to 640x480 colour gave all-black colour
+    # frames on this D435. A lit scene must register on the RGB sensor.
+    assert _mean_brightness(f) > 8.0, "colour frame is (near) black — lens covered, dark room, or mixed sizes"
     assert cam.tuning_applied["preset"]["ok"], cam.tuning_applied  # applied after the first frameset
     assert f.intrinsics == cam.intrinsics["color"]
     assert f.depth.stats()["valid_fraction"] > 0.1
     assert frames[-1].frame_number > frames[0].frame_number
     # the SDK's deprojection and ours agree on the live intrinsics
     api = cam.api
-    for uv in ((320, 240), (10, 10), (630, 470)):
+    for uv in ((424, 240), (10, 10), (838, 470)):
         assert f.intrinsics.deproject(*uv, 0.7) == pytest.approx(
             api.deproject(f.intrinsics, *uv, 0.7), abs=1e-5
         )
@@ -98,10 +108,11 @@ def test_filtered_depth_is_steadier_than_raw(devices):
     f = tuned_frames[-1]
     assert (
         f.aligned
-        and (f.depth.width, f.depth.height) == (640, 480)
+        and (f.depth.width, f.depth.height) == (848, 480)
         and f.intrinsics == tuned.intrinsics["color"]
     )
     assert f.depth.stats()["valid_fraction"] > 0.1
+    assert _mean_brightness(f) > 8.0, "colour frame is (near) black with the default configuration"
     noise_raw, noise_tuned = _temporal_noise(raw_frames), _temporal_noise(tuned_frames)
     print(f"temporal noise: raw {noise_raw * 1000:.2f} mm -> filtered {noise_tuned * 1000:.2f} mm")
     assert noise_tuned < noise_raw

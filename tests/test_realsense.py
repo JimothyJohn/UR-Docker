@@ -551,3 +551,6 @@ def test_depth_resolution_is_independent_of_colour():
     real = open_camera(fake=False, width=640, height=480, depth_width=1280, depth_height=720, filters=None)
     assert isinstance(real, RealSenseCamera) and (real.depth_width, real.depth_height) == (1280, 720)
     assert real.filters is None and real.tuning is not None
+    follows = open_camera(fake=False, depth_width=1280, depth_height=720)
+    assert (follows.width, follows.height) == (1280, 720)  # colour follows depth unless given
+    assert (RealSenseCamera().width, RealSenseCamera().depth_width) == (848, 848)

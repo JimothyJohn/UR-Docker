@@ -684,8 +684,11 @@ class RgbdCamera(Protocol):
 
 # The D435's native depth mode. Its stereo ASIC matches at 848x480 and derives
 # the smaller modes by downscaling, so this is the accuracy-optimal choice
-# (Intel's D400 tuning guide); the colour stream can stay at 640x480 — aligned
-# depth lands on the colour grid regardless.
+# (Intel's D400 tuning guide). Colour defaults to the *same* size: on this
+# D435 (fw 5.12.7.100, macOS libusb backend, 2026-09-04) depth at 848x480 with
+# colour at 640x480 delivered all-black colour frames — sensor options all at
+# factory, lit room — while 640/640 and 848/848 were both fine. No mechanism
+# known; matching the two sidesteps it and the hardware test checks for it.
 DEFAULT_DEPTH_WIDTH, DEFAULT_DEPTH_HEIGHT = 848, 480
 LASER_MAX = -1.0  # DepthTuning.laser_power sentinel: whatever the sensor's range allows
 
@@ -808,14 +811,15 @@ class RealSenseCamera:
     ``serial`` picks a specific camera when several are attached (``None`` =
     the first). ``align`` re-projects depth into the color image (default; what
     click-to-measure needs). Depth streams at ``depth_width x depth_height``
-    (default 848x480, see :data:`DEFAULT_DEPTH_WIDTH`) and, unless ``filters``
+    (default 848x480, see :data:`DEFAULT_DEPTH_WIDTH`; colour defaults to the
+    same size — see the note there) and, unless ``filters``
     is ``None``, runs through :class:`DepthFilters` before alignment;
     ``tuning`` (:class:`DepthTuning`, or ``None`` to leave the sensor alone)
     is applied at open. ``api`` lets tests inject a fake SDK.
     """
 
-    width: int = 640
-    height: int = 480
+    width: int = DEFAULT_DEPTH_WIDTH
+    height: int = DEFAULT_DEPTH_HEIGHT
     fps: int | None = None  # None = 30 on USB 3, 15 on a USB 2 link
     serial: str | None = None
     align: bool = True
@@ -1208,8 +1212,8 @@ class RealSenseSource:
 def open_camera(
     *,
     fake: bool = False,
-    width: int = 640,
-    height: int = 480,
+    width: int | None = None,
+    height: int | None = None,
     fps: int | None = None,
     serial: str | None = None,
     align: bool = True,
@@ -1219,7 +1223,10 @@ def open_camera(
     filters: DepthFilters | None = DEFAULT_DEPTH_FILTERS,
     tuning: DepthTuning | None = DEFAULT_DEPTH_TUNING,
 ) -> RgbdCamera:
-    """Factory used by the CLI/viewer: a real D4xx, or the synthetic stand-in."""
+    """Factory used by the CLI/viewer: a real D4xx, or the synthetic stand-in.
+    ``width``/``height`` = the colour size; ``None`` follows the depth size."""
+    width = width or depth_width
+    height = height or depth_height
     if fake:
         return SyntheticRgbdCamera(width=width, height=height, fps=min(fps or 15, 15))
     return RealSenseCamera(

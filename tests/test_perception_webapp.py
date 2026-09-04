@@ -320,10 +320,24 @@ def test_depth_flags_reach_the_camera(monkeypatch, tmp_path):
         base.update(kw)
         return argparse.Namespace(**base)
 
+    monkeypatch.delenv("PERCEPTION_WIDTH", raising=False)
+    monkeypatch.delenv("PERCEPTION_HEIGHT", raising=False)
     cam = camera_from_args(ns(), PerceptionConfig.from_env())
     assert isinstance(cam, RealSenseCamera)
     assert (cam.depth_width, cam.depth_height) == (848, 480)
+    assert (cam.width, cam.height) == (848, 480)  # colour follows depth (mixed sizes -> black colour)
     assert cam.filters is DEFAULT_DEPTH_FILTERS and cam.tuning == DepthTuning()
+    # an explicit colour size — flag or env — still wins
+    cam = camera_from_args(ns(width=640, height=480), PerceptionConfig.from_env(width=640, height=480))
+    assert (cam.width, cam.height) == (640, 480) and cam.depth_width == 848
+    monkeypatch.setenv("PERCEPTION_WIDTH", "1280")
+    monkeypatch.setenv("PERCEPTION_HEIGHT", "720")
+    cam = camera_from_args(ns(), PerceptionConfig.from_env())
+    assert (cam.width, cam.height) == (1280, 720) and cam.depth_width == 848
+    monkeypatch.delenv("PERCEPTION_WIDTH")
+    monkeypatch.delenv("PERCEPTION_HEIGHT")
+    cam = camera_from_args(ns(depth_res="640x480"), PerceptionConfig.from_env())
+    assert (cam.width, cam.height) == (640, 480) == (cam.depth_width, cam.depth_height)
 
     cam = camera_from_args(
         ns(depth_res="640x480", no_depth_filters=True, rs_preset="none", laser_power="0"),
