@@ -170,7 +170,19 @@ changed enough to matter:
   brake release, load, play) returns **HTTP 403** unless the robot is in
   **Remote** control mode, and there is **no REST endpoint to switch
   Local→Remote** — it's a toggle on the Safety screen in the UI. (On e-Series
-  only Dashboard `play` needed Remote; Primary URScript did not.)
+  only Dashboard `play` needed Remote; Primary URScript did not.) **Primary
+  URScript is gated on Remote too on PolyScope X** (verified 2026-09-04 on the
+  10.13.0 sim): in Local the port accepts and broadcasts state but scripts are
+  silently ignored — `textmsg` never surfaces, `run_and_capture` returns `[]`,
+  `move-*` returns `landed: null`. Once Remote, `textmsg`, confirmed moves and
+  `get_flange_pose` all work over `:31001`.
+- **UI passwords** (UR's published defaults, first use forces a change): admin
+  `easybot` (gates Settings → Security → Services), operational mode `operator`
+  (gates Manual/Automatic + Remote). **Stay on the 10.13.0 image** — see the
+  comment in `docker-compose.yml`; on 10.14 the Services toggles never stick.
+- **Runs natively on Apple Silicon** (arm64 image; `HOST_ARCH=arm64 make
+  simx-up`), which makes it the sim to use on this Mac now that the e-Series
+  image can't boot under Rosetta here (gotchas table).
 
 `urctl` drives PolyScope X with the **same commands** — select the platform with
 `--platform polyscopex` (or `UR_PLATFORM=polyscopex`) and point the Robot-API at

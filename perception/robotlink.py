@@ -77,7 +77,10 @@ class RobotLink:
             return {"ok": False, "error": fp.get("error") or "could not read the flange pose", "robot": fp}
         result = locate(self.handeye, fp["flange"], point_cam, tcp_pose=fp["tcp"], standoff_m=standoff_m)
         result["ok"] = True
-        result["robot"] = {k: fp.get(k) for k in ("host", "dry_run", "tcp_offset", "flange_reported", "ts")}
+        result["robot"] = {
+            k: fp.get(k)
+            for k in ("host", "dry_run", "tcp_offset", "flange_reported", "host_controller_mismatch_m", "ts")
+        }
         return result
 
     def move(

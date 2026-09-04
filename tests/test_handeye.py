@@ -143,6 +143,7 @@ def test_robotlink_locate_then_move_goes_through_the_tool_registry(monkeypatch):
         and d["handeye"]["depth_to_color_translation"] == [0.015, 0.0, 0.0]
     )
     loc = link.locate((0.0, 0.0, 0.3), standoff_m=0.08)
+    assert loc["robot"]["host_controller_mismatch_m"] < 1e-5  # the controller's pose_trans agrees
     assert (
         loc["ok"]
         and len(loc["approach_pose"]) == 6

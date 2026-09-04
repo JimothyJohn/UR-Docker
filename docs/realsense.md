@@ -180,6 +180,14 @@ Flags / env: `--robot-host` (`$UR_HOST`, default localhost = URSim),
 lets the whole flow run on `--fake`), `--no-robot` (no panel). The
 standoff is per-click in the panel (default 0.10 m).
 
+**Verified 2026-09-04 against the PolyScope X simulator (10.13.0, native
+arm64, Remote mode):** `ur_flange_pose` matched the controller's own
+`pose_trans(tcp, pose_inv(offset))` exactly; the cockpit's Locate mapped the
+synthetic camera point into the base frame and Move landed on the approach
+pose to 0.1 mm (RTDE readback). Not yet run with the camera on the bracket or
+on the physical UR10, and the sim's TCP offset is zero, so the offset half of
+the arithmetic is covered by unit tests only.
+
 What it does **not** do: pick the object (no gripper orientation from the
 segment — the approach keeps the current tool rotation; the segment's
 `grasp` yaw hint is there for the next step), avoid obstacles (a straight

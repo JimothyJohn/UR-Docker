@@ -60,7 +60,14 @@ services:
   # only the e-Series sim. Start it with `docker compose --profile polyscopex up`
   # or `make simx-up`, then open http://localhost:8000 in Chrome.
   ursim-px:
-    image: universalrobots/ursim_polyscopex:10.14.0-0.10.777
+    # Pinned at 10.13.0 on purpose (2026-09-04): in 10.14.0-0.10.777 the
+    # Settings -> Security -> Services toggles (Primary Client Interface, RTDE)
+    # revert after a few seconds — each flip POSTs firewall rules for the
+    # interface "ethCB0", which the sim's firewall service doesn't know
+    # ("interface ethCB0 not found in firewall config", 404), so Primary never
+    # accepts URScript and urctl can't move the robot. 10.13.0 has no such
+    # firewall step and the toggles stick. Both tags ship arm64 images.
+    image: universalrobots/ursim_polyscopex:10.13.0
     profiles: ["polyscopex"]
     stdin_open: true
     tty: true
