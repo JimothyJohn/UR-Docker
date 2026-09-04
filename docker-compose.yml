@@ -4,7 +4,7 @@ services:
     stdin_open: true
     tty: true
     ports:
-      - "5900:5900"   # VNC
+      - "15900:5900"  # VNC (host 5900 is macOS Screen Sharing on a Mac; noVNC on 6080 is the usual door)
       - "6080:6080"   # noVNC (browser)
       - "29999:29999" # Dashboard server
       - "30000:30000" # Primary client (legacy alias port)
