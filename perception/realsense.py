@@ -138,6 +138,10 @@ class _rs2_intrinsics(ctypes.Structure):
     ]
 
 
+class _rs2_extrinsics(ctypes.Structure):
+    _fields_ = [("rotation", ctypes.c_float * 9), ("translation", ctypes.c_float * 3)]
+
+
 def find_library_path(explicit: str | None = None) -> str:
     """Locate the SDK shared library or raise :class:`RealSenseLibraryNotFound`."""
     tried: list[str] = []
@@ -249,6 +253,7 @@ class Api:
                 ],
             ),
             "rs2_get_video_stream_intrinsics": (None, [P, ctypes.POINTER(_rs2_intrinsics), PP]),
+            "rs2_get_extrinsics": (None, [P, P, ctypes.POINTER(_rs2_extrinsics), PP]),
             "rs2_embedded_frames_count": (I, [P, PP]),
             "rs2_extract_frame": (P, [P, I, PP]),
             "rs2_release_frame": (None, [P]),
@@ -514,6 +519,29 @@ class Api:
         finally:
             self.lib.rs2_delete_stream_profiles_list(lst)
         return out
+
+    def depth_to_color_extrinsics(self, profile) -> dict | None:
+        """``rs2_get_extrinsics(depth, color)`` of the active profile: ``{rotation:
+        [[..3]]*3 (row-major), translation: [x, y, z] m}`` mapping a *depth*-frame
+        point into the *colour* frame (``p_color = R p_depth + t``); None when
+        either stream is absent."""
+        lst = self._call("rs2_pipeline_profile_get_streams", profile)
+        try:
+            handles: dict[int, Any] = {}
+            for i in range(self._call("rs2_get_stream_profiles_count", lst)):
+                sp = self._call("rs2_get_stream_profile", lst, i)
+                handles[self._stream_profile(sp)["stream"]] = sp
+            if STREAM_DEPTH not in handles or STREAM_COLOR not in handles:
+                return None
+            raw = _rs2_extrinsics()
+            self._call("rs2_get_extrinsics", handles[STREAM_DEPTH], handles[STREAM_COLOR], ctypes.byref(raw))
+        finally:
+            self.lib.rs2_delete_stream_profiles_list(lst)
+        r = [float(v) for v in raw.rotation]  # librealsense stores this column-major
+        return {
+            "rotation": [[r[0], r[3], r[6]], [r[1], r[4], r[7]], [r[2], r[5], r[8]]],
+            "translation": [float(v) for v in raw.translation],
+        }
 
     def _stream_profile(self, sp) -> dict:
         stream, fmt, index, uid, fps = (ctypes.c_int() for _ in range(5))
@@ -837,6 +865,7 @@ class RealSenseCamera:
     depth_scale: float | None = field(default=None, init=False)
     effective_fps: int | None = field(default=None, init=False)
     tuning_applied: dict = field(default_factory=dict, init=False)  # filled on the first read()
+    extrinsics_depth_to_color: dict | None = field(default=None, init=False)
     _tuning_pending: bool = field(default=False, init=False, repr=False)
     _ctx: Any = field(default=None, init=False, repr=False)
     _pipe: Any = field(default=None, init=False, repr=False)
@@ -880,6 +909,10 @@ class RealSenseCamera:
                 key = {STREAM_DEPTH: "depth", STREAM_COLOR: "color"}.get(sp["stream"])
                 if key and sp["intrinsics"] is not None:
                     self.intrinsics[key] = sp["intrinsics"]
+            try:
+                self.extrinsics_depth_to_color = api.depth_to_color_extrinsics(self._profile)
+            except RealSenseError:
+                self.extrinsics_depth_to_color = None
             if self.filters is not None:
                 for kind, options in self.filters.chain():
                     self._filters.append(api.create_filter(kind, options))
@@ -1058,6 +1091,7 @@ class RealSenseCamera:
             },
             "depth_scale_m": self.depth_scale,
             "intrinsics": {k: v.as_dict() for k, v in self.intrinsics.items()},
+            "extrinsics_depth_to_color": self.extrinsics_depth_to_color,
             "sdk": {
                 "path": getattr(self.api, "path", None),
                 "api_version": getattr(self.api, "version", None),
@@ -1166,6 +1200,10 @@ class SyntheticRgbdCamera:
             "depth_scale_m": 0.001,
             "intrinsics": {
                 "color": synthetic_rgbd(self.width, self.height, holes=False).intrinsics.as_dict()
+            },
+            "extrinsics_depth_to_color": {
+                "rotation": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                "translation": [0.0, 0.0, 0.0],
             },
         }
 

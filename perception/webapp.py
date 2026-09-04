@@ -22,6 +22,13 @@ API:
   * ``POST /api/segment``  ``{x, y}`` segment the object under a pixel of the
                                       latest frame → mask PNG (base64) + features.
   * ``POST /api/nearest``             RealSenseTrainer's nearest-object mask.
+  * ``GET  /api/robot``               the robot link: host, hand-eye, dry-run.
+  * ``POST /api/robot/state``         ``ur_get_state`` through the tool registry.
+  * ``POST /api/robot/locate``        ``{standoff_m?, point_m?}`` — the segment's
+                                      camera point → base frame + approach pose
+                                      (reads the live flange pose; no motion).
+  * ``POST /api/robot/move``          ``{pose, velocity?}`` — safety-validated
+                                      ``movel`` to that approach pose.
   * ``POST /api/capture``  ``{name, include_mask}`` save color/depth(/mask/meta).
   * ``GET  /api/captures``            what's in the capture root.
   * ``POST /api/clear``               drop the current mask.
@@ -65,6 +72,7 @@ from .realsense import (
     platform_hint,
 )
 from .rgbd import RgbdFrame, pack_rgbd
+from .robotlink import RobotLink
 from .segment import Mask, StubSegmenter, extract_features, normalize_box
 
 DEFAULT_PORT = 7621
@@ -99,8 +107,10 @@ class ViewerApp:
         config: PerceptionConfig | None = None,
         store: CaptureStore | None = None,
         segmenter=None,
+        robot: RobotLink | None = None,
     ):
         self.camera = camera
+        self.robot = robot
         self.config = config or PerceptionConfig.from_env()
         self.store = store or CaptureStore(Path(DEFAULT_CAPTURE_ROOT))
         self.segmenter = segmenter or make_segmenter(self.config)
@@ -151,6 +161,8 @@ class ViewerApp:
                     opened = True
                     failures = 0
                     self.last_error = None
+                    if self.robot is not None:
+                        self.robot.attach_camera(self.camera.describe())  # depth→colour extrinsics
                 frame = self.camera.read()
             except Exception as exc:
                 hint = platform_hint(exc) if isinstance(exc, RealSenseError) else ""
@@ -219,7 +231,33 @@ class ViewerApp:
             "last_error": self.last_error,
             "frame": frame.summary() if frame else None,
             "has_mask": self.mask is not None,
+            "robot": self.robot.describe() if self.robot is not None else None,
         }
+
+    # -- robot -------------------------------------------------------------------------
+
+    def _link(self) -> RobotLink:
+        if self.robot is None:
+            raise ValueError("no robot link (started with --no-robot)")
+        return self.robot
+
+    def robot_state(self) -> dict:
+        return self._link().state()
+
+    def robot_locate(self, standoff_m: float | None = None, point_m: Sequence[float] | None = None) -> dict:
+        """The current segment's camera point (or an explicit ``point_m``) → base
+        frame + approach pose. Reads the flange pose; moves nothing."""
+        link = self._link()
+        if point_m is None:
+            if not self.features or not self.features.get("point_m"):
+                raise ValueError("segment an object with depth first (no camera point to send)")
+            point_m = self.features["point_m"]
+        kwargs = {} if standoff_m is None else {"standoff_m": float(standoff_m)}
+        return link.locate(point_m, **kwargs)
+
+    def robot_move(self, pose: Sequence[float], velocity: float | None = None) -> dict:
+        kwargs = {} if velocity is None else {"velocity": float(velocity)}
+        return self._link().move(pose, **kwargs)
 
     def segment(self, x: int | None = None, y: int | None = None, box: Sequence[float] | None = None) -> dict:
         """Segment the latest frame from a click (``x, y``), a dragged ``box``
@@ -350,6 +388,10 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._guarded(self.app.info)
         elif route == "/api/captures":
             self._guarded(self.app.captures)
+        elif route == "/api/robot":
+            self._guarded(
+                lambda: {"ok": True, "robot": self.app.robot.describe() if self.app.robot else None}
+            )
         elif route == "/api/rgbd":
             try:
                 after = int(qs["after"][0]) if "after" in qs else None
@@ -392,8 +434,48 @@ class ViewerHandler(BaseHTTPRequestHandler):
             )
         elif route == "/api/clear":
             self._guarded(self.app.clear)
+        elif route == "/api/robot/state":
+            self._guarded(self.app.robot_state)
+        elif route == "/api/robot/locate":
+            self._guarded(
+                lambda: self.app.robot_locate(
+                    _number(payload, "standoff_m") if "standoff_m" in payload else None,
+                    _vector(payload, "point_m", 3) if "point_m" in payload else None,
+                )
+            )
+        elif route == "/api/robot/move":
+            self._guarded(
+                lambda: self.app.robot_move(
+                    _vector(payload, "pose", 6),
+                    _number(payload, "velocity") if "velocity" in payload else None,
+                )
+            )
         else:
             self._send_json({"ok": False, "error": f"no route {route}"}, status=404)
+
+
+def _number(payload: dict, key: str) -> float:
+    v = payload.get(key)
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
+        raise ValueError(f"{key} must be a finite number")
+    return float(v)
+
+
+def _vector(payload: dict, key: str, n: int) -> list[float]:
+    v = payload.get(key)
+    if not isinstance(v, list) or len(v) != n:
+        raise ValueError(f"{key} must be a list of {n} numbers")
+    out = []
+    for x in v:
+        if (
+            isinstance(x, bool)
+            or not isinstance(x, (int, float))
+            or x != x
+            or x in (float("inf"), float("-inf"))
+        ):
+            raise ValueError(f"{key} must contain finite numbers")
+        out.append(float(x))
+    return out
 
 
 def _box(payload: dict) -> list | None:
@@ -420,16 +502,24 @@ def serve(
     bind: str = "127.0.0.1",
     port: int = DEFAULT_PORT,
     open_browser: bool = True,
+    robot: RobotLink | None = None,
 ) -> None:
     """Run the cockpit until interrupted (the ``perception gui`` entry point)."""
-    app = ViewerApp(camera, config=config, store=CaptureStore(Path(capture_root)))
+    app = ViewerApp(camera, config=config, store=CaptureStore(Path(capture_root)), robot=robot)
     server = ThreadingHTTPServer((bind, port), ViewerHandler)
     server.daemon_threads = True
     server.app = app  # type: ignore[attr-defined]
     host = "127.0.0.1" if bind in ("0.0.0.0", "") else bind
     url = f"http://{host}:{server.server_address[1]}/"
     kind = camera.describe()["kind"]
-    print(f"perception gui -> {url}   (camera: {kind}, captures: {capture_root}, Ctrl-C to stop)")
+    robot_desc = (
+        f"robot: {robot.config.host}{' (dry-run)' if robot.dry_run else ''}"
+        if robot is not None
+        else "robot: off"
+    )
+    print(
+        f"perception gui -> {url}   (camera: {kind}, {robot_desc}, captures: {capture_root}, Ctrl-C to stop)"
+    )
     if bind not in ("127.0.0.1", "localhost", "::1"):
         print(f"WARNING: bound to {bind} with no authentication — only do this on a trusted cell network.")
     app.start()
@@ -479,6 +569,30 @@ def add_camera_args(ap) -> None:
         help="projector power in mW, or max|none (default: $PERCEPTION_RS_LASER_POWER, max)",
     )
     ap.add_argument("--library", default=None, help="path to librealsense2 (default: $REALSENSE_LIB / auto)")
+
+
+def add_robot_args(ap) -> None:
+    """The robot-link flags shared by ``perception gui`` and ``perception-gui``."""
+    ap.add_argument("--no-robot", action="store_true", help="no robot panel / link at all")
+    ap.add_argument(
+        "--robot-host", default=None, help="UR controller address (default: $UR_HOST, localhost = URSim)"
+    )
+    ap.add_argument(
+        "--robot-dry-run",
+        action="store_true",
+        help="validate + audit robot actions but send nothing (a stand-in flange pose is used)",
+    )
+
+
+def robot_from_args(args) -> RobotLink | None:
+    if getattr(args, "no_robot", False):
+        return None
+    from urctl.config import RobotConfig
+
+    return RobotLink(
+        RobotConfig.from_env(host=getattr(args, "robot_host", None)),
+        dry_run=bool(getattr(args, "robot_dry_run", False)),
+    )
 
 
 def parse_resolution(text: str) -> tuple[int, int]:
@@ -559,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="perception-gui", description="local RGB-D cockpit for a RealSense camera"
     )
     add_camera_args(ap)
+    add_robot_args(ap)
     ap.add_argument("--width", type=int, default=None)
     ap.add_argument("--height", type=int, default=None)
     ap.add_argument(
@@ -593,6 +708,7 @@ def main(argv: list[str] | None = None) -> int:
         bind=args.bind,
         port=args.port,
         open_browser=not args.no_browser,
+        robot=robot_from_args(args),
     )
     return 0
 

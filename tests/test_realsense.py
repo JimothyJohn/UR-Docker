@@ -172,6 +172,9 @@ class FakeApi:
         self.log.append(f"process:{block.rsplit('#', 1)[0].split(':', 1)[1]}")
         return self._take("frameset")
 
+    def depth_to_color_extrinsics(self, profile):
+        return {"rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "translation": [0.015, 0.0, 0.0]}
+
     def profile_streams(self, profile):
         return [
             {
@@ -265,6 +268,7 @@ def test_open_read_close_is_handle_balanced():
         assert f.extra["serial"] == "123456"
         d = cam.describe()
         assert d["kind"] == "realsense" and d["open"] and d["sdk"]["api_version"] == 25804
+        assert d["extrinsics_depth_to_color"]["translation"] == [0.015, 0.0, 0.0]
     assert balanced(api), api.live
     assert "start:64x48@30:None" in api.log and "align" in api.log
     assert "depth:848x480" in api.log  # depth streams at its native mode, colour at 64x48

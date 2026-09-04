@@ -17,6 +17,8 @@ anything to the controller — useful for previewing what an agent would do.
 
 from __future__ import annotations
 
+import math
+
 from .audit import AuditLog
 from .config import RobotConfig
 from .dashboard import DashboardClient
@@ -207,6 +209,63 @@ class Robot:
             **extra,
         }
         return self._log("get_state", {}, ok=True, result=result)
+
+    def get_flange_pose(self, *, collect_for: float = 3.0) -> dict:
+        """The tool-flange pose in the base frame, alongside the active TCP pose
+        and TCP offset it was derived from — what a camera on the flange needs
+        to put its measurements into base coordinates (``perception.handeye``).
+
+        One Primary ``textmsg`` round-trip: the controller reports
+        ``get_actual_tcp_pose()`` and ``get_tcp_offset()``; the flange is
+        ``pose_trans(tcp, pose_inv(offset))`` (also computed host-side by
+        :mod:`urctl.pose` and cross-checked against the controller's own
+        arithmetic). Works in Local control mode on a real e-Series — only
+        *motion* is gated on Remote. In ``dry_run`` a stand-in pose is returned
+        (tool pointing down, 0.5 m out and up) so cockpits can be exercised
+        without a controller.
+        """
+        from .pose import Transform
+
+        if self.dry_run:
+            flange = [0.5, 0.0, 0.5, 0.0, math.pi, 0.0]
+            return self._log(
+                "get_flange_pose",
+                {},
+                ok=True,
+                result={"flange": flange, "tcp": flange, "tcp_offset": [0.0] * 6, "dry_run": True},
+            )
+        captured = self.primary.run_and_capture(
+            'textmsg("urctl/flange/tcp=", get_actual_tcp_pose())\n'
+            'textmsg("urctl/flange/offset=", get_tcp_offset())\n'
+            'textmsg("urctl/flange/pose=", pose_trans(get_actual_tcp_pose(), pose_inv(get_tcp_offset())))\n',
+            fn_name="urctl_flange_pose",
+            marker="urctl/flange",
+            collect_for=collect_for,
+            stop_marker="urctl/flange/pose=",
+        )
+        from .primary import parse_vector
+
+        tcp = parse_vector(captured, "urctl/flange/tcp")
+        offset = parse_vector(captured, "urctl/flange/offset")
+        reported = parse_vector(captured, "urctl/flange/pose")
+        if tcp is None or offset is None:
+            return self._log(
+                "get_flange_pose",
+                {},
+                ok=False,
+                result={
+                    "error": "no TCP pose/offset surfaced on the Primary broadcast",
+                    "captured": captured[-5:],
+                },
+            )
+        flange = Transform.from_pose(tcp).compose(Transform.from_pose(offset).inverse()).to_pose()
+        result = {"flange": flange, "tcp": tcp, "tcp_offset": offset}
+        if reported is not None:
+            result["flange_reported"] = reported
+            result["host_controller_mismatch_m"] = max(
+                abs(a - b) for a, b in zip(flange[:3], reported[:3], strict=False)
+            )
+        return self._log("get_flange_pose", {}, ok=True, result=result)
 
     def rtde_state(self, *, deep: bool = False) -> dict:
         """High-rate structured state via RTDE (port 30004).

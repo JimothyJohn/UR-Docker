@@ -356,3 +356,133 @@ def test_depth_flags_reach_the_camera(monkeypatch, tmp_path):
     assert cam.tuning == DepthTuning(preset="high_density", laser_power=None, emitter=None)
     # the synthetic camera ignores all of it
     assert isinstance(camera_from_args(ns(fake=True), PerceptionConfig.from_env()), SyntheticRgbdCamera)
+
+
+# ----- robot link: send the segment's point to the robot -----------------------------
+
+
+@pytest.fixture
+def robot_server(tmp_path, monkeypatch):
+    """The cockpit with a RobotLink whose Robot talks to test_urctl's fake controller."""
+    from perception.robotlink import RobotLink
+    from tests.test_urctl import FakeController
+    from urctl.config import RobotConfig
+
+    fake = FakeController().install(monkeypatch)
+    link = RobotLink(RobotConfig(host="fake-ur"))
+    app = ViewerApp(
+        SyntheticRgbdCamera(width=64, height=48, fps=0),
+        config=PerceptionConfig(),
+        store=CaptureStore(tmp_path / "caps"),
+        robot=link,
+    )
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), ViewerHandler)
+    srv.daemon_threads = True
+    srv.app = app  # type: ignore[attr-defined]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    app.start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    deadline = time.monotonic() + 5
+    while app.latest()[1] is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    yield base, app, fake
+    srv.shutdown()
+    srv.server_close()
+    app.stop()
+
+
+def test_robot_panel_info_and_locate_needs_a_segment(robot_server):
+    base, app, fake = robot_server
+    _, _, body = get(base, "/api/info")
+    info = json.loads(body)
+    assert info["robot"]["host"] == "fake-ur" and info["robot"]["handeye"]["source"] == "bracket-nominal"
+    # the synthetic camera's identity extrinsics were attached on open
+    assert info["robot"]["handeye"]["depth_to_color_translation"] == [0.0, 0.0, 0.0]
+    _, _, body = get(base, "/api/robot")
+    assert json.loads(body)["robot"]["dry_run"] is False
+    code, j = post(base, "/api/robot/locate", {})
+    assert code == 400 and "segment an object" in j["error"]
+    assert not fake.primary_sends  # nothing touched the controller
+
+
+def test_robot_locate_then_move_round_trip(robot_server):
+    base, app, fake = robot_server
+    # segment the synthetic disk so the cockpit has a camera-frame point
+    code, seg = post(base, "/api/nearest", {})
+    assert code == 200 and seg["features"]["point_m"], seg
+    code, loc = post(base, "/api/robot/locate", {"standoff_m": 0.05})
+    assert code == 200 and loc["ok"], loc
+    assert loc["point_cam_m"] == pytest.approx(seg["features"]["point_m"], abs=1e-9)
+    assert len(loc["approach_pose"]) == 6 and loc["standoff_m"] == 0.05
+    assert loc["approach_pose"][3:] == pytest.approx(fake.tcp_pose[3:], abs=1e-6)  # orientation kept
+    assert loc["robot"]["tcp_offset"] == pytest.approx(fake.tcp_offset, abs=1e-6)
+    assert len([s for s in fake.primary_sends if "urctl/flange" in s]) == 1
+    # an explicit point overrides the segment's
+    code, loc2 = post(base, "/api/robot/locate", {"point_m": [0.0, 0.0, 0.3]})
+    assert code == 200 and loc2["point_cam_m"] == [0.0, 0.0, 0.3] and loc2["standoff_m"] == 0.1
+    # move to the approach pose: one absolute movel, through the safety envelope
+    code, mv = post(base, "/api/robot/move", {"pose": loc["approach_pose"]})
+    assert code == 200 and mv["ok"] and mv["action"] == "move_tcp" and mv["safety"]["ok"], mv
+    movel = [s for s in fake.primary_sends if "movel(" in s]
+    assert len(movel) == 1 and "pose_add" not in movel[0] and "v=0.1" in movel[0]
+    code, mv2 = post(base, "/api/robot/move", {"pose": loc["approach_pose"], "velocity": 0.05})
+    assert code == 200 and "v=0.05" in [s for s in fake.primary_sends if "movel(" in s][-1]
+    # state passes through the registry too
+    code, st = post(base, "/api/robot/state", {})
+    assert code == 200 and st["ok"] and st["robot_mode"]
+
+
+@pytest.mark.parametrize(
+    "path, body",
+    [
+        ("/api/robot/locate", {"standoff_m": "far"}),
+        ("/api/robot/locate", {"standoff_m": 5.0}),
+        ("/api/robot/locate", {"point_m": [0, 0]}),
+        ("/api/robot/locate", {"point_m": [0, 0, "z"]}),
+        ("/api/robot/locate", {"point_m": [0, 0, True]}),
+        ("/api/robot/move", {}),
+        ("/api/robot/move", {"pose": [0, 0, 0]}),
+        ("/api/robot/move", {"pose": [0, 0, 0, 0, 0, "x"]}),
+        ("/api/robot/move", {"pose": [0, 0, 0, 0, 0, 0], "velocity": 0}),
+        ("/api/robot/move", {"pose": [0, 0, 0, 0, 0, 0], "velocity": 9}),
+        ("/api/robot/move", {"pose": [1e400, 0, 0, 0, 0, 0]}),
+    ],
+)
+def test_robot_bad_inputs_never_reach_the_controller(robot_server, path, body):
+    base, app, fake = robot_server
+    code, j = post(base, path, body)
+    assert code == 400 and not j["ok"], j
+    assert not any("movel(" in s for s in fake.primary_sends)
+
+
+def test_robot_move_refused_by_envelope_is_reported_not_executed(robot_server):
+    base, app, fake = robot_server
+    fake.robot_mode = "POWER_OFF"
+    code, mv = post(base, "/api/robot/move", {"pose": [0.5, 0, 0.3, 0, 3.14159, 0]})
+    assert code == 200 and not mv["ok"] and mv["safety"]["ok"] is False
+    assert not any("movel(" in s for s in fake.primary_sends)
+
+
+def test_no_robot_link_is_a_clean_400(server):
+    base, app, _ = server
+    _, _, body = get(base, "/api/info")
+    assert json.loads(body)["robot"] is None
+    _, _, body = get(base, "/api/robot")
+    assert json.loads(body)["robot"] is None
+    for path in ("/api/robot/state", "/api/robot/locate", "/api/robot/move"):
+        code, j = post(base, path, {"pose": [0, 0, 0, 0, 0, 0]})
+        assert code == 400 and "no robot link" in j["error"]
+
+
+def test_gui_main_robot_flags(monkeypatch, tmp_path):
+    from perception.robotlink import RobotLink
+
+    calls = {}
+    monkeypatch.setattr("perception.webapp.serve", lambda camera, **kw: calls.update(kw))
+    common = ["--fake", "--no-browser", "--out", str(tmp_path), "--port", "0"]
+    assert gui_main([*common, "--no-robot"]) == 0 and calls["robot"] is None
+    assert gui_main([*common, "--robot-host", "10.1.2.3", "--robot-dry-run"]) == 0
+    link = calls["robot"]
+    assert isinstance(link, RobotLink) and link.config.host == "10.1.2.3" and link.dry_run
+    monkeypatch.setenv("UR_HOST", "10.9.9.9")
+    assert gui_main(common) == 0 and calls["robot"].config.host == "10.9.9.9" and not calls["robot"].dry_run

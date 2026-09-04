@@ -140,6 +140,53 @@ frame costs only the decode — pause the stream (Space) to iterate on one frame
 On the Jetson the same backend runs on CUDA; NanoSAM (TensorRT) is a possible
 later backend behind the same `Segmenter` seam but is not wired.
 
+## Sending a point to the robot (cockpit → base frame → `movel`)
+
+The Object panel has a **Robot** section. With a segment that has depth:
+
+1. **Locate in base** — `POST /api/robot/locate`. The cockpit reads the live
+   flange pose from the controller (`ur_flange_pose`: one Primary `textmsg`
+   round-trip returning `get_actual_tcp_pose()`, `get_tcp_offset()` and the
+   controller's own `pose_trans(tcp, pose_inv(offset))`; works in Local mode)
+   and maps the segment's camera-frame point through the hand-eye transform:
+   `p_base = T_base_flange · T_flange_depth · T_depth_color · p_color`. It
+   shows every intermediate frame plus an **approach pose**: the TCP placed
+   *standoff* metres short of the point along the camera's viewing ray, with
+   the tool's current orientation. Nothing moves.
+2. **Move TCP to approach** — `POST /api/robot/move` with the pose you just
+   saw. One absolute `movel` through `ur_move_tcp` — the same schema-validated,
+   safety-enveloped, audited path as the `urctl` CLI and MCP server (refused
+   when not RUNNING, over the speed caps, or outside reach). Slow by default
+   (0.1 m/s). On a real e-Series this needs **Remote** control mode; locating
+   doesn't.
+
+**Hand-eye transform.** `perception/handeye.py` seeds `T_flange_depth` from
+the bracket geometry (`hardware/d435-tool-bracket/README.md` §3,
+`ARM_ANGLE_DEG = 0`: camera x = flange +Y, camera y = flange −X, camera z =
+flange +Z, depth origin at (75.0, −17.5, 35.0) mm) and takes
+`T_depth_color` from the SDK's extrinsics at open (`rs2_get_extrinsics`,
+~15 mm along x on a D435; identity on the synthetic camera). That is an
+**uncalibrated seed** — a printed part won't hold ±1°, and 1° at 0.5 m is
+~9 mm. Replace it with a hand-eye calibration via
+`PERCEPTION_T_FLANGE_CAMERA="[x, y, z, rx, ry, rz]"` (the depth frame in the
+flange frame, metres + UR rotation vector); the panel's *hand-eye* row says
+which one is active. Pose arithmetic is `urctl/pose.py` (Rodrigues,
+`pose_trans`/`pose_inv` with URScript semantics, pure stdlib) and is
+cross-checked against the controller's own `pose_trans` on every locate
+(the *host/controller Δ* row).
+
+Flags / env: `--robot-host` (`$UR_HOST`, default localhost = URSim),
+`--robot-dry-run` (validate + audit, send nothing; a stand-in flange pose
+lets the whole flow run on `--fake`), `--no-robot` (no panel). The
+standoff is per-click in the panel (default 0.10 m).
+
+What it does **not** do: pick the object (no gripper orientation from the
+segment — the approach keeps the current tool rotation; the segment's
+`grasp` yaw hint is there for the next step), avoid obstacles (a straight
+`movel`; move above the scene first), or verify reach before you press Move
+(the envelope's reach check is a sphere; PolyScope's IK is the final word,
+see *Cartesian moves and singularities* in CLAUDE.md).
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

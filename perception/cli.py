@@ -27,7 +27,14 @@ import sys
 from .config import PerceptionConfig
 from .pipeline import PerceptionPipeline
 from .tools import ToolError, call_tool, get_tool_schemas
-from .webapp import DEFAULT_CAPTURE_ROOT, DEFAULT_PORT, add_camera_args, camera_from_args
+from .webapp import (
+    DEFAULT_CAPTURE_ROOT,
+    DEFAULT_PORT,
+    add_camera_args,
+    add_robot_args,
+    camera_from_args,
+    robot_from_args,
+)
 
 
 def _emit(result: dict) -> int:
@@ -109,8 +116,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--warmup", type=int, default=15, help="frames to discard for auto-exposure (default: 15)"
     )
 
-    gu = sub.add_parser("gui", help="local RGB-D cockpit: live view, click-to-segment, capture")
+    gu = sub.add_parser(
+        "gui", help="local RGB-D cockpit: live view, click-to-segment, capture, send-to-robot"
+    )
     add_camera_args(gu)
+    add_robot_args(gu)
     gu.add_argument(
         "--out", default=DEFAULT_CAPTURE_ROOT, help=f"capture root (default: {DEFAULT_CAPTURE_ROOT}/)"
     )
@@ -179,6 +189,7 @@ def _realsense_command(args) -> int:
             bind=args.bind,
             port=args.port,
             open_browser=not args.no_browser,
+            robot=robot_from_args(args),
         )
         return 0
 

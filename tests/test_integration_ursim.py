@@ -497,6 +497,27 @@ def _running_robot(*, ready_pose: bool = True):
     return robot
 
 
+def test_flange_pose_matches_the_controllers_own_arithmetic(ursim_ready):
+    """``get_flange_pose`` (host-side pose_trans/pose_inv) agrees with what the
+    controller computes, and undoing the active TCP offset is consistent with
+    the live TCP pose."""
+    from urctl.pose import pose_trans
+
+    robot = _running_robot()
+    fp = robot.get_flange_pose()
+    assert fp["ok"], fp
+    assert len(fp["flange"]) == 6 and len(fp["tcp"]) == 6 and len(fp["tcp_offset"]) == 6
+    assert "flange_reported" in fp and fp["host_controller_mismatch_m"] < 1e-4, fp
+    # flange · offset == tcp (to the controller's textmsg precision)
+    back = pose_trans(fp["flange"], fp["tcp_offset"])
+    assert max(abs(a - b) for a, b in zip(back[:3], fp["tcp"][:3], strict=True)) < 1e-4
+    # and the tool registry exposes it
+    from urctl.tools import call_tool
+
+    via_tool = call_tool(robot, "ur_flange_pose")
+    assert via_tool["ok"] and via_tool["action"] == "get_flange_pose"
+
+
 def _read_tcp(robot, *, collect_for: float = 3.0):
     """Read the TCP pose, retrying briefly — Primary's broadcast is sampled."""
     for _ in range(3):

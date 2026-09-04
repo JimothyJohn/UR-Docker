@@ -63,7 +63,13 @@ sensor on the High Accuracy preset at full laser; `docs/realsense.md` §Depth
 quality; `--no-depth-filters` / `--rs-preset none` for raw), and the cockpit (`perception/webapp.py` + `perception/webui/`) does
 hover-to-measure, click-to-segment (`perception/segment.py`: colour+depth
 region growing, or SAM via the `sam` extra) and RealSenseTrainer-style captures
-(`perception/capture.py`). **macOS needs `sudo`** to open the camera (libusb
+(`perception/capture.py`), and a **Robot** panel that sends the segment's point to
+the arm: `ur_flange_pose` (new tool) + the bracket-nominal hand-eye seed
+(`perception/handeye.py`, override with `PERCEPTION_T_FLANGE_CAMERA`) give a
+base-frame point and an approach pose; **Move** is one `ur_move_tcp` through the
+same tool registry (`perception/robotlink.py`; `docs/realsense.md` §Sending a
+point to the robot). `urctl/pose.py` is the stdlib pose math (`pose_trans` /
+`pose_inv` semantics). **macOS needs `sudo`** to open the camera (libusb
 must detach Apple's UVC driver — `failed to set power state` otherwise); Linux
 needs the udev rules. `--fake` runs everything on a synthetic scene. The
 target compute is a Jetson Orin next to the robot: `Dockerfile.perception` +

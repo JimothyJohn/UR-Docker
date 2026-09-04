@@ -113,6 +113,10 @@ def _h_move_joints(robot: Robot, p: dict) -> dict:
     return robot.move_joints(p["joints"], **kwargs)
 
 
+def _h_flange_pose(robot: Robot, p: dict) -> dict:
+    return robot.get_flange_pose()
+
+
 def _h_move_tcp(robot: Robot, p: dict) -> dict:
     kwargs = {}
     if "relative" in p:
@@ -233,6 +237,15 @@ TOOLS: list[Tool] = [
         "state, and (when RUNNING) joint angles and TCP pose.",
         _object_schema({}),
         _h_get_state,
+    ),
+    Tool(
+        "ur_flange_pose",
+        "Read the tool-flange pose in the base frame (plus the active TCP pose "
+        "and TCP offset it derives from). Use it to transform measurements from "
+        "a flange-mounted camera into base coordinates. Read-only; works in "
+        "Local mode.",
+        _object_schema({}),
+        _h_flange_pose,
     ),
     Tool(
         "ur_bring_up",

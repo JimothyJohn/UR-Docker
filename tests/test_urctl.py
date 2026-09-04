@@ -52,6 +52,11 @@ class FakeController:
         self.confirm_answer = confirm_answer
         self.dashboard_sends: list[str] = []
         self.primary_sends: list[str] = []
+        # What a flange-pose read reports: live TCP pose + active TCP offset
+        # (a 120 mm tool along flange +Z). The controller-side flange is
+        # echoed as pose_trans(tcp, pose_inv(offset)) computed host-side.
+        self.tcp_pose = [0.5, -0.1, 0.4, 0.0, 3.14159265, 0.0]
+        self.tcp_offset = [0.0, 0.0, 0.12, 0.0, 0.0, 0.0]
 
     def install(self, monkeypatch) -> FakeController:
         from urctl import transport
@@ -105,6 +110,16 @@ class FakeController:
                     return b"urctl/reteach/pose=[1,2,3,4,5,6]\n"
                 return b"urctl/reteach=cancel\n"
             return f"urctl/confirm={self.confirm_answer}\n".encode()
+        if "urctl/flange" in body:
+            from urctl.pose import pose_inv, pose_trans
+
+            flange = pose_trans(self.tcp_pose, pose_inv(self.tcp_offset))
+            fmt = lambda v: "[" + ",".join(f"{x:.6f}" for x in v) + "]"  # noqa: E731
+            return (
+                f"urctl/flange/tcp={fmt(self.tcp_pose)}\n"
+                f"urctl/flange/offset={fmt(self.tcp_offset)}\n"
+                f"urctl/flange/pose={fmt(flange)}\n"
+            ).encode()
         # Echo the first bracketed vector back as the "done"/state marker so
         # move/read round-trips parse successfully.
         m = _VEC_RX.search(body)
