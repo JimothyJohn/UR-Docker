@@ -192,6 +192,17 @@ def test_pump_recovers_from_open_failure(tmp_path):
         app.stop()
 
 
+def test_reopen_delay_backs_off_and_caps():
+    from perception.webapp import REOPEN_DELAY_S, REOPEN_MAX_DELAY_S, reopen_delay
+
+    delays = [reopen_delay(n) for n in range(1, 12)]
+    assert delays[0] == REOPEN_DELAY_S
+    assert delays[:5] == [1.0, 2.0, 4.0, 8.0, 16.0]
+    assert all(a <= b for a, b in zip(delays, delays[1:], strict=False))
+    assert max(delays) == REOPEN_MAX_DELAY_S
+    assert reopen_delay(0) == REOPEN_DELAY_S
+
+
 def test_pump_reports_persistent_failure_with_hint(tmp_path):
     app = ViewerApp(FlakyCamera(fail_opens=10**6, width=32, height=24, fps=0), store=CaptureStore(tmp_path))
     app.start()

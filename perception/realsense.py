@@ -264,13 +264,14 @@ class Api:
         """The process-wide ``rs2_context`` (created once, never deleted).
 
         librealsense is built around one context per process: each context
-        claims the camera's USB interfaces through its own device watcher,
-        and on macOS's libusb backend those claims are released *late* — a
-        second context created seconds after the first (or after another
-        process released the camera) finds the depth interface still held,
-        logs ``cannot access depth sensor`` and starts a pipeline that never
-        delivers a frameset. Enumeration and streaming therefore share this
-        handle; the OS reclaims it at exit.
+        claims the camera's USB interfaces through its own device watcher.
+        On macOS's libusb backend every claim that finds an interface held
+        resets the USB device and races Apple's ``UVCAssistant`` for the
+        re-enumerated interfaces (see docs/realsense.md, Troubleshooting) —
+        a second context in the same process re-runs that race and, losing
+        the depth interface, logs ``cannot access depth sensor`` and starts
+        a pipeline that never delivers a frameset. Enumeration and streaming
+        therefore share this handle; the OS reclaims it at exit.
         """
         with self._ctx_lock:
             if self._ctx is None:

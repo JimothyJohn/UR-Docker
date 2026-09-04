@@ -59,6 +59,21 @@ from .segment import Mask, StubSegmenter, extract_features
 DEFAULT_PORT = 7621
 DEFAULT_CAPTURE_ROOT = "captures"
 REOPEN_DELAY_S = 1.0
+REOPEN_MAX_DELAY_S = 30.0
+
+
+def reopen_delay(failures: int) -> float:
+    """Seconds to wait before the ``failures``-th consecutive reopen (1-based):
+    1, 2, 4, … capped at :data:`REOPEN_MAX_DELAY_S`.
+
+    Every failed open on macOS's libusb backend resets the USB device to try
+    to capture it, and each reset re-runs the race against the OS camera
+    driver — a tight retry loop just resets the camera dozens of times and
+    stalls its control pipe (seen: 36 re-enumerations in nine minutes at a
+    fixed 1 s delay), so back off instead of hammering it.
+    """
+    return min(REOPEN_DELAY_S * 2 ** max(0, failures - 1), REOPEN_MAX_DELAY_S)
+
 
 _WEBUI = Path(__file__).parent / "webui" / "index.html"
 
@@ -117,11 +132,13 @@ class ViewerApp:
 
     def _pump(self) -> None:
         opened = False
+        failures = 0
         while self._running:
             try:
                 if not opened:
                     self.camera.open()
                     opened = True
+                    failures = 0
                     self.last_error = None
                 frame = self.camera.read()
             except Exception as exc:
@@ -132,9 +149,10 @@ class ViewerApp:
                 except Exception:
                     pass
                 opened = False
+                failures += 1
                 # Back off, then try again (camera unplugged / permission fixed / re-plugged).
                 with self._cond:
-                    self._cond.wait(REOPEN_DELAY_S)
+                    self._cond.wait(reopen_delay(failures))
                 continue
             now = time.monotonic()
             with self._cond:
