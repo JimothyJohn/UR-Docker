@@ -52,5 +52,5 @@ def make_segmenter(config: PerceptionConfig) -> Segmenter:
     if name == "sam":
         from .backends.sam import SamSegmenter
 
-        return SamSegmenter()
+        return SamSegmenter(model_id=config.sam_model) if config.sam_model else SamSegmenter()
     raise ValueError(f"unknown segment backend {name!r}; choose from {SEGMENT_BACKENDS}")

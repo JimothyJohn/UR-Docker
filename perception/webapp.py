@@ -45,6 +45,7 @@ import threading
 import time
 import traceback
 import webbrowser
+from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -54,7 +55,7 @@ from .config import PerceptionConfig
 from .factory import SEGMENT_BACKENDS, make_segmenter
 from .realsense import RealSenseError, RgbdCamera, open_camera, platform_hint
 from .rgbd import RgbdFrame, pack_rgbd
-from .segment import Mask, StubSegmenter, extract_features
+from .segment import Mask, StubSegmenter, extract_features, normalize_box
 
 DEFAULT_PORT = 7621
 DEFAULT_CAPTURE_ROOT = "captures"
@@ -210,16 +211,34 @@ class ViewerApp:
             "has_mask": self.mask is not None,
         }
 
-    def segment(self, x: int, y: int) -> dict:
+    def segment(self, x: int | None = None, y: int | None = None, box: Sequence[float] | None = None) -> dict:
+        """Segment the latest frame from a click (``x, y``), a dragged ``box``
+        (``[x0, y0, x1, y1]``), or both (the click disambiguates inside the box)."""
         seq, frame = self.latest()
         if frame is None:
             raise RuntimeError("no frame yet" + (f" ({self.last_error})" if self.last_error else ""))
-        if not (0 <= x < frame.color.width and 0 <= y < frame.color.height):
-            raise ValueError(f"point ({x}, {y}) outside the {frame.color.width}x{frame.color.height} frame")
+        w, h = frame.color.width, frame.color.height
+        if (x is None) != (y is None):
+            raise ValueError("x and y must be given together")
+        if x is None and box is None:
+            raise ValueError("segment needs x/y, box, or both")
+        point = None
+        if x is not None and y is not None:
+            if not (0 <= x < w and 0 <= y < h):
+                raise ValueError(f"point ({x}, {y}) outside the {w}x{h} frame")
+            point = (x, y)
+        nbox = normalize_box(box, w, h) if box is not None else None
+        if point is not None and nbox is not None and not (nbox[0] <= x < nbox[2] and nbox[1] <= y < nbox[3]):
+            raise ValueError(f"point ({x}, {y}) outside box {list(nbox)}")
+        prompt: dict = {}
+        if point is not None:
+            prompt.update({"x": x, "y": y})
+        if nbox is not None:
+            prompt["box"] = list(nbox)
         t0 = time.monotonic()
         with self._seg_lock:
-            mask = self.segmenter.segment(frame, (x, y))
-        return self._adopt_mask(mask, frame, seq, t0, {"x": x, "y": y})
+            mask = self.segmenter.segment(frame, point, box=nbox)
+        return self._adopt_mask(mask, frame, seq, t0, prompt)
 
     def nearest(self, near_ratio: float = 1.2) -> dict:
         seq, frame = self.latest()
@@ -346,7 +365,13 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": f"bad request: {exc}"}, status=400)
             return
         if route == "/api/segment":
-            self._guarded(lambda: self.app.segment(_int(payload, "x"), _int(payload, "y")))
+            self._guarded(
+                lambda: self.app.segment(
+                    _int(payload, "x") if "x" in payload else None,
+                    _int(payload, "y") if "y" in payload else None,
+                    _box(payload),
+                )
+            )
         elif route == "/api/nearest":
             self._guarded(lambda: self.app.nearest(float(payload.get("near_ratio", 1.2))))
         elif route == "/api/capture":
@@ -359,6 +384,15 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._guarded(self.app.clear)
         else:
             self._send_json({"ok": False, "error": f"no route {route}"}, status=404)
+
+
+def _box(payload: dict) -> list | None:
+    v = payload.get("box")
+    if v is None:
+        return None
+    if not isinstance(v, list) or len(v) != 4:
+        raise ValueError("box must be [x0, y0, x1, y1]")
+    return v
 
 
 def _int(payload: dict, key: str) -> int:
@@ -442,6 +476,11 @@ def main(argv: list[str] | None = None) -> int:
         "--segment-backend", default=None, help="stub | sam (default: $PERCEPTION_SEGMENT_BACKEND)"
     )
     ap.add_argument(
+        "--sam-model",
+        default=None,
+        help="SAM checkpoint id for the sam backend (default: $PERCEPTION_SAM_MODEL)",
+    )
+    ap.add_argument(
         "--out", default=DEFAULT_CAPTURE_ROOT, help=f"capture root (default: {DEFAULT_CAPTURE_ROOT}/)"
     )
     ap.add_argument("--bind", default="127.0.0.1", help="interface to bind (default: loopback only)")
@@ -455,6 +494,8 @@ def main(argv: list[str] | None = None) -> int:
         overrides["height"] = args.height
     if args.segment_backend is not None:
         overrides["segment_backend"] = args.segment_backend
+    if args.sam_model is not None:
+        overrides["sam_model"] = args.sam_model
     config = PerceptionConfig.from_env(**overrides)
     serve(
         camera_from_args(args, config),

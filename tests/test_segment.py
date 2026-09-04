@@ -8,7 +8,7 @@ import pytest
 
 from perception.frame import Frame
 from perception.rgbd import DepthImage, RgbdFrame, synthetic_disks, synthetic_intrinsics, synthetic_rgbd
-from perception.segment import Mask, Segmenter, StubSegmenter, extract_features
+from perception.segment import Mask, Segmenter, StubSegmenter, extract_features, normalize_box
 
 
 def _scene(width, height, rects, background=(20, 20, 24), wall=1.2):
@@ -158,3 +158,69 @@ def test_features_without_depth_data():
     ft = extract_features(StubSegmenter().segment(nodepth, (16, 24)), nodepth)
     assert ft is not None and ft.depth_median_m is None and ft.point_m is None and ft.extent_m is None
     assert ft.grasp["opening_m"] is None and ft.area_px > 0
+
+
+# ---- box prompts -------------------------------------------------------------------
+
+
+def test_box_prompt_segments_the_thing_inside_and_clips_to_it():
+    # two same-coloured touching rectangles at the same depth: a point grows across both,
+    # a box returns only what's inside it
+    f = _scene(80, 60, [(10, 10, 40, 50, (200, 40, 40), 0.8), (40, 10, 70, 50, (200, 40, 40), 0.8)])
+    seg = StubSegmenter()
+    whole = seg.segment(f, (20, 30))
+    assert whole.area == 2 * 30 * 40
+    left = seg.segment(f, box=(10, 10, 40, 50))
+    assert left.area == 30 * 40 and left.bbox() == (10, 10, 39, 49)
+    # box + point: the point seeds, the box clips
+    both = seg.segment(f, (15, 15), box=(12, 12, 20, 20))
+    assert both.area == 8 * 8 and both.bbox() == (12, 12, 19, 19)
+
+
+def test_box_centre_seed_on_background_still_clips():
+    f = _scene(80, 60, [(10, 10, 30, 30, (200, 40, 40), 0.8)])
+    # box around the object but centred on background: region grows over the background,
+    # is capped, and is clipped to the box — never the whole frame
+    m = StubSegmenter().segment(f, box=(0, 0, 60, 60))
+    assert m.area <= 60 * 60 and m.bbox() is not None and m.bbox()[2] < 60 and m.bbox()[3] < 60
+
+
+@pytest.mark.parametrize(
+    "box",
+    [
+        (0, 0, 0, 0),  # empty
+        (5, 5, 5, 20),  # zero width
+        (-1, 0, 10, 10),  # off the left edge
+        (0, 0, 81, 10),  # past the right edge
+        (0, 0, 10, 61),  # past the bottom
+        (0, 0, 10),  # wrong arity
+        (0, 0, 10, float("nan")),
+        (0, 0, 10, float("inf")),
+        (0, 0, True, 10),
+        "0,0,10,10",
+        None,
+    ],
+)
+def test_normalize_box_rejects_garbage(box):
+    with pytest.raises((ValueError, TypeError)):
+        normalize_box(box, 80, 60)
+
+
+def test_normalize_box_orders_corners_and_truncates():
+    assert normalize_box((40.9, 50.2, 10, 10), 80, 60) == (10, 10, 40, 50)
+    assert normalize_box([0, 0, 80, 60], 80, 60) == (0, 0, 80, 60)
+
+
+def test_point_outside_box_is_rejected():
+    f = _scene(80, 60, [(10, 10, 30, 30, (200, 40, 40), 0.8)])
+    with pytest.raises(ValueError, match="outside box"):
+        StubSegmenter().segment(f, (50, 50), box=(10, 10, 30, 30))
+    with pytest.raises(ValueError, match="point, a box, or both"):
+        StubSegmenter().segment(f)
+
+
+def test_mask_clipped():
+    m = Mask(4, 3, bytes([1] * 12))
+    c = m.clipped((1, 1, 3, 3))
+    assert c.area == 4 and c.bbox() == (1, 1, 2, 2)
+    assert m.clipped((-5, -5, 99, 99)).area == 12

@@ -147,9 +147,38 @@ def test_segment_capture_clear_flow(server):
     assert c3["index"] == 3 and not c3["with_mask"]
 
 
+def test_segment_by_box_and_by_box_plus_point(server):
+    base, app, _ = server
+    cx, cy, r, rgb, z = synthetic_disks(64, 48)[0]
+    box = [cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2]
+    status, j = post(base, "/api/segment", {"box": box})
+    assert status == 200 and j["ok"] and j["area_px"] > 0
+    assert j["prompt"] == {"box": box} and "x" not in j["prompt"]
+    # corner order doesn't matter; the echo is normalized
+    status, j2 = post(base, "/api/segment", {"box": [box[2], box[3], box[0], box[1]]})
+    assert status == 200 and j2["prompt"] == {"box": box} and j2["area_px"] == j["area_px"]
+    # point inside the box: both echoed
+    status, j3 = post(base, "/api/segment", {"x": cx, "y": cy, "box": box})
+    assert status == 200 and j3["prompt"] == {"x": cx, "y": cy, "box": box}
+    # the mask never leaks outside the box
+    bb = j3["features"]["bbox"]
+    assert box[0] <= bb[0] and box[1] <= bb[1] and bb[2] < box[2] and bb[3] < box[3]
+
+
 @pytest.mark.parametrize(
     "path,body,code",
     [
+        ("/api/segment", {}, 400),
+        ("/api/segment", {"x": 1}, 400),
+        ("/api/segment", {"box": [0, 0, 0, 0]}, 400),
+        ("/api/segment", {"box": [0, 0, 65, 10]}, 400),
+        ("/api/segment", {"box": [-1, 0, 10, 10]}, 400),
+        ("/api/segment", {"box": [0, 0, 10]}, 400),
+        ("/api/segment", {"box": "0,0,10,10"}, 400),
+        ("/api/segment", {"box": [0, 0, 10, float("nan")]}, 400),
+        ("/api/segment", {"box": [0, 0, 10, True]}, 400),
+        ("/api/segment", {"box": {"x0": 0}}, 400),
+        ("/api/segment", {"x": 60, "y": 40, "box": [0, 0, 10, 10]}, 400),
         ("/api/segment", {"x": 9999, "y": 1}, 400),
         ("/api/segment", {"x": -1, "y": 1}, 400),
         ("/api/segment", {"x": "NaN", "y": 1}, 400),

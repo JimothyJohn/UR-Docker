@@ -86,6 +86,35 @@ RSUSB backend, ~10 min on Apple Silicon), the SDK loads inside it, and
 The container has no auth — it is a cell-network cockpit, like `urctl gui`.
 Keep it off routable networks or put it behind the Jetson's firewall.
 
+## Click or drag to segment
+
+In the cockpit, a **click** sends a point prompt and a **press-drag-release**
+sends a box prompt (`/api/segment` takes `{"x","y"}`, `{"box":[x0,y0,x1,y1]}`,
+or both — a point inside a box disambiguates). Boxes are `x1`/`y1`-exclusive
+pixel edges, corner order doesn't matter, and anything off-frame or empty is a
+400 rather than a clamp. The last box is drawn dashed until you clear.
+
+Backends (`--segment-backend`, `$PERCEPTION_SEGMENT_BACKEND`):
+
+| backend | what it does | box prompt |
+| --- | --- | --- |
+| `stub` (default) | colour + depth region growing, pure Python | grows from the box centre (or the click) and clips to the box |
+| `sam` | Segment Anything via `transformers` (`uv sync --extra sam`) | native SAM box prompt, single-mask decode |
+
+SAM checkpoint (`--sam-model`, `$PERCEPTION_SAM_MODEL`, any `SamModel`-loadable
+id): `facebook/sam-vit-base` by default; `Zigeng/SlimSAM-uniform-50` is the
+light one (27 M params). Measured on this M-series Mac (`mps`, 640×480):
+
+| | embed a new frame | decode a prompt on the same frame |
+| --- | --- | --- |
+| `sam-vit-base` | ~0.45 s | ~10–50 ms |
+| `SlimSAM-uniform-50` | ~0.33 s | ~10–50 ms |
+
+The image embedding is cached per frame, so re-clicking or re-boxing the same
+frame costs only the decode — pause the stream (Space) to iterate on one frame.
+On the Jetson the same backend runs on CUDA; NanoSAM (TensorRT) is a possible
+later backend behind the same `Segmenter` seam but is not wired.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

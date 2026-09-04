@@ -112,7 +112,7 @@ perception-down:  ## Stop the perception service.
 test: test-unit  ## Alias for `test-unit` (the default fast path).
 
 test-unit:  ## Run unit tests (no simulator required).
-	$(PYTEST) -m "not integration"
+	$(PYTEST) -m "not integration and not sam"
 
 test-integration:  ## Run integration tests against a running URSim.
 	$(PYTEST) -m integration

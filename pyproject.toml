@@ -50,6 +50,7 @@ testpaths = ["tests"]
 markers = [
     "integration: test requires a running URSim simulator (deselect with -m 'not integration')",
     "realsense: test needs a RealSense camera attached and openable (deselect with -m 'not realsense')",
+    "sam: test runs the real SAM checkpoint (needs the `sam` extra + a download; deselect with -m 'not sam')",
 ]
 
 [tool.ruff]

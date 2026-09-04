@@ -37,6 +37,10 @@ DEFAULT_BLOB_BACKEND = "stub"
 # Click-to-segment backend for RGB-D frames: "stub" (color + depth region
 # growing, pure Python) or "sam" (Segment Anything via the `sam` extra).
 DEFAULT_SEGMENT_BACKEND = "stub"
+# Checkpoint for the "sam" backend (any SamModel-loadable id). "" = the
+# backend's default (facebook/sam-vit-base); Zigeng/SlimSAM-uniform-50 is the
+# light option — see perception/backends/sam.py.
+DEFAULT_SAM_MODEL = ""
 
 # RealSense selection. Empty serial = first attached camera. The RealSense
 # streams run at their own rate independent of the pure-Python pipeline's
@@ -118,6 +122,7 @@ class PerceptionConfig:
     blob_link_tolerance: int = DEFAULT_BLOB_LINK_TOLERANCE
     blob_split_touching: bool = DEFAULT_BLOB_SPLIT_TOUCHING
     segment_backend: str = DEFAULT_SEGMENT_BACKEND
+    sam_model: str = DEFAULT_SAM_MODEL
     rs_serial: str = DEFAULT_RS_SERIAL
     rs_fps: int = DEFAULT_RS_FPS
 
@@ -142,6 +147,7 @@ class PerceptionConfig:
             "blob_link_tolerance": _env_int("PERCEPTION_BLOB_LINK_TOLERANCE", DEFAULT_BLOB_LINK_TOLERANCE),
             "blob_split_touching": _env_bool("PERCEPTION_BLOB_SPLIT_TOUCHING", DEFAULT_BLOB_SPLIT_TOUCHING),
             "segment_backend": _env_str("PERCEPTION_SEGMENT_BACKEND", DEFAULT_SEGMENT_BACKEND),
+            "sam_model": _env_str("PERCEPTION_SAM_MODEL", DEFAULT_SAM_MODEL),
             "rs_serial": _env_str("PERCEPTION_RS_SERIAL", DEFAULT_RS_SERIAL),
             "rs_fps": _env_int("PERCEPTION_RS_FPS", DEFAULT_RS_FPS),
         }

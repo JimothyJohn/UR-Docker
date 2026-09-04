@@ -8,7 +8,8 @@ it's lying. Everything here is pure Python; the optional SAM backend
 (:mod:`perception.backends.sam`) plugs into the same :class:`Segmenter` seam.
 
 * :class:`Mask` — one binary label image (bytes, 0/1) with geometry helpers.
-* :class:`Segmenter` — the pluggable interface: ``segment(rgbd, point) → Mask``.
+* :class:`Segmenter` — the pluggable interface: ``segment(rgbd, point=…,
+  box=…) → Mask`` — a click, a dragged box, or both.
 * :class:`StubSegmenter` — region growing from the clicked pixel by *color
   similarity* (chained neighbour tolerance, like the blob detector) **and**
   *depth continuity* (a neighbour joins only if its depth is within
@@ -78,9 +79,53 @@ class Mask:
 
         return encode_png(self.width, self.height, 1, bytes(255 if v else 0 for v in self.data))
 
+    def clipped(self, box: tuple[int, int, int, int]) -> Mask:
+        """Copy with every pixel outside ``box`` (``x0, y0, x1, y1``; ``x1``/``y1``
+        exclusive) cleared."""
+        x0, y0, x1, y1 = box
+        w = self.width
+        out = bytearray(len(self.data))
+        for y in range(max(0, y0), min(self.height, y1)):
+            row = y * w
+            lo, hi = row + max(0, x0), row + min(w, x1)
+            out[lo:hi] = self.data[lo:hi]
+        return Mask(self.width, self.height, bytes(out))
+
     @classmethod
     def empty(cls, width: int, height: int) -> Mask:
         return cls(width, height, bytes(width * height))
+
+
+Box = tuple[int, int, int, int]
+
+
+def normalize_box(box, width: int, height: int) -> Box:
+    """Validate a prompt box against a ``width``×``height`` frame.
+
+    Accepts any 4-sequence of finite numbers (corner order doesn't matter),
+    returns ``(x0, y0, x1, y1)`` with ``0 <= x0 < x1 <= width`` and
+    ``0 <= y0 < y1 <= height`` (``x1``/``y1`` exclusive, so a box must cover at
+    least one pixel). Rejects anything else rather than clamping — a box that
+    hangs off the frame is a UI bug, not a request to guess.
+    """
+    try:
+        vals = list(box)
+    except TypeError:
+        raise ValueError("box must be [x0, y0, x1, y1]") from None
+    if len(vals) != 4:
+        raise ValueError("box must be [x0, y0, x1, y1]")
+    nums = []
+    for v in vals:
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (math.inf, -math.inf):
+            raise ValueError("box coordinates must be finite numbers")
+        nums.append(int(v))
+    x0, x1 = sorted((nums[0], nums[2]))
+    y0, y1 = sorted((nums[1], nums[3]))
+    if x0 < 0 or y0 < 0 or x1 > width or y1 > height:
+        raise ValueError(f"box {nums} outside the {width}x{height} frame")
+    if x1 <= x0 or y1 <= y0:
+        raise ValueError(f"box {nums} is empty")
+    return x0, y0, x1, y1
 
 
 @runtime_checkable
@@ -89,7 +134,9 @@ class Segmenter(Protocol):
 
     name: str
 
-    def segment(self, rgbd: RgbdFrame, point: tuple[int, int]) -> Mask: ...
+    def segment(
+        self, rgbd: RgbdFrame, point: tuple[int, int] | None = None, *, box: Box | None = None
+    ) -> Mask: ...
 
 
 @dataclass
@@ -107,6 +154,10 @@ class StubSegmenter:
 
     ``max_area_fraction`` caps the region so a click on the background can't
     return the whole frame.
+
+    A ``box`` prompt grows from the box centre (or from ``point`` when both are
+    given) and clips the result to the box — the cheap stand-in for SAM's box
+    prompt: "the thing in here", not "everything that touches it".
     """
 
     name: str = "stub"
@@ -117,12 +168,22 @@ class StubSegmenter:
     max_area_fraction: float = 0.5
     use_depth: bool = True
 
-    def segment(self, rgbd: RgbdFrame, point: tuple[int, int]) -> Mask:
+    def segment(
+        self, rgbd: RgbdFrame, point: tuple[int, int] | None = None, *, box: Box | None = None
+    ) -> Mask:
         frame, depth = rgbd.color, rgbd.depth
         w, h = frame.width, frame.height
+        if box is not None:
+            box = normalize_box(box, w, h)
+        if point is None:
+            if box is None:
+                raise ValueError("segment needs a point, a box, or both")
+            point = ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
         sx, sy = point
         if not (0 <= sx < w and 0 <= sy < h):
             raise ValueError(f"seed ({sx}, {sy}) outside the {w}x{h} frame")
+        if box is not None and not (box[0] <= sx < box[2] and box[1] <= sy < box[3]):
+            raise ValueError(f"seed ({sx}, {sy}) outside box {box}")
         use_depth = self.use_depth and (depth.width, depth.height) == (w, h)
         c = frame.channels
         px = frame.data
@@ -167,7 +228,8 @@ class StubSegmenter:
                 out[j] = 1
                 count += 1
                 q.append(j)
-        return Mask(w, h, bytes(out))
+        mask = Mask(w, h, bytes(out))
+        return mask.clipped(box) if box is not None else mask
 
     def nearest_object(self, rgbd: RgbdFrame, near_ratio: float = 1.2) -> Mask:
         """RealSenseTrainer's rule: everything closer than ``near_ratio`` × the

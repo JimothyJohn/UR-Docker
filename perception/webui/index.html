@@ -97,9 +97,9 @@
     <div class="body">
       <div class="stage" id="colorStage">
         <canvas id="colorCv"></canvas><canvas id="colorOv"></canvas>
-        <div class="readout" id="colorReadout">click an object to segment it</div>
+        <div class="readout" id="colorReadout">click an object, or drag a box around it, to segment</div>
       </div>
-      <div class="hint">Click = segment under the cursor · <span class="kbd">n</span> nearest object · <span class="kbd">esc</span> clear · <span class="kbd">c</span> capture</div>
+      <div class="hint">Click = segment under the cursor · drag = box prompt · <span class="kbd">n</span> nearest object · <span class="kbd">esc</span> clear · <span class="kbd">c</span> capture</div>
     </div>
   </section>
 
@@ -150,6 +150,8 @@
   const cctx = colorCv.getContext('2d'), dctx = depthCv.getContext('2d');
   const coctx = colorOv.getContext('2d'), doctx = depthOv.getContext('2d');
   let seq = 0, running = true, latest = null, features = null, maskImg = null, maskSeq = 0, hover = null;
+  let drag = null, promptBox = null;   // drag = {u0, v0, u1, v1, moved}; promptBox = last box prompt sent
+  const DRAG_MIN_PX = 4;               // smaller movement than this is a click
   let inflight = false, lut = buildLut();
 
   // ---- utilities ----------------------------------------------------------------
@@ -262,25 +264,55 @@
         ctx.strokeStyle = '#DFA43E'; ctx.beginPath(); ctx.moveTo(cx - Math.cos(th) * L, cy - Math.sin(th) * L); ctx.lineTo(cx + Math.cos(th) * L, cy + Math.sin(th) * L); ctx.stroke();
         ctx.fillStyle = '#F1F6FA'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
       }
-      if (hover) {
+      const box = drag && drag.moved ? drag : promptBox;
+      if (box) {
+        const x0 = Math.min(box.u0, box.u1), y0 = Math.min(box.v0, box.v1), x1 = Math.max(box.u0, box.u1), y1 = Math.max(box.v0, box.v1);
+        ctx.setLineDash([6, 4]); ctx.strokeStyle = drag && drag.moved ? '#F1F6FA' : '#DFA43E'; ctx.lineWidth = 1.5;
+        ctx.strokeRect(x0 + .5, y0 + .5, x1 - x0, y1 - y0); ctx.setLineDash([]);
+      }
+      if (hover && !(drag && drag.moved)) {
         ctx.strokeStyle = 'rgba(241,246,250,.85)'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(hover.u + .5, 0); ctx.lineTo(hover.u + .5, cv.height); ctx.moveTo(0, hover.v + .5); ctx.lineTo(cv.width, hover.v + .5); ctx.stroke();
       }
     }
   }
   function onMove(ev, cv) {
-    const p = pixelFromEvent(ev, cv); hover = p; drawOverlays();
+    const p = pixelFromEvent(ev, cv); hover = p;
+    if (drag && p) {
+      drag.u1 = p.u; drag.v1 = p.v;
+      if (Math.abs(drag.u1 - drag.u0) >= DRAG_MIN_PX || Math.abs(drag.v1 - drag.v0) >= DRAG_MIN_PX) drag.moved = true;
+    }
+    drawOverlays();
     if (!p) return;
+    if (drag && drag.moved) { $('colorReadout').textContent = `box ${Math.abs(drag.u1 - drag.u0) + 1}×${Math.abs(drag.v1 - drag.v0) + 1} px — release to segment`; return; }
     const m = measure(p.u, p.v);
     const txt = !m ? '–' : (m.z === null ? `(${m.u}, ${m.v})  no depth` : `(${m.u}, ${m.v})  z ${m.z.toFixed(3)} m   X ${m.x.toFixed(3)}  Y ${m.y.toFixed(3)}  Z ${m.z.toFixed(3)}`);
     $('depthReadout').textContent = txt;
     if (!features) $('colorReadout').textContent = txt;
   }
+  // Press-drag-release draws a box prompt; a press-release without movement is a click (point prompt).
   for (const cv of [colorOv, depthOv]) {
     cv.addEventListener('mousemove', (ev) => onMove(ev, cv));
     cv.addEventListener('mouseleave', () => { hover = null; drawOverlays(); });
-    cv.addEventListener('click', (ev) => { const p = pixelFromEvent(ev, cv); if (p) segmentAt(p.u, p.v); });
+    cv.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      const p = pixelFromEvent(ev, cv); if (!p) return;
+      drag = { u0: p.u, v0: p.v, u1: p.u, v1: p.v, moved: false }; ev.preventDefault();
+    });
+    cv.addEventListener('mouseup', (ev) => {
+      if (!drag) return;
+      const d = drag; drag = null;
+      const p = pixelFromEvent(ev, cv);
+      if (p) { d.u1 = p.u; d.v1 = p.v; }
+      if (d.moved) {
+        const box = [Math.min(d.u0, d.u1), Math.min(d.v0, d.v1), Math.max(d.u0, d.u1) + 1, Math.max(d.v0, d.v1) + 1];
+        promptBox = { u0: box[0], v0: box[1], u1: box[2] - 1, v1: box[3] - 1 };
+        segmentBox(box);
+      } else { promptBox = null; segmentAt(d.u0, d.v0); }
+      drawOverlays();
+    });
   }
+  window.addEventListener('mouseup', () => { if (drag) { drag = null; drawOverlays(); } });  // released off-canvas: cancel
 
   // ---- segmentation ---------------------------------------------------------------
   async function post(url, body) {
@@ -304,7 +336,7 @@
   async function adopt(j) {
     features = j.features; maskSeq = j.seq;
     maskImg = j.mask_png_b64 ? await tintedMask('data:image/png;base64,' + j.mask_png_b64) : null;
-    $('segMeta').textContent = `${j.segmenter} · ${j.elapsed_ms} ms · frame ${j.seq}`;
+    $('segMeta').textContent = `${j.segmenter} · ${j.prompt && j.prompt.box ? (j.prompt.x !== undefined ? 'box+point' : 'box') : (j.prompt && j.prompt.nearest ? 'nearest' : 'point')} · ${j.elapsed_ms} ms · frame ${j.seq}`;
     renderFeatures(); drawOverlays();
     $('colorReadout').textContent = features ? `object @ (${features.centroid_px.map(v => v.toFixed(0)).join(', ')}) · ${fmt(features.depth.median_m)} m` : 'empty segment';
   }
@@ -312,13 +344,17 @@
     if (inflight) return; inflight = true;
     try { await adopt(await post('/api/segment', { x: u, y: v })); } catch (e) { toast(`segment: ${e.message}`); } finally { inflight = false; }
   }
+  async function segmentBox(box) {
+    if (inflight) return; inflight = true;
+    try { await adopt(await post('/api/segment', { box })); } catch (e) { toast(`segment: ${e.message}`); promptBox = null; drawOverlays(); } finally { inflight = false; }
+  }
   async function nearest() {
     if (inflight) return; inflight = true;
     try { await adopt(await post('/api/nearest', { near_ratio: 1.2 })); } catch (e) { toast(`nearest: ${e.message}`); } finally { inflight = false; }
   }
   async function clearSeg() {
-    features = null; maskImg = null; maskSeq = 0; renderFeatures(); drawOverlays(); $('segMeta').textContent = '–';
-    $('colorReadout').textContent = 'click an object to segment it';
+    features = null; maskImg = null; maskSeq = 0; promptBox = null; renderFeatures(); drawOverlays(); $('segMeta').textContent = '–';
+    $('colorReadout').textContent = 'click an object, or drag a box around it, to segment';
     try { await post('/api/clear'); } catch (e) {}
   }
   function renderFeatures() {

@@ -61,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="stub | sam (default: $PERCEPTION_SEGMENT_BACKEND or stub) — click-to-segment in the gui",
     )
+
+    ap.add_argument(
+        "--sam-model",
+        default=None,
+        help="SAM checkpoint id for the sam backend (default: $PERCEPTION_SAM_MODEL)",
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sy = sub.add_parser("synthetic", help="process a deterministic synthetic frame (no camera)")
@@ -128,6 +134,8 @@ def _config_from_args(args) -> PerceptionConfig:
         overrides["min_blob_area"] = args.min_blob_area
     if getattr(args, "segment_backend", None) is not None:
         overrides["segment_backend"] = args.segment_backend
+    if getattr(args, "sam_model", None) is not None:
+        overrides["sam_model"] = args.sam_model
     return PerceptionConfig.from_env(**overrides)
 
 

@@ -59,7 +59,7 @@ jobs:
         # best-effort off the oldest/newest edges: fall back to core deps.
         run: uv sync --extra perception || uv sync
       - name: unit tests
-        run: uv run pytest -m "not integration" -q
+        run: uv run pytest -m "not integration and not sam" -q
 
   package:
     # The wheel must carry the GUI's static assets (urctl/webui/) and the
