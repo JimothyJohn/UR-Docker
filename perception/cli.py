@@ -92,6 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     ri = sub.add_parser("rs-info", help="list attached RealSense cameras + SDK version (no streaming)")
     ri.add_argument("--library", default=None, help="path to librealsense2 (default: $REALSENSE_LIB / auto)")
+    ri.add_argument(
+        "--options",
+        action="store_true",
+        help="also dump every sensor option (value/range) per sensor — what a preset or another app left",
+    )
 
     rc = sub.add_parser("rs-capture", help="grab one aligned RGB-D frame from the RealSense and save it")
     add_camera_args(rc)
@@ -151,10 +156,18 @@ def _realsense_command(args) -> int:
 
             api = load_api(args.library)
             devices = list_devices(args.library)
+            options = None
+            if args.options:
+                from .realsense import list_sensor_options
+
+                options = list_sensor_options(args.library)
         except RealSenseError as exc:
             hint = platform_hint(exc)
             return _emit({"ok": False, "error": str(exc), "hint": hint or None})
-        return _emit({"ok": True, "sdk": {"path": api.path, "api_version": api.version}, "devices": devices})
+        result = {"ok": True, "sdk": {"path": api.path, "api_version": api.version}, "devices": devices}
+        if options is not None:
+            result["options"] = options
+        return _emit(result)
 
     if args.cmd == "gui":
         from .webapp import serve

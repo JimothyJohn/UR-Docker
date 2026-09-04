@@ -214,6 +214,7 @@ class Api:
             "rs2_supports_device_info": (I, [P, I, PP]),
             "rs2_get_device_info": (S, [P, I, PP]),
             "rs2_query_sensors": (P, [P, PP]),
+            "rs2_get_sensor_info": (S, [P, I, PP]),
             "rs2_get_sensors_count": (I, [P, PP]),
             "rs2_create_sensor": (P, [P, I, PP]),
             "rs2_delete_sensor": (None, [P]),
@@ -344,6 +345,48 @@ class Api:
                     self.lib.rs2_delete_device(dev)
         finally:
             self.lib.rs2_delete_device_list(dev_list)
+        return out
+
+    def sensor_options(self, dev) -> list[dict]:
+        """Every sensor of ``dev`` with every option it supports:
+        ``[{name, options: {option name: {value, min, max, step, default}}}]``.
+        Names come from ``rs2_option_to_string`` so nothing here depends on
+        ordinals; a read-only failure on one option is recorded as ``error``."""
+        out = []
+        sensors = self._call("rs2_query_sensors", dev)
+        try:
+            for i in range(self._call("rs2_get_sensors_count", sensors)):
+                sensor = self._call("rs2_create_sensor", sensors, i)
+                try:
+                    name = "sensor"
+                    try:
+                        raw = self._call("rs2_get_sensor_info", sensor, INFO_NAME)
+                        name = raw.decode(errors="replace") if raw else name
+                    except RealSenseError:
+                        pass
+                    options: dict[str, dict] = {}
+                    for ordinal in range(256):
+                        label = (self.lib.rs2_option_to_string(ordinal) or b"").decode()
+                        if label == "UNKNOWN":
+                            break
+                        try:
+                            if not self.supports_option(sensor, ordinal):
+                                continue
+                            lo, hi, step, default = self.option_range(sensor, ordinal)
+                            options[label] = {
+                                "value": self.get_option(sensor, ordinal),
+                                "min": lo,
+                                "max": hi,
+                                "step": step,
+                                "default": default,
+                            }
+                        except RealSenseError as exc:
+                            options[label] = {"error": str(exc)}
+                    out.append({"name": name, "options": options})
+                finally:
+                    self.lib.rs2_delete_sensor(sensor)
+        finally:
+            self.lib.rs2_delete_sensor_list(sensors)
         return out
 
     def device_info(self, dev) -> dict:
@@ -1040,6 +1083,36 @@ def list_devices(library: str | None = None) -> list[dict]:
     api = load_api(library)
     api.log_to_console("error")
     return api.list_devices(api.context())
+
+
+def list_sensor_options(library: str | None = None, serial: str | None = None) -> list[dict]:
+    """Per-sensor option dump (:meth:`Api.sensor_options`) for every attached
+    device, or just ``serial`` — ``[{serial, name, sensors}]``. Opens no
+    streams; on macOS it still needs root to claim the device."""
+    api = load_api(library)
+    api.log_to_console("error")
+    ctx = api.context()
+    dev_list = api._call("rs2_query_devices", ctx)
+    out = []
+    try:
+        for i in range(api._call("rs2_get_device_count", dev_list)):
+            dev = api._call("rs2_create_device", dev_list, i)
+            try:
+                info = api.device_info(dev)
+                if serial and info.get("serial") != serial:
+                    continue
+                out.append(
+                    {
+                        "serial": info.get("serial"),
+                        "name": info.get("name"),
+                        "sensors": api.sensor_options(dev),
+                    }
+                )
+            finally:
+                api.delete_device(dev)
+    finally:
+        api.lib.rs2_delete_device_list(dev_list)
+    return out
 
 
 @dataclass
