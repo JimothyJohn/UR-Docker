@@ -789,7 +789,8 @@ class RealSenseCamera:
     intrinsics: dict = field(default_factory=dict, init=False)
     depth_scale: float | None = field(default=None, init=False)
     effective_fps: int | None = field(default=None, init=False)
-    tuning_applied: dict = field(default_factory=dict, init=False)
+    tuning_applied: dict = field(default_factory=dict, init=False)  # filled on the first read()
+    _tuning_pending: bool = field(default=False, init=False, repr=False)
     _ctx: Any = field(default=None, init=False, repr=False)
     _pipe: Any = field(default=None, init=False, repr=False)
     _profile: Any = field(default=None, init=False, repr=False)
@@ -823,9 +824,10 @@ class RealSenseCamera:
                 self.depth_scale = api.depth_scale(dev)
                 if self.depth_scale is None:
                     raise RealSenseError("device has no depth sensor")
-                self.tuning_applied = self._apply_tuning(api, dev)
             finally:
                 api.delete_device(dev)
+            self.tuning_applied = {}
+            self._tuning_pending = self.tuning is not None
             self.intrinsics = {}
             for sp in api.profile_streams(self._profile):
                 key = {STREAM_DEPTH: "depth", STREAM_COLOR: "color"}.get(sp["stream"])
@@ -841,7 +843,16 @@ class RealSenseCamera:
             raise
 
     def _apply_tuning(self, api, dev) -> dict:
-        """Push :attr:`tuning` onto the depth sensor; ``{name: {ok, value|error}}``."""
+        """Push :attr:`tuning` onto the depth sensor; ``{name: {ok, value|error}}``.
+
+        Called from :meth:`read` once the **first frameset has arrived**, never
+        at open: writing the preset/laser/emitter right after
+        ``rs2_pipeline_start`` on a freshly claimed camera left the pipeline
+        without a single frame (macOS libusb backend, D435 fw 5.12.7.100,
+        2026-09-04 — deterministic on the process's first open, fine on a
+        re-open where the stream was already running). With the stream proven
+        alive the same writes take effect immediately.
+        """
         applied: dict[str, dict] = {}
         if self.tuning is None:
             return applied
@@ -916,6 +927,13 @@ class RealSenseCamera:
                     ) from exc
                 raise
             self._frames_read += 1
+            if self._tuning_pending:
+                self._tuning_pending = False
+                dev = api.profile_device(self._profile)
+                try:
+                    self.tuning_applied = self._apply_tuning(api, dev)
+                finally:
+                    api.delete_device(dev)
             for block, queue in self._filters:
                 frameset = api.process(block, queue, frameset, self.timeout_ms)
             if self._align is not None:
@@ -970,6 +988,7 @@ class RealSenseCamera:
                 api.stop_pipeline(self._pipe, self._profile)
             finally:
                 self._pipe = self._profile = None
+        self._tuning_pending = False
         self._ctx = None  # shared with the process; never deleted here
 
     def describe(self) -> dict:

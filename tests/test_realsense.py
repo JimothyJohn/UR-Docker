@@ -200,6 +200,7 @@ class FakeApi:
         self._give("align")
 
     def wait_for_frames(self, pipe, timeout_ms):
+        self.log.append("wait")
         if self.fail_wait:
             raise RealSenseError(self.fail_wait)
         return self._take("frameset")
@@ -463,9 +464,32 @@ def test_filter_chain_composition():
     assert balanced(api), api.live
 
 
+def test_tuning_waits_for_the_first_frameset():
+    """Regression (hardware, 2026-09-04): sensor writes issued between pipeline
+    start and the first frameset stalled a freshly claimed D435 on macOS — no
+    frame ever arrived. The writes must follow the first successful wait, once."""
+    api = FakeApi()
+    with RealSenseCamera(width=64, height=48, api=api) as cam:
+        assert cam.tuning_applied == {}  # nothing touched at open
+        assert not any(e.startswith("set:sensor") for e in api.log)
+        cam.read()
+        cam.read()
+    events = [e for e in api.log if e == "wait" or e.startswith("set:sensor")]
+    assert events[0] == "wait" and events[-1] == "wait"
+    assert events.count("wait") == 2 and len(events) == 5  # 3 writes, all after the first wait
+    assert balanced(api), api.live  # the device handle used for the writes was released
+    # a first read that never gets a frameset leaves the sensor untouched and the tuning pending
+    api = FakeApi(fail_wait="Frame didn't arrive within 5000")
+    with RealSenseCamera(width=64, height=48, api=api) as cam:
+        with pytest.raises(RealSenseError):
+            cam.read()
+        assert cam.tuning_applied == {} and not any(e.startswith("set:sensor") for e in api.log)
+
+
 def test_default_tuning_sets_preset_then_emitter_then_max_laser():
     api = FakeApi()
     with RealSenseCamera(width=64, height=48, api=api) as cam:
+        cam.read()
         applied = cam.tuning_applied
         assert cam.describe()["depth"]["tuning_applied"] is applied
     sensor_sets = [e for e in api.log if e.startswith("set:sensor")]
@@ -496,11 +520,13 @@ def test_tuning_is_best_effort_and_reported():
 def test_tuning_none_and_partial_leave_the_sensor_alone():
     api = FakeApi()
     with RealSenseCamera(width=64, height=48, tuning=None, api=api) as cam:
+        cam.read()
         assert cam.tuning_applied == {} and cam.describe()["depth"]["tuning"] is None
     assert not any(e.startswith("set:sensor") for e in api.log)
     api = FakeApi()
     explicit = DepthTuning(preset=None, laser_power=90.0, emitter=None)
     with RealSenseCamera(width=64, height=48, tuning=explicit, api=api) as cam:
+        cam.read()
         assert cam.tuning_applied == {"laser_power": {"ok": True, "value": 90.0}}
     assert [e for e in api.log if e.startswith("set:sensor")] == [f"set:sensor#1:{OPTION_LASER_POWER}=90"]
     assert DepthTuning(laser_power=LASER_MAX).laser_power == LASER_MAX

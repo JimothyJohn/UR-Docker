@@ -41,6 +41,7 @@ def test_stream_aligned_frames_and_measure(devices):
     f = frames[-1]
     assert f.aligned and (f.color.width, f.color.height) == (640, 480)
     assert (f.depth.width, f.depth.height) == (640, 480)
+    assert cam.tuning_applied["preset"]["ok"], cam.tuning_applied  # applied after the first frameset
     assert f.intrinsics == cam.intrinsics["color"]
     assert f.depth.stats()["valid_fraction"] > 0.1
     assert frames[-1].frame_number > frames[0].frame_number
@@ -88,11 +89,11 @@ def test_filtered_depth_is_steadier_than_raw(devices):
         raw_frames = [raw.read() for _ in range(20)]
     tuned = RealSenseCamera(width=640, height=480, fps=30)  # defaults: 848x480 depth, filters, tuning
     with tuned:
-        assert tuned.tuning_applied["preset"]["ok"], tuned.tuning_applied
-        assert tuned.tuning_applied["laser_power"]["ok"], tuned.tuning_applied
         assert tuned.intrinsics["depth"].width == 848 and tuned.intrinsics["color"].width == 640
         for _ in range(15):
             tuned.read()
+        assert tuned.tuning_applied["preset"]["ok"], tuned.tuning_applied
+        assert tuned.tuning_applied["laser_power"]["ok"], tuned.tuning_applied
         tuned_frames = [tuned.read() for _ in range(20)]
     f = tuned_frames[-1]
     assert (
