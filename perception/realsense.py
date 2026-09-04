@@ -817,11 +817,23 @@ def open_camera(
     return RealSenseCamera(width=width, height=height, fps=fps, serial=serial, align=align, library=library)
 
 
+def _is_root() -> bool:
+    geteuid = getattr(os, "geteuid", None)
+    return bool(geteuid) and geteuid() == 0
+
+
 def platform_hint(exc: BaseException) -> str:
     """Turn the SDK's opaque access failure into the fix for this OS."""
     text = str(exc)
     if "power state" in text or "RS2_USB_STATUS_ACCESS" in text or "claim usb interface" in text:
         if sys.platform == "darwin":
+            if _is_root():
+                return (
+                    "librealsense could not claim the camera's USB interface even as root, so something "
+                    "else holds it: a process that just exited (macOS releases the claim seconds late), "
+                    "or an app with the camera open (browser, FaceTime, realsense-viewer). Wait a few "
+                    "seconds and retry; if it persists, unplug and re-plug the camera."
+                )
             return (
                 "librealsense could not claim the camera's USB interface. On macOS the SDK needs root to "
                 "detach the built-in UVC driver: re-run under `sudo` "

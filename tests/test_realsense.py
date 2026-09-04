@@ -301,6 +301,21 @@ def test_platform_hint():
     assert platform_hint(RealSenseError("something else")) == ""
 
 
+def test_platform_hint_macos_already_root(monkeypatch):
+    """Under sudo the claim failure is a held interface, not a permission problem —
+    the hint must not send the operator back to `sudo`."""
+    import perception.realsense as rs
+
+    monkeypatch.setattr(rs.sys, "platform", "darwin")
+    monkeypatch.setattr(rs, "_is_root", lambda: True)
+    hint = platform_hint(RealSenseError("failed to set power state"))
+    assert "sudo" not in hint
+    assert "re-plug" in hint and "just exited" in hint
+
+    monkeypatch.setattr(rs, "_is_root", lambda: False)
+    assert "sudo" in platform_hint(RealSenseError("RS2_USB_STATUS_ACCESS"))
+
+
 def test_context_is_shared_across_opens_and_enumeration():
     api = FakeApi()
     cam = RealSenseCamera(width=64, height=48, api=api)
