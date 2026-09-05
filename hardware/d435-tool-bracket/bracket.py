@@ -81,7 +81,7 @@ PARAMS = {
     "BOLT80_ANGLES_DEG": (0.0, 60.0, 120.0, 180.0, 240.0, 300.0),  # 30° from the pin at 90°
     "DOWEL80_SLOT_W": 8.2,  # Ø8 H7 pin + 0.2
     "DOWEL80_SLOT_L": 11.0,
-    "SPIGOT80_OD": 0.0,  # 0 = off (fits both robots). 49.8 adds a Ø50 H7 spigot: UR20-only print
+    "SPIGOT80_OD": 0.0,  # 0 = off in the base design; the ur20 variant turns it on (see VARIANTS)
     "SPIGOT80_H": 3.0,
     "DOWEL_ANGLE_DEG": 90.0,  # both pin holes sit at 12 o'clock on their PCD
     # -- tool-I/O connector (M8 socket at 12 o'clock on the wrist housing, behind the face) -----
@@ -91,7 +91,10 @@ PARAMS = {
     "TOOL_PLUG_D": 12.0,  # M8 8-pin cable plug body, used for the clearance check
     # -- the hanging camera wall -----------------------------------------------------------
     "ARM_ANGLE_DEG": 90.0,  # 90 = camera on +Y, the pin / tool-I/O connector side (cables leave together)
+    # -- variants: two independent prints, one per flange. Overrides applied on top of the base design.
     "UR20_ARM_ANGLE_DEG": 45.0,  # UR20: its socket is only 17.6 behind the face, so clock the camera 45° off
+    "UR20_SPIGOT_OD": 49.8,  # Ø50 H7 pilot engaged (a dual part can't: it would hold it off a Ø63 face)
+    "UR20_TOP_RECESS_D": 50.2,  # the Ø50 pilot re-presented to an ISO-80 tool (e-Series variant keeps Ø31.7)
     "ARM_W": 66.0,  # tangential width of the tab + wall (covers the M3 pair at ±22.5)
     "WRIST_R": 50.0,  # largest thing the wall must clear: the UR20's Ø100 housing (e-Series wrist is Ø90)
     "WALL_CLEAR": 3.0,  # radial gap housing → wall inner face (flat heads are flush, so this is all it needs)
@@ -118,6 +121,24 @@ PARAMS = {
     # -- printing allowances ----------------------------------------------------------------
     "HOLE_PRINT_ALLOWANCE": 0.0,  # add to every hole diameter if your printer undersizes
 }
+
+VARIANTS = ("eseries", "ur20")
+
+
+def variant_params(p: dict, variant: str) -> dict:
+    """Base PARAMS plus the per-flange overrides. ``eseries`` *is* the base design;
+    ``ur20`` clocks the camera off the M8 socket and engages the Ø50 pilot both ways."""
+    if variant == "eseries":
+        return dict(p)
+    if variant == "ur20":
+        return {
+            **p,
+            "ARM_ANGLE_DEG": p["UR20_ARM_ANGLE_DEG"],
+            "SPIGOT80_OD": p["UR20_SPIGOT_OD"],
+            "TOP_RECESS_D": p["UR20_TOP_RECESS_D"],
+        }
+    raise ValueError(f"unknown variant {variant!r}; one of {VARIANTS}")
+
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
@@ -532,43 +553,41 @@ def export(p: dict) -> dict:
     import cadquery as cq
 
     OUT.mkdir(parents=True, exist_ok=True)
-    bracket = build_bracket(p)
-    cq.exporters.export(bracket, str(OUT / "d435_tool_bracket.stl"), tolerance=0.02, angularTolerance=0.1)
-    cq.exporters.export(bracket, str(OUT / "d435_tool_bracket.step"))
-    p_ur20 = _ur20_params(p)
-    bracket_ur20 = build_bracket(p_ur20)
-    cq.exporters.export(
-        bracket_ur20, str(OUT / "d435_tool_bracket_ur20.stl"), tolerance=0.02, angularTolerance=0.1
-    )
-    for robot, pp, br in (("eseries", p, bracket), ("ur20", p_ur20, bracket_ur20)):
-        assy = cq.Assembly(name=f"d435_tool_bracket_{robot}")
-        assy.add(build_flange_standin(pp, robot), name=f"ur_flange_{robot}", color=cq.Color(0.55, 0.57, 0.6))
-        assy.add(br, name="bracket", color=cq.Color(0.15, 0.15, 0.17))
+    out = {"variants": {}}
+    for variant in VARIANTS:
+        pp = variant_params(p, variant)
+        bracket = build_bracket(pp)
+        stl = OUT / f"d435_tool_bracket_{variant}.stl"
+        step = OUT / f"d435_tool_bracket_{variant}.step"
+        cq.exporters.export(bracket, str(stl), tolerance=0.02, angularTolerance=0.1)
+        cq.exporters.export(bracket, str(step))
+        assy = cq.Assembly(name=f"d435_tool_bracket_{variant}")
+        assy.add(
+            build_flange_standin(pp, variant), name=f"ur_flange_{variant}", color=cq.Color(0.55, 0.57, 0.6)
+        )
+        assy.add(bracket, name="bracket", color=cq.Color(0.15, 0.15, 0.17))
         assy.add(build_camera_standin(pp), name="d435_envelope", color=cq.Color(0.75, 0.75, 0.78))
-        for k, v in build_hardware(pp, robot).items():
+        for k, v in build_hardware(pp, variant).items():
             assy.add(v, name=k, color=cq.Color(0.8, 0.7, 0.3))
-        assy.save(str(OUT / f"d435_tool_bracket_assembly_{robot}.step"))
-    # Intel's body, placed in the flange frame, for anyone assembling in their own CAD
+        assy_path = OUT / f"d435_tool_bracket_assembly_{variant}.step"
+        assy.save(str(assy_path))
+        vol = bracket.val().Volume()  # mm^3
+        bb = bracket.val().BoundingBox()
+        out["variants"][variant] = {
+            "overrides": {k: v for k, v in pp.items() if p.get(k) != v},
+            "derived": derived(pp),
+            "volume_cm3": vol / 1000.0,
+            "mass_g_ppa_cf": vol / 1000.0 * 1.20,  # ~1.2 g/cm³ CF-filled PA/PPA at 100% — infill lowers it
+            "bbox_mm": [round(bb.xlen, 2), round(bb.ylen, 2), round(bb.zlen, 2)],
+            "stl": str(stl),
+            "step": str(step),
+            "assembly_step": str(assy_path),
+        }
+    # Intel's body, placed in the flange frame (default clocking), for anyone assembling in their own CAD
     verts, tris = load_camera_mesh(p)
     _write_stl(OUT / "d435_body_in_flange_frame.stl", verts, tris)
-    vol = bracket.val().Volume()  # mm^3
-    bb = bracket.val().BoundingBox()
-    return {
-        "volume_cm3": vol / 1000.0,
-        "mass_g_ppa_cf": vol / 1000.0 * 1.20,  # ~1.2 g/cm³ for CF-filled PA/PPA at 100% — infill lowers it
-        "bbox_mm": [round(bb.xlen, 2), round(bb.ylen, 2), round(bb.zlen, 2)],
-        "stl": str(OUT / "d435_tool_bracket.stl"),
-        "stl_ur20_clocked": str(OUT / "d435_tool_bracket_ur20.stl"),
-        "ur20_derived": derived(p_ur20),
-        "step": str(OUT / "d435_tool_bracket.step"),
-        "assembly_step": [str(OUT / f"d435_tool_bracket_assembly_{r}.step") for r in ("eseries", "ur20")],
-        "camera_body_stl": str(OUT / "d435_body_in_flange_frame.stl"),
-    }
-
-
-def _ur20_params(p: dict) -> dict:
-    """The same part clocked for a UR20/UR30 (its M8 socket is in the wall's path at 90°)."""
-    return {**p, "ARM_ANGLE_DEG": p["UR20_ARM_ANGLE_DEG"]}
+    out["camera_body_stl"] = str(OUT / "d435_body_in_flange_frame.stl")
+    return out
 
 
 def _write_stl(path: Path, verts, tris) -> None:
@@ -604,7 +623,8 @@ def render(p: dict) -> list[str]:
     RENDERS.mkdir(parents=True, exist_ok=True)
     d = derived(p)
     scenes, angles = {}, {}
-    for robot, pp in (("eseries", p), ("ur20", _ur20_params(p))):
+    for robot in VARIANTS:
+        pp = variant_params(p, robot)
         parts = [
             (_mesh(build_flange_standin(pp, robot)), (0.55, 0.57, 0.60), 0.35),
             (_mesh(build_bracket(pp)), (0.16, 0.18, 0.22), 0.6),
@@ -614,12 +634,13 @@ def render(p: dict) -> list[str]:
             parts.append((_mesh(v), (0.82, 0.68, 0.30), 0.3))
         scenes[robot] = parts
         angles[robot] = pp["ARM_ANGLE_DEG"]
-    angles["bracket"] = angles["eseries"]
-    scenes["bracket"] = list(scenes["eseries"][1:3]) + [
-        (_mesh(v), (0.82, 0.68, 0.30), 0.3)
-        for k, v in build_hardware(p, "eseries").items()
-        if k in ("tripod_screw", "m3_a", "m3_b")
-    ]
+    for robot in VARIANTS:  # robot hidden: the print itself, the camera and its three screws
+        scenes[f"bracket_{robot}"] = list(scenes[robot][1:3]) + [
+            (_mesh(v), (0.82, 0.68, 0.30), 0.3)
+            for k, v in build_hardware(variant_params(p, robot), robot).items()
+            if k in ("tripod_screw", "m3_a", "m3_b")
+        ]
+        angles[f"bracket_{robot}"] = angles[robot]
     light = np.array([0.4, -0.6, 0.7])
     light /= np.linalg.norm(light)
 
@@ -670,8 +691,26 @@ def render(p: dict) -> list[str]:
             "Top (X–Y): ISO-50 + ISO-80 patterns; pins, M8 socket and camera all on +Y",
         ),
         (
+            "underside_eseries",
+            "bracket_eseries",
+            -50,
+            -125,
+            60,
+            (15, 0, -2),
+            "e-Series print from below: Ø31.3 spigot into the Ø31.5 H7 recess",
+        ),
+        (
+            "underside_ur20",
+            "bracket_ur20",
+            -50,
+            -125,
+            60,
+            (15, 0, -2),
+            "UR20 print from below: Ø49.8 spigot into the Ø50 H7 pilot, camera 45° off the M8",
+        ),
+        (
             "wrist_side",
-            "bracket",
+            "bracket_eseries",
             -12,
             175,
             48,
@@ -766,7 +805,7 @@ def main(argv: list[str]) -> int:
             if k not in p:
                 sys.exit(f"unknown parameter {k}; see PARAMS in bracket.py")
             p[k] = type(p[k])(json.loads(v)) if not isinstance(p[k], tuple) else tuple(json.loads(v))
-    info = {"params": p, "derived": derived(p), "camera_mesh": CAMERA_MESH_SOURCE}
+    info = {"params": p, "variants": VARIANTS, "derived": derived(p), "camera_mesh": CAMERA_MESH_SOURCE}
     info["export"] = export(p)
     info["renders"] = render(p)
     (OUT / "build_info.json").write_text(json.dumps(info, indent=2, default=list))

@@ -40,6 +40,8 @@
     "TOOL_PLUG_D": 12.0,
     "ARM_ANGLE_DEG": 90.0,
     "UR20_ARM_ANGLE_DEG": 45.0,
+    "UR20_SPIGOT_OD": 49.8,
+    "UR20_TOP_RECESS_D": 50.2,
     "ARM_W": 66.0,
     "WRIST_R": 50.0,
     "WALL_CLEAR": 3.0,
@@ -64,6 +66,10 @@
     "DEPTH_ORIGIN_FROM_FRONT": 4.3,
     "HOLE_PRINT_ALLOWANCE": 0.0
   },
+  "variants": [
+    "eseries",
+    "ur20"
+  ],
   "derived": {
     "wall_inner_x": 53.0,
     "wall_outer_x": 59.0,
@@ -145,94 +151,186 @@
     "triangles": 12000
   },
   "export": {
-    "volume_cm3": 67.28561882861726,
-    "mass_g_ppa_cf": 80.74274259434071,
-    "bbox_mm": [
-      100.04,
-      109.01,
-      27.07
-    ],
-    "stl": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket.stl",
-    "stl_ur20_clocked": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_ur20.stl",
-    "ur20_derived": {
-      "wall_inner_x": 53.0,
-      "wall_outer_x": 59.0,
-      "wall_z_range": [
-        -19.05,
-        8.0
-      ],
-      "camera_front_z": 8.0,
-      "camera_back_z": -17.05,
-      "camera_x_range": [
-        59.0,
-        84.0
-      ],
-      "camera_y_range": [
-        -45.0,
-        45.0
-      ],
-      "camera_z_range": [
-        -17.05,
-        8.0
-      ],
-      "tripod_z": -6.9,
-      "m3_z": -6.199999999999999,
-      "radial_extent": 84.0,
-      "lowest_z": -19.05,
-      "usb_c": {
-        "where": "camera back face (-Z), camera-left end, 36\u201345 mm from centre; exits along -Z",
-        "flange_xyz_mm": [
-          79.195959,
-          21.92031,
-          -17.05
-        ]
-      },
-      "tool_connector": {
-        "eseries": {
-          "angular_gap_deg": 6.6,
-          "axial_gap_mm": 10.6,
-          "clear": true
+    "variants": {
+      "eseries": {
+        "overrides": {},
+        "derived": {
+          "wall_inner_x": 53.0,
+          "wall_outer_x": 59.0,
+          "wall_z_range": [
+            -19.05,
+            8.0
+          ],
+          "camera_front_z": 8.0,
+          "camera_back_z": -17.05,
+          "camera_x_range": [
+            59.0,
+            84.0
+          ],
+          "camera_y_range": [
+            -45.0,
+            45.0
+          ],
+          "camera_z_range": [
+            -17.05,
+            8.0
+          ],
+          "tripod_z": -6.9,
+          "m3_z": -6.199999999999999,
+          "radial_extent": 84.0,
+          "lowest_z": -19.05,
+          "usb_c": {
+            "where": "camera back face (-Z), camera-left end, 36\u201345 mm from centre; exits along -Z",
+            "flange_xyz_mm": [
+              40.5,
+              71.5,
+              -17.05
+            ]
+          },
+          "tool_connector": {
+            "eseries": {
+              "angular_gap_deg": -38.4,
+              "axial_gap_mm": 10.6,
+              "clear": true
+            },
+            "ur20_at_this_angle": {
+              "angular_gap_deg": -38.4,
+              "axial_gap_mm": -7.45,
+              "clear": false
+            },
+            "ur20_at_UR20_ARM_ANGLE_DEG": {
+              "angular_gap_deg": 6.6,
+              "axial_gap_mm": -7.45,
+              "clear": true
+            }
+          },
+          "depth_origin_flange_mm": [
+            17.5,
+            71.5,
+            3.7
+          ],
+          "camera_axes_in_flange": {
+            "x_cam": [
+              -1.0,
+              0.0,
+              0
+            ],
+            "y_cam": [
+              -0.0,
+              -1.0,
+              0
+            ],
+            "z_cam": [
+              0,
+              0,
+              1
+            ]
+          },
+          "arm_angle_deg": 90.0
         },
-        "ur20_at_this_angle": {
-          "angular_gap_deg": 6.6,
-          "axial_gap_mm": -7.45,
-          "clear": true
+        "volume_cm3": 67.28561882861726,
+        "mass_g_ppa_cf": 80.74274259434071,
+        "bbox_mm": [
+          100.04,
+          109.01,
+          27.07
+        ],
+        "stl": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_eseries.stl",
+        "step": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_eseries.step",
+        "assembly_step": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_assembly_eseries.step"
+      },
+      "ur20": {
+        "overrides": {
+          "TOP_RECESS_D": 50.2,
+          "SPIGOT80_OD": 49.8,
+          "ARM_ANGLE_DEG": 45.0
         },
-        "ur20_at_UR20_ARM_ANGLE_DEG": {
-          "angular_gap_deg": 6.6,
-          "axial_gap_mm": -7.45,
-          "clear": true
-        }
-      },
-      "depth_origin_flange_mm": [
-        62.932504,
-        38.183766,
-        3.7
-      ],
-      "camera_axes_in_flange": {
-        "x_cam": [
-          -0.707107,
-          0.707107,
-          0
+        "derived": {
+          "wall_inner_x": 53.0,
+          "wall_outer_x": 59.0,
+          "wall_z_range": [
+            -19.05,
+            8.0
+          ],
+          "camera_front_z": 8.0,
+          "camera_back_z": -17.05,
+          "camera_x_range": [
+            59.0,
+            84.0
+          ],
+          "camera_y_range": [
+            -45.0,
+            45.0
+          ],
+          "camera_z_range": [
+            -17.05,
+            8.0
+          ],
+          "tripod_z": -6.9,
+          "m3_z": -6.199999999999999,
+          "radial_extent": 84.0,
+          "lowest_z": -19.05,
+          "usb_c": {
+            "where": "camera back face (-Z), camera-left end, 36\u201345 mm from centre; exits along -Z",
+            "flange_xyz_mm": [
+              79.195959,
+              21.92031,
+              -17.05
+            ]
+          },
+          "tool_connector": {
+            "eseries": {
+              "angular_gap_deg": 6.6,
+              "axial_gap_mm": 10.6,
+              "clear": true
+            },
+            "ur20_at_this_angle": {
+              "angular_gap_deg": 6.6,
+              "axial_gap_mm": -7.45,
+              "clear": true
+            },
+            "ur20_at_UR20_ARM_ANGLE_DEG": {
+              "angular_gap_deg": 6.6,
+              "axial_gap_mm": -7.45,
+              "clear": true
+            }
+          },
+          "depth_origin_flange_mm": [
+            62.932504,
+            38.183766,
+            3.7
+          ],
+          "camera_axes_in_flange": {
+            "x_cam": [
+              -0.707107,
+              0.707107,
+              0
+            ],
+            "y_cam": [
+              -0.707107,
+              -0.707107,
+              0
+            ],
+            "z_cam": [
+              0,
+              0,
+              1
+            ]
+          },
+          "arm_angle_deg": 45.0
+        },
+        "volume_cm3": 63.270451485762095,
+        "mass_g_ppa_cf": 75.92454178291452,
+        "bbox_mm": [
+          115.07,
+          115.07,
+          27.07
         ],
-        "y_cam": [
-          -0.707107,
-          -0.707107,
-          0
-        ],
-        "z_cam": [
-          0,
-          0,
-          1
-        ]
-      },
-      "arm_angle_deg": 45.0
+        "stl": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_ur20.stl",
+        "step": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_ur20.step",
+        "assembly_step": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_assembly_ur20.step"
+      }
     },
-    "step": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket.step",
-    "assembly_step": [
-      "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_assembly_eseries.step",
-      "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_assembly_ur20.step"
-    ],
     "camera_body_stl": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_body_in_flange_frame.stl"
   },
   "renders": [
@@ -241,6 +339,8 @@
     "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/renders/iso_ur20.png",
     "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/renders/side_xz.png",
     "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/renders/top_xy.png",
+    "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/renders/underside_eseries.png",
+    "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/renders/underside_ur20.png",
     "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/renders/wrist_side.png"
   ]
 }
