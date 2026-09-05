@@ -30,13 +30,13 @@ def _close(a, b, tol=1e-9):
 
 
 def test_bracket_nominal_matches_readme_section_3():
-    # depth origin (17.5, 71.5, 3.7) mm; x_cam = -X, y_cam = -Y, z_cam = +Z (camera on +Y)
-    assert _close(BRACKET_NOMINAL.translation, (0.0175, 0.0715, 0.0037))
+    # depth origin (17.5, 71.5, 1.7) mm; x_cam = -X, y_cam = -Y, z_cam = +Z (camera on +Y)
+    assert _close(BRACKET_NOMINAL.translation, (0.0175, 0.0715, 0.0017))
     assert _close(BRACKET_NOMINAL.rotate((1, 0, 0)), (-1, 0, 0))
     assert _close(BRACKET_NOMINAL.rotate((0, 1, 0)), (0, -1, 0))
     assert _close(BRACKET_NOMINAL.rotate((0, 0, 1)), (0, 0, 1))
     # a point 300 mm straight out of the lens sits 303.7 mm out of the flange face
-    assert _close(HandEye().camera_to_flange((0, 0, 0.3)), (0.0175, 0.0715, 0.3037))
+    assert _close(HandEye().camera_to_flange((0, 0, 0.3)), (0.0175, 0.0715, 0.3017))
 
 
 def test_extrinsics_move_the_colour_origin():
@@ -45,7 +45,7 @@ def test_extrinsics_move_the_colour_origin():
     # SDK convention: p_color = R·p_depth + t, so the *depth* origin sits at
     # +15 mm along colour x; a point on the colour axis is at depth x = -15 mm,
     # and camera x is flange -X.
-    assert _close(he.camera_to_flange((0, 0, 0.3)), (0.0175 + 0.015, 0.0715, 0.3037))
+    assert _close(he.camera_to_flange((0, 0, 0.3)), (0.0175 + 0.015, 0.0715, 0.3017))
     assert _close(transform_from_extrinsics(None).translation, (0, 0, 0))
     assert he.as_dict()["depth_to_color_translation"] == [0.015, 0.0, 0.0]
     assert HandEye().with_extrinsics(None).flange_to_color == HandEye().flange_to_depth
@@ -73,11 +73,11 @@ def test_locate_geometry_tool_down():
     base_from_flange = Transform.from_pose(flange)
     expect_base = base_from_flange.apply(he.camera_to_flange((0, 0, 0.3)))
     assert _close(out["point_base_m"], expect_base, 1e-9)
-    # tool down => the camera looks along base -Z; the object is 0.3037 below the flange
+    # tool down => the camera looks along base -Z; the object is 0.3017 below the flange
     assert _close(out["view_ray_base"], (0, 0, -1), 1e-9)
-    assert out["point_base_m"][2] == pytest.approx(0.5 - 0.3037, abs=1e-9)
+    assert out["point_base_m"][2] == pytest.approx(0.5 - 0.3017, abs=1e-9)
     # approach = 50 mm short of the object along that ray, current tool orientation kept
-    assert out["approach_pose"][2] == pytest.approx(0.5 - 0.3037 + 0.05, abs=1e-9)
+    assert out["approach_pose"][2] == pytest.approx(0.5 - 0.3017 + 0.05, abs=1e-9)
     assert out["approach_pose"][3:] == tcp[3:]
     # the lateral camera offset on the bracket shows up in base xy (flange x flips under the π about Y)
     assert out["point_base_m"][0] == pytest.approx(0.5 - 0.0175, abs=1e-9)

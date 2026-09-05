@@ -60,8 +60,8 @@ from pathlib import Path
 # ----------------------------------------------------------------------------
 PARAMS = {
     # -- plate ---------------------------------------------------------------------------
-    "PLATE_OD": 100.0,  # matches the UR20/UR30 Ø100 h8 face; overhangs the e-Series Ø63 face
-    "PLATE_T": 8.0,
+    "PLATE_OD": 96.0,  # smallest disc that clears the ISO-80 holes (Ø9 on Ø80 + 3 mm); UR20 face is Ø100
+    "PLATE_T": 6.0,  # 8 → 6 saved ~20 % filament; the pin still has 6 in the flange, M6/M8 clamp fine
     "PLATE_EDGE_CHAMFER": 1.0,
     "CENTER_HOLE_D": 24.0,  # cable / air pass-through
     # -- ISO 9409-1-50-4-M6 (UR3e/5e/10e/16e) --------------------------------------------
@@ -74,7 +74,7 @@ PARAMS = {
     "SPIGOT_H": 4.0,  # recess is deeper; 4 mm engagement leaves margin
     "SPIGOT_CHAMFER": 0.8,
     "TOP_RECESS_D": 31.7,  # the Ø31.5 pilot re-presented to an ISO-50 tool
-    "TOP_RECESS_H": 5.0,
+    "TOP_RECESS_H": 4.0,  # leaves a 2 mm floor in the 6 mm plate (the spigot ring sits under it)
     # -- ISO 9409-1-80-6-M8 (UR20/UR30) --------------------------------------------------
     "PCD80": 80.0,
     "BOLT80_HOLE_D": 9.0,  # M8 clearance (ISO 273 medium)
@@ -95,11 +95,11 @@ PARAMS = {
     "UR20_ARM_ANGLE_DEG": 45.0,  # UR20: its socket is only 17.6 behind the face, so clock the camera 45° off
     "UR20_SPIGOT_OD": 49.8,  # Ø50 H7 pilot engaged (a dual part can't: it would hold it off a Ø63 face)
     "UR20_TOP_RECESS_D": 50.2,  # the Ø50 pilot re-presented to an ISO-80 tool (e-Series variant keeps Ø31.7)
-    "ARM_W": 66.0,  # tangential width of the tab + wall (covers the M3 pair at ±22.5)
+    "ARM_W": 56.0,  # tangential width of tab + wall: M3 csk at ±22.5 (Ø6.6) + 2 mm of wall each side
     "WRIST_R": 50.0,  # largest thing the wall must clear: the UR20's Ø100 housing (e-Series wrist is Ø90)
     "WALL_CLEAR": 3.0,  # radial gap housing → wall inner face (flat heads are flush, so this is all it needs)
     "WALL_T": 6.0,
-    "WALL_BELOW_CAM": 2.0,  # wall continues this far past the camera's back face
+    "WALL_BELOW_CAM": 0.0,  # wall ends at the camera's back face (3.8 mm below the 1/4-20 countersink mouth)
     "WALL_CORNER_R": 6.0,  # rounded bottom corners of the wall / outer corners of the tab
     "CAM_PROUD": 0.0,  # camera front plate above the plate's tool face (0 = flush)
     # -- camera: Intel RealSense D435 ---------------------------------------------------------
@@ -170,7 +170,7 @@ def derived(p: dict) -> dict:
     ca, sa = math.cos(a), math.sin(a)
 
     def rot(x, y, z):  # the whole camera side rotates about Z by ARM_ANGLE_DEG
-        return (round(ca * x - sa * y, 6), round(sa * x + ca * y, 6), z)
+        return (round(ca * x - sa * y, 6), round(sa * x + ca * y, 6), round(z, 6))
 
     depth_origin = rot(wall_out + p["CAM_H"] / 2, -p["IMAGER_OFFSET"], front_z - p["DEPTH_ORIGIN_FROM_FRONT"])
     x_cam, y_cam, z_cam = rot(0, 1, 0), rot(-1, 0, 0), (0, 0, 1)
@@ -577,7 +577,7 @@ def export(p: dict) -> dict:
             "overrides": {k: v for k, v in pp.items() if p.get(k) != v},
             "derived": derived(pp),
             "volume_cm3": vol / 1000.0,
-            "mass_g_ppa_cf": vol / 1000.0 * 1.20,  # ~1.2 g/cm³ CF-filled PA/PPA at 100% — infill lowers it
+            "mass_g_ppa_cf_solid": vol / 1000.0 * 1.25,  # Bambu PPA-CF spec 1.25 g/cm³, 100 % solid
             "bbox_mm": [round(bb.xlen, 2), round(bb.ylen, 2), round(bb.zlen, 2)],
             "stl": str(stl),
             "step": str(step),
