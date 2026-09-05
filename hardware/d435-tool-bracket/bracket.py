@@ -16,8 +16,9 @@ adapter first, then bolt the adapter to the robot.
 Frame: origin at the centre of the robot's tool-flange face, +Z away from the
 flange (the tool direction, and the camera's optical axis), +Y towards the
 dowel/pin hole (12 o'clock on both UR flanges, the tool-I/O connector side),
-+X completes the right-handed set. The camera hangs on +X by default
-(``ARM_ANGLE_DEG`` rotates it).
++X completes the right-handed set. The camera hangs on +Y by default — the
+same side as the tool-I/O connector, so both cables leave together
+(``ARM_ANGLE_DEG = 90``; the geometry is authored on +X and rotated).
 
 Sources (verified 2026-09-04):
   * UR10e User Manual (SW 5.19), §8.7.5 "Securing Tool": Ø63 h8 face, Ø50 ±0.1
@@ -29,7 +30,10 @@ Sources (verified 2026-09-04):
     face, Ø80 ±0.1 PCD, 6× M8-6H ▽17.25 on 6×60° starting 30° from the pin,
     Ø8 H7 ▽8 ±0.2 pin hole at 12 o'clock, Ø50 H7 pilot, the Ø100 housing
     continues 56.50 behind the face; "do not use bolts that extend beyond
-    17.25 mm". UR30 shares the flange (ISO 9409-1-80-6-M8).
+    17.25 mm". UR30 shares the flange (ISO 9409-1-80-6-M8). Tool-I/O socket at
+    12 o'clock, centreline 17.60 behind the face (section A-A).
+  * UR10e User Manual (SW 5.21, 711-039-00), §7.11.3: Lumberg RKMW 8-354
+    tool-I/O socket at 12 o'clock on the Ø90 wrist, 35.65 behind the face.
   * Intel RealSense D400 Series Datasheet 337029-017, Fig. 10-9 (D435/D435i):
     90 × 25 × 25.05 mm, 1/4-20 on the bottom, 2× M3 45 mm apart (max
     insertion 3 mm, 0.4 Nm), 50 mm stereo baseline.
@@ -80,8 +84,14 @@ PARAMS = {
     "SPIGOT80_OD": 0.0,  # 0 = off (fits both robots). 49.8 adds a Ø50 H7 spigot: UR20-only print
     "SPIGOT80_H": 3.0,
     "DOWEL_ANGLE_DEG": 90.0,  # both pin holes sit at 12 o'clock on their PCD
+    # -- tool-I/O connector (M8 socket at 12 o'clock on the wrist housing, behind the face) -----
+    "TOOL_CONNECTOR_Z_ESERIES": -35.65,  # UR10e manual §7.11.3: Lumberg RKMW 8-354, 35.65 behind the face
+    "TOOL_CONNECTOR_Z_UR20": -17.6,  # UR20 manual §8.11.3 section A-A: centreline 17.60 behind the face
+    "TOOL_CONNECTOR_D": 10.0,  # socket face (render); the plug body is bigger:
+    "TOOL_PLUG_D": 12.0,  # M8 8-pin cable plug body, used for the clearance check
     # -- the hanging camera wall -----------------------------------------------------------
-    "ARM_ANGLE_DEG": 0.0,  # 0 = camera on +X, i.e. 90° from the dowel/tool-I/O side
+    "ARM_ANGLE_DEG": 90.0,  # 90 = camera on +Y, the pin / tool-I/O connector side (cables leave together)
+    "UR20_ARM_ANGLE_DEG": 45.0,  # UR20: its socket is only 17.6 behind the face, so clock the camera 45° off
     "ARM_W": 66.0,  # tangential width of the tab + wall (covers the M3 pair at ±22.5)
     "WRIST_R": 50.0,  # largest thing the wall must clear: the UR20's Ø100 housing (e-Series wrist is Ø90)
     "WALL_CLEAR": 3.0,  # radial gap housing → wall inner face (flat heads are flush, so this is all it needs)
@@ -132,9 +142,17 @@ def derived(p: dict) -> dict:
     tripod_z = front_z - p["TRIPOD_FROM_FRONT"]
     m3_z = front_z - p["M3_FROM_FRONT"]
     cam_x0, cam_x1 = wall_out, wall_out + p["CAM_H"]
-    # camera frame in flange coords: +z_cam = +Z, +y_cam (image down, toward the
-    # camera's bottom = the wall) = -X, hence +x_cam = +Y. Camera-left = -Y.
-    depth_origin = (wall_out + p["CAM_H"] / 2, -p["IMAGER_OFFSET"], front_z - p["DEPTH_ORIGIN_FROM_FRONT"])
+    # camera frame in flange coords before the arm rotation: +z_cam = +Z, +y_cam
+    # (image down, toward the camera's bottom = the wall) = -X, hence +x_cam = +Y
+    # and camera-left = -Y. ARM_ANGLE_DEG rotates the whole set about Z.
+    a = math.radians(p["ARM_ANGLE_DEG"])
+    ca, sa = math.cos(a), math.sin(a)
+
+    def rot(x, y, z):  # the whole camera side rotates about Z by ARM_ANGLE_DEG
+        return (round(ca * x - sa * y, 6), round(sa * x + ca * y, 6), z)
+
+    depth_origin = rot(wall_out + p["CAM_H"] / 2, -p["IMAGER_OFFSET"], front_z - p["DEPTH_ORIGIN_FROM_FRONT"])
+    x_cam, y_cam, z_cam = rot(0, 1, 0), rot(-1, 0, 0), (0, 0, 1)
     return {
         "wall_inner_x": wall_in,
         "wall_outer_x": wall_out,
@@ -148,11 +166,39 @@ def derived(p: dict) -> dict:
         "m3_z": m3_z,
         "radial_extent": cam_x1,
         "lowest_z": wall_bottom_z,
-        "usb_c": "back face (-Z), camera-left end: Y ≈ -36 … -45, exits along -Z beside the wrist",
+        "usb_c": {
+            "where": "camera back face (-Z), camera-left end, 36–45 mm from centre; exits along -Z",
+            "flange_xyz_mm": rot(wall_out + p["CAM_H"] / 2, -40.5, back_z),
+        },
+        "tool_connector": {
+            "eseries": _connector_check(
+                p, p["ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_ESERIES"], wall_in, wall_bottom_z
+            ),
+            "ur20_at_this_angle": _connector_check(
+                p, p["ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_UR20"], wall_in, wall_bottom_z
+            ),
+            "ur20_at_UR20_ARM_ANGLE_DEG": _connector_check(
+                p, p["UR20_ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_UR20"], wall_in, wall_bottom_z
+            ),
+        },
         "depth_origin_flange_mm": depth_origin,
-        "R_flange_to_cam": [[0, 1, 0], [-1, 0, 0], [0, 0, 1]],  # columns = x_cam, y_cam, z_cam in flange axes
+        "camera_axes_in_flange": {"x_cam": x_cam, "y_cam": y_cam, "z_cam": z_cam},
         "arm_angle_deg": p["ARM_ANGLE_DEG"],
     }
+
+
+def _connector_check(p: dict, arm_deg: float, conn_z: float, wall_in: float, wall_bot: float) -> dict:
+    """Does the hanging wall stay clear of the M8 tool-I/O plug at 12 o'clock?
+    Angular: the wall spans ±atan(ARM_W/2 / wall_in) about the arm angle, the plug
+    ±asin(TOOL_PLUG_D/2 / wall_in) about 12 o'clock. Axial: the plug body spans
+    conn_z ± TOOL_PLUG_D/2; the wall spans wall_bot … PLATE_T."""
+    half_wall = math.degrees(math.atan2(p["ARM_W"] / 2, wall_in))
+    half_plug = math.degrees(math.asin(min(1.0, p["TOOL_PLUG_D"] / 2 / wall_in)))
+    dang = abs((arm_deg - p["DOWEL_ANGLE_DEG"] + 180) % 360 - 180)
+    angular_gap = round(dang - half_wall - half_plug, 1)
+    axial_gap = round(wall_bot - (conn_z + p["TOOL_PLUG_D"] / 2), 2)  # wall bottom above the plug's top edge
+    clear = angular_gap > 0 or axial_gap > 0
+    return {"angular_gap_deg": angular_gap, "axial_gap_mm": axial_gap, "clear": clear}
 
 
 # ----------------------------------------------------------------------------
@@ -198,7 +244,6 @@ def build_bracket(p: dict):
         tab = tab.edges("|Z").edges(">X").fillet(p["WALL_CORNER_R"])
     except Exception:
         pass
-    body = plate.union(tab)
 
     # the hanging wall: from the underside of the tab down past the camera's back
     wall = (
@@ -211,7 +256,29 @@ def build_bracket(p: dict):
         wall = wall.edges("|X").edges("<Z").fillet(p["WALL_CORNER_R"])
     except Exception:
         pass
-    body = body.union(wall)
+    side = tab.union(wall)
+    # camera fasteners through the wall (axis = X), countersunk on the wrist-side face
+    side = side.cut(
+        _yz_hole_tool(
+            cq,
+            wall_in,
+            0,
+            d["tripod_z"],
+            p["TRIPOD_HOLE_D"] + ha,
+            p["TRIPOD_CSK_D"],
+            p["TRIPOD_CSK_ANGLE"],
+            p["WALL_T"],
+        )
+    )
+    for y in (-p["M3_SPACING"] / 2, p["M3_SPACING"] / 2):
+        side = side.cut(
+            _yz_hole_tool(
+                cq, wall_in, y, d["m3_z"], p["M3_HOLE_D"] + ha, p["M3_CSK_D"], p["M3_CSK_ANGLE"], p["WALL_T"]
+            )
+        )
+
+    # only the camera side clocks; the plate features stay with the robot
+    body = plate.union(_rot_z(side, p["ARM_ANGLE_DEG"]))
 
     # bottom spigot ring(s) into the flange pilot, chamfered lead-in
     spig = (
@@ -257,27 +324,7 @@ def build_bracket(p: dict):
             .extrude(80)
         )
 
-    # camera fasteners through the wall (axis = X), countersunk on the wrist-side face
-    body = body.cut(
-        _yz_hole_tool(
-            cq,
-            wall_in,
-            0,
-            d["tripod_z"],
-            p["TRIPOD_HOLE_D"] + ha,
-            p["TRIPOD_CSK_D"],
-            p["TRIPOD_CSK_ANGLE"],
-            p["WALL_T"],
-        )
-    )
-    for y in (-p["M3_SPACING"] / 2, p["M3_SPACING"] / 2):
-        body = body.cut(
-            _yz_hole_tool(
-                cq, wall_in, y, d["m3_z"], p["M3_HOLE_D"] + ha, p["M3_CSK_D"], p["M3_CSK_ANGLE"], p["WALL_T"]
-            )
-        )
-
-    return _rot_z(body, p["ARM_ANGLE_DEG"])
+    return body
 
 
 def _yz_hole_tool(
@@ -313,7 +360,7 @@ def build_flange_standin(p: dict, robot: str = "eseries"):
             f = f.cut(cq.Workplane("XY", origin=(x, y, -17.25)).circle(3.4).extrude(17.25))
         x, y = _pcd_xy(p["PCD80"] / 2, p["DOWEL_ANGLE_DEG"])
         f = f.cut(cq.Workplane("XY", origin=(x, y, -8.0)).circle(4.0).extrude(8.0))
-        return f
+        return f.union(_connector_standin(cq, p, 50.0, p["TOOL_CONNECTOR_Z_UR20"]))
     wrist = cq.Workplane("XY", origin=(0, 0, -6.5 - 48.75)).circle(45.0).extrude(48.75)
     face = cq.Workplane("XY", origin=(0, 0, -6.5)).circle(31.5).extrude(6.5)
     f = wrist.union(face)
@@ -323,7 +370,15 @@ def build_flange_standin(p: dict, robot: str = "eseries"):
         f = f.cut(cq.Workplane("XY", origin=(x, y, -8)).circle(2.5).extrude(8))
     x, y = _pcd_xy(p["PCD50"] / 2, p["DOWEL_ANGLE_DEG"])
     f = f.cut(cq.Workplane("XY", origin=(x, y, -6.2)).circle(3.0).extrude(6.2))
-    return f
+    return f.union(_connector_standin(cq, p, 45.0, p["TOOL_CONNECTOR_Z_ESERIES"]))
+
+
+def _connector_standin(cq, p: dict, housing_r: float, z: float):
+    """The M8 tool-I/O socket: a Ø10 boss at 12 o'clock, 2 mm proud of the housing."""
+    a = math.radians(p["DOWEL_ANGLE_DEG"])
+    pnt = cq.Vector((housing_r - 1.0) * math.cos(a), (housing_r - 1.0) * math.sin(a), z)
+    axis = cq.Vector(math.cos(a), math.sin(a), 0)
+    return cq.Workplane().add(cq.Solid.makeCylinder(p["TOOL_CONNECTOR_D"] / 2, 3.0, pnt=pnt, dir=axis))
 
 
 def camera_mesh_to_flange(p: dict, verts):
@@ -464,7 +519,8 @@ def build_hardware(p: dict, robot: str = "eseries"):
             csk_d / 2, dia / 2, cone_h, pnt=cq.Vector(wall_in, y, z), dir=cq.Vector(1, 0, 0)
         )
         parts[name] = shank.union(cq.Workplane().add(head))
-    return {k: _rot_z(v, p["ARM_ANGLE_DEG"]) for k, v in parts.items()}
+    cam_side = ("tripod_screw", "m3_a", "m3_b")
+    return {k: (_rot_z(v, p["ARM_ANGLE_DEG"]) if k in cam_side else v) for k, v in parts.items()}
 
 
 # ----------------------------------------------------------------------------
@@ -479,12 +535,17 @@ def export(p: dict) -> dict:
     bracket = build_bracket(p)
     cq.exporters.export(bracket, str(OUT / "d435_tool_bracket.stl"), tolerance=0.02, angularTolerance=0.1)
     cq.exporters.export(bracket, str(OUT / "d435_tool_bracket.step"))
-    for robot in ("eseries", "ur20"):
+    p_ur20 = _ur20_params(p)
+    bracket_ur20 = build_bracket(p_ur20)
+    cq.exporters.export(
+        bracket_ur20, str(OUT / "d435_tool_bracket_ur20.stl"), tolerance=0.02, angularTolerance=0.1
+    )
+    for robot, pp, br in (("eseries", p, bracket), ("ur20", p_ur20, bracket_ur20)):
         assy = cq.Assembly(name=f"d435_tool_bracket_{robot}")
-        assy.add(build_flange_standin(p, robot), name=f"ur_flange_{robot}", color=cq.Color(0.55, 0.57, 0.6))
-        assy.add(bracket, name="bracket", color=cq.Color(0.15, 0.15, 0.17))
-        assy.add(build_camera_standin(p), name="d435_envelope", color=cq.Color(0.75, 0.75, 0.78))
-        for k, v in build_hardware(p, robot).items():
+        assy.add(build_flange_standin(pp, robot), name=f"ur_flange_{robot}", color=cq.Color(0.55, 0.57, 0.6))
+        assy.add(br, name="bracket", color=cq.Color(0.15, 0.15, 0.17))
+        assy.add(build_camera_standin(pp), name="d435_envelope", color=cq.Color(0.75, 0.75, 0.78))
+        for k, v in build_hardware(pp, robot).items():
             assy.add(v, name=k, color=cq.Color(0.8, 0.7, 0.3))
         assy.save(str(OUT / f"d435_tool_bracket_assembly_{robot}.step"))
     # Intel's body, placed in the flange frame, for anyone assembling in their own CAD
@@ -497,10 +558,17 @@ def export(p: dict) -> dict:
         "mass_g_ppa_cf": vol / 1000.0 * 1.20,  # ~1.2 g/cm³ for CF-filled PA/PPA at 100% — infill lowers it
         "bbox_mm": [round(bb.xlen, 2), round(bb.ylen, 2), round(bb.zlen, 2)],
         "stl": str(OUT / "d435_tool_bracket.stl"),
+        "stl_ur20_clocked": str(OUT / "d435_tool_bracket_ur20.stl"),
+        "ur20_derived": derived(p_ur20),
         "step": str(OUT / "d435_tool_bracket.step"),
         "assembly_step": [str(OUT / f"d435_tool_bracket_assembly_{r}.step") for r in ("eseries", "ur20")],
         "camera_body_stl": str(OUT / "d435_body_in_flange_frame.stl"),
     }
+
+
+def _ur20_params(p: dict) -> dict:
+    """The same part clocked for a UR20/UR30 (its M8 socket is in the wall's path at 90°)."""
+    return {**p, "ARM_ANGLE_DEG": p["UR20_ARM_ANGLE_DEG"]}
 
 
 def _write_stl(path: Path, verts, tris) -> None:
@@ -535,18 +603,18 @@ def render(p: dict) -> list[str]:
 
     RENDERS.mkdir(parents=True, exist_ok=True)
     d = derived(p)
-    bracket_mesh = _mesh(build_bracket(p))
-    camera_mesh = load_camera_mesh(p)
-    scenes = {}
-    for robot in ("eseries", "ur20"):
+    scenes, angles = {}, {}
+    for robot, pp in (("eseries", p), ("ur20", _ur20_params(p))):
         parts = [
-            (_mesh(build_flange_standin(p, robot)), (0.55, 0.57, 0.60), 0.35),
-            (bracket_mesh, (0.16, 0.18, 0.22), 0.6),
-            (camera_mesh, (0.80, 0.81, 0.84), 0.30),
+            (_mesh(build_flange_standin(pp, robot)), (0.55, 0.57, 0.60), 0.35),
+            (_mesh(build_bracket(pp)), (0.16, 0.18, 0.22), 0.6),
+            (load_camera_mesh(pp), (0.80, 0.81, 0.84), 0.30),
         ]
-        for v in build_hardware(p, robot).values():
+        for v in build_hardware(pp, robot).values():
             parts.append((_mesh(v), (0.82, 0.68, 0.30), 0.3))
         scenes[robot] = parts
+        angles[robot] = pp["ARM_ANGLE_DEG"]
+    angles["bracket"] = angles["eseries"]
     scenes["bracket"] = list(scenes["eseries"][1:3]) + [
         (_mesh(v), (0.82, 0.68, 0.30), 0.3)
         for k, v in build_hardware(p, "eseries").items()
@@ -579,10 +647,10 @@ def render(p: dict) -> list[str]:
             -55,
             62,
             (35, 0, -5),
-            "D435 on a UR e-Series flange — camera tucked beside the wrist",
+            "D435 on a UR e-Series flange — beside the wrist, on the tool-I/O side",
         ),
         ("iso_wide", "eseries", 24, -35, 105, (25, 0, -15), "e-Series assembly — wrist-3, adapter, D435"),
-        ("iso_ur20", "ur20", 28, -55, 75, (35, 0, -10), "Same part on a UR20/UR30 (ISO-80) flange"),
+        ("iso_ur20", "ur20", 28, -55, 75, (35, 0, -10), "ur20_title"),
         (
             "side_xz",
             "eseries",
@@ -599,7 +667,7 @@ def render(p: dict) -> list[str]:
             -90,
             62,
             (35, 0, 0),
-            "Top (X–Y): ISO-50 + ISO-80 patterns, pins at +Y, camera on +X",
+            "Top (X–Y): ISO-50 + ISO-80 patterns; pins, M8 socket and camera all on +Y",
         ),
         (
             "wrist_side",
@@ -613,6 +681,14 @@ def render(p: dict) -> list[str]:
     ]
     files = []
     for name, robot, elev, azim, lim, center, title in views:
+        if title == "ur20_title":
+            title = (
+                f"UR20/UR30: M8 socket only 17.6 behind the face — camera clocked {angles['ur20']:.0f}° off"
+            )
+        a = math.radians(angles[robot])
+        cx, cy, cz = center  # views are authored for the camera on +X; follow the scene's arm angle
+        center = (cx * math.cos(a) - cy * math.sin(a), cx * math.sin(a) + cy * math.cos(a), cz)
+        azim += angles[robot]
         fig = plt.figure(figsize=(9, 9), dpi=150)
         ax = fig.add_subplot(111, projection="3d")
         draw(ax, scenes[robot], lim, center)

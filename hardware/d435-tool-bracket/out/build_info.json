@@ -34,7 +34,12 @@
     "SPIGOT80_OD": 0.0,
     "SPIGOT80_H": 3.0,
     "DOWEL_ANGLE_DEG": 90.0,
-    "ARM_ANGLE_DEG": 0.0,
+    "TOOL_CONNECTOR_Z_ESERIES": -35.65,
+    "TOOL_CONNECTOR_Z_UR20": -17.6,
+    "TOOL_CONNECTOR_D": 10.0,
+    "TOOL_PLUG_D": 12.0,
+    "ARM_ANGLE_DEG": 90.0,
+    "UR20_ARM_ANGLE_DEG": 45.0,
     "ARM_W": 66.0,
     "WRIST_R": 50.0,
     "WALL_CLEAR": 3.0,
@@ -84,30 +89,54 @@
     "m3_z": -6.199999999999999,
     "radial_extent": 84.0,
     "lowest_z": -19.05,
-    "usb_c": "back face (-Z), camera-left end: Y \u2248 -36 \u2026 -45, exits along -Z beside the wrist",
+    "usb_c": {
+      "where": "camera back face (-Z), camera-left end, 36\u201345 mm from centre; exits along -Z",
+      "flange_xyz_mm": [
+        40.5,
+        71.5,
+        -17.05
+      ]
+    },
+    "tool_connector": {
+      "eseries": {
+        "angular_gap_deg": -38.4,
+        "axial_gap_mm": 10.6,
+        "clear": true
+      },
+      "ur20_at_this_angle": {
+        "angular_gap_deg": -38.4,
+        "axial_gap_mm": -7.45,
+        "clear": false
+      },
+      "ur20_at_UR20_ARM_ANGLE_DEG": {
+        "angular_gap_deg": 6.6,
+        "axial_gap_mm": -7.45,
+        "clear": true
+      }
+    },
     "depth_origin_flange_mm": [
+      17.5,
       71.5,
-      -17.5,
       3.7
     ],
-    "R_flange_to_cam": [
-      [
-        0,
-        1,
+    "camera_axes_in_flange": {
+      "x_cam": [
+        -1.0,
+        0.0,
         0
       ],
-      [
-        -1,
-        0,
+      "y_cam": [
+        -0.0,
+        -1.0,
         0
       ],
-      [
+      "z_cam": [
         0,
         0,
         1
       ]
-    ],
-    "arm_angle_deg": 0.0
+    },
+    "arm_angle_deg": 90.0
   },
   "camera_mesh": {
     "url": "https://raw.githubusercontent.com/IntelRealSense/realsense-ros/9189b0591fae677570d2dfd0ae8957fb6f12e635/realsense2_description/meshes/d435.dae",
@@ -116,14 +145,89 @@
     "triangles": 12000
   },
   "export": {
-    "volume_cm3": 67.285618828617,
-    "mass_g_ppa_cf": 80.7427425943404,
+    "volume_cm3": 67.28561882861726,
+    "mass_g_ppa_cf": 80.74274259434071,
     "bbox_mm": [
-      109.01,
       100.04,
+      109.01,
       27.07
     ],
     "stl": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket.stl",
+    "stl_ur20_clocked": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_ur20.stl",
+    "ur20_derived": {
+      "wall_inner_x": 53.0,
+      "wall_outer_x": 59.0,
+      "wall_z_range": [
+        -19.05,
+        8.0
+      ],
+      "camera_front_z": 8.0,
+      "camera_back_z": -17.05,
+      "camera_x_range": [
+        59.0,
+        84.0
+      ],
+      "camera_y_range": [
+        -45.0,
+        45.0
+      ],
+      "camera_z_range": [
+        -17.05,
+        8.0
+      ],
+      "tripod_z": -6.9,
+      "m3_z": -6.199999999999999,
+      "radial_extent": 84.0,
+      "lowest_z": -19.05,
+      "usb_c": {
+        "where": "camera back face (-Z), camera-left end, 36\u201345 mm from centre; exits along -Z",
+        "flange_xyz_mm": [
+          79.195959,
+          21.92031,
+          -17.05
+        ]
+      },
+      "tool_connector": {
+        "eseries": {
+          "angular_gap_deg": 6.6,
+          "axial_gap_mm": 10.6,
+          "clear": true
+        },
+        "ur20_at_this_angle": {
+          "angular_gap_deg": 6.6,
+          "axial_gap_mm": -7.45,
+          "clear": true
+        },
+        "ur20_at_UR20_ARM_ANGLE_DEG": {
+          "angular_gap_deg": 6.6,
+          "axial_gap_mm": -7.45,
+          "clear": true
+        }
+      },
+      "depth_origin_flange_mm": [
+        62.932504,
+        38.183766,
+        3.7
+      ],
+      "camera_axes_in_flange": {
+        "x_cam": [
+          -0.707107,
+          0.707107,
+          0
+        ],
+        "y_cam": [
+          -0.707107,
+          -0.707107,
+          0
+        ],
+        "z_cam": [
+          0,
+          0,
+          1
+        ]
+      },
+      "arm_angle_deg": 45.0
+    },
     "step": "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket.step",
     "assembly_step": [
       "/Users/nick/github/UR-utils/hardware/d435-tool-bracket/out/d435_tool_bracket_assembly_eseries.step",

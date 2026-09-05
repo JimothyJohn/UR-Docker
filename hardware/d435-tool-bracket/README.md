@@ -1,9 +1,9 @@
 # D435 tool-flange adapter — specification / datasheet
 
 **Part:** `d435_tool_bracket` · **Rev:** B (2026-09-04) · **Status:** designed, exported, *not yet printed or test-fitted*
-**Files:** `bracket.py` (parametric source, CadQuery) · `out/d435_tool_bracket.stl` (print) · `out/d435_tool_bracket.step` (edit) · `out/d435_tool_bracket_assembly_{eseries,ur20}.step` (flange + adapter + camera envelope + hardware) · `out/d435_body_in_flange_frame.stl` (Intel's D435 body, placed) · `renders/*.png`
+**Files:** `bracket.py` (parametric source, CadQuery) · `out/d435_tool_bracket.stl` (print) · `out/d435_tool_bracket_ur20.stl` (print, clocked for a UR20/UR30) · `out/d435_tool_bracket.step` (edit) · `out/d435_tool_bracket_assembly_{eseries,ur20}.step` (flange + adapter + camera envelope + hardware) · `out/d435_body_in_flange_frame.stl` (Intel's D435 body, placed) · `renders/*.png`
 
-A one-piece **sandwich adapter plate** for an Intel RealSense D435 on a Universal Robots tool flange. It carries **both** the ISO 9409-1-50-4-M6 (UR3e/5e/10e/16e) and the ISO 9409-1-80-6-M8 (UR20/UR30) patterns as plain through holes, so the tool's own bolts pass through it into whichever robot it is on. The camera **hangs beside the wrist, back along −Z**, with its front plate flush with the adapter's tool face and its optical axis along flange +Z: nothing of the camera or the adapter rises into the tool's volume. The 1/4-20 and the two M3 enter through the hanging wall from the wrist side, **countersunk flush** — fit the camera to the adapter first, then bolt the adapter to the robot.
+A one-piece **sandwich adapter plate** for an Intel RealSense D435 on a Universal Robots tool flange. It carries **both** the ISO 9409-1-50-4-M6 (UR3e/5e/10e/16e) and the ISO 9409-1-80-6-M8 (UR20/UR30) patterns as plain through holes, so the tool's own bolts pass through it into whichever robot it is on. The camera **hangs beside the wrist, back along −Z, on the tool-I/O connector side** (so both cables leave together), with its front plate flush with the adapter's tool face and its optical axis along flange +Z: nothing of the camera or the adapter rises into the tool's volume. The 1/4-20 and the two M3 enter through the hanging wall from the wrist side, **countersunk flush** — fit the camera to the adapter first, then bolt the adapter to the robot.
 
 Rev A (2026-09-02) was a Ø63 plate with a 90° arm and the camera standing *above* the plate on +X; it read as looking sideways and would have fouled any tool. Everything below replaces it.
 
@@ -27,6 +27,7 @@ The camera in the renders is Intel's own D435 body mesh (`vendor/`, see the NOTI
 | R5 | Tool still mounts normally | all pattern holes are through holes for the tool's own bolts (+8 mm); top recess Ø31.7 × 5 re-presents the Ø31.5 pilot to an ISO-50 tool; pin slots pass the pin through to the tool | — |
 | R6 | Cable exit unobstructed | USB-C is on the camera's **back face** at its left end (Intel mesh); it exits along −Z beside the wrist, where nothing is | §6 A1 |
 | R7 | Printable in PPA-CF; simple enough for machining | Z-extrusions + one set of radial holes; no supports in the recommended orientation | §5 |
+| R9 | Camera on the tool-I/O side, clear of the M8 plug | `ARM_ANGLE_DEG = 90` puts the wall at 12 o'clock. e-Series socket is 35.65 behind the face and the wall ends 19.05 behind it: **10.6 mm axial clearance** to a Ø12 plug. The UR20's socket is only 17.6 behind its face, so the UR20 part is clocked 45° off (`UR20_ARM_ANGLE_DEG`, 6.6° angular clearance) | `derived()["tool_connector"]`, `side_xz.png` |
 | R8 | Others can iterate | every number is a named parameter in `bracket.py`; STL/STEP/renders regenerate from one command | this file |
 
 ## 2. Interfaces (the numbers that are not ours)
@@ -41,6 +42,7 @@ The camera in the renders is Intel's own D435 body mesh (`vendor/`, see the NOTI
 | Dowel hole | Ø6 H7, depth 6.20 ±0.20, on the PCD at 12 o'clock | tool-I/O connector side |
 | Centring recess | Ø31.50 H7 | depth not dimensioned; spigot kept to 4 mm |
 | Bolt length | "do not use bolts that extend beyond 10 mm" into the flange | ⇒ ≤ 8 mm engagement |
+| Tool-I/O socket | Lumberg RKMW 8-354 (M8, 8-pin) at 12 o'clock on the Ø90 wrist, **35.65 behind the face** | UR10e manual SW 5.21 §7.11.3 drawing |
 
 ### 2.2 UR20 / UR30 tool flange (UR20 User Manual SW 5.21, 718-818-00, §8.11.3 "Securing Tool")
 
@@ -52,6 +54,7 @@ The camera in the renders is Intel's own D435 body mesh (`vendor/`, see the NOTI
 | Pin hole | Ø8 H7, depth 8 ±0.2, on the PCD at 12 o'clock | |
 | Pilot | Ø50 H7 | **not engaged** by this part (§6 A3); `SPIGOT80_OD=49.8` adds a spigot for a UR20-only print |
 | Bolt length | "do not use bolts that extend beyond 17.25 mm" | |
+| Tool-I/O socket | M8 at 12 o'clock on the Ø100 housing, **centreline 17.60 behind the face** | section A-A; in the wall's path — see R9 |
 
 ### 2.3 Camera: Intel RealSense D435
 
@@ -69,7 +72,7 @@ The camera in the renders is Intel's own D435 body mesh (`vendor/`, see the NOTI
 
 ## 3. Geometry (all mm, from `bracket.py` PARAMS → `derived()`)
 
-Frame: origin = centre of the flange face, +Z = away from the flange (tool direction, optical axis), +Y = towards the pin holes, +X = camera side (`ARM_ANGLE_DEG = 0`; rotate in 60° steps to keep the ISO-80 holes clear of nothing in particular — the wall sits outside both patterns, so any angle works; the pin slots follow the *robot*, not the camera).
+Frame: origin = centre of the flange face, +Z = away from the flange (tool direction, optical axis), +Y = towards the pin holes and the tool-I/O socket. **The camera side is on +Y too** (`ARM_ANGLE_DEG = 90`; the geometry is authored on +X and only the tab, wall and camera fasteners rotate — the plate features stay with the robot). The wall sits outside both patterns, so any angle builds; only the M8 plug limits it (R9). Positions below are for the default clocking.
 
 | Item | Value | Parameter(s) |
 | --- | --- | --- |
@@ -82,15 +85,15 @@ Frame: origin = centre of the flange face, +Z = away from the flange (tool direc
 | Optional UR20 spigot | off; `SPIGOT80_OD=49.8` → Ø49.8 × 3 ring (UR20-only part) | `SPIGOT80_OD/H` |
 | Recess (top) | Ø31.7 × 5 | `TOP_RECESS_D/H` |
 | Centre hole | Ø24 thru | `CENTER_HOLE_D` |
-| Tab | X = 30 … 59, Y = ±33, 8 thick, R6 outer corners | `ARM_W`, `WALL_CORNER_R` |
-| Wall | X = **53 … 59**, Y = ±33, Z = **−19.05 … 8**, R6 bottom corners | `WRIST_R`, `WALL_CLEAR`, `WALL_T`, `WALL_BELOW_CAM` |
-| 1/4-20 | Ø6.6 thru the wall at Y = 0, Z = **−6.9**; countersink Ø12.7 × 82° on the X = 53 face | `TRIPOD_HOLE_D`, `TRIPOD_CSK_D/ANGLE`, `TRIPOD_FROM_FRONT` |
-| M3 | 2× Ø3.4 at Y = ±22.5, Z = **−6.2**; countersink Ø6.6 × 90° on the X = 53 face | `M3_HOLE_D`, `M3_CSK_D/ANGLE`, `M3_SPACING`, `M3_FROM_FRONT` |
-| Camera envelope | X = 59 … 84, Y = ±45, Z = −17.05 … **8.0** (front plate flush with the tool face) | `CAM_H/L/D`, `CAM_PROUD` |
+| Tab | Y = 30 … 59, X = ±33, 8 thick, R6 outer corners | `ARM_W`, `WALL_CORNER_R` |
+| Wall | Y = **53 … 59**, X = ±33, Z = **−19.05 … 8**, R6 bottom corners | `WRIST_R`, `WALL_CLEAR`, `WALL_T`, `WALL_BELOW_CAM` |
+| 1/4-20 | Ø6.6 thru the wall at X = 0, Z = **−6.9**; countersink Ø12.7 × 82° on the Y = 53 face | `TRIPOD_HOLE_D`, `TRIPOD_CSK_D/ANGLE`, `TRIPOD_FROM_FRONT` |
+| M3 | 2× Ø3.4 at X = ±22.5, Z = **−6.2**; countersink Ø6.6 × 90° on the Y = 53 face | `M3_HOLE_D`, `M3_CSK_D/ANGLE`, `M3_SPACING`, `M3_FROM_FRONT` |
+| Camera envelope | Y = 59 … 84, X = ±45, Z = −17.05 … **8.0** (front plate flush with the tool face) | `CAM_H/L/D`, `CAM_PROUD` |
 | Radial extent / lowest point | 84 from the flange axis / z = −19.05 | `radial_extent`, `lowest_z` |
-| Bracket bbox / volume / mass | 109 × 100 × 27 mm · 67.3 cm³ · ≈ 81 g solid PPA-CF (infill lowers it) | `out/build_info.json` |
+| Bracket bbox / volume / mass | 100 × 109 × 27 mm · 67.3 cm³ · ≈ 81 g solid PPA-CF (infill lowers it) | `out/build_info.json` |
 
-**Nominal camera pose (hand-eye seed).** Camera axes in flange axes: `x_cam = +Y`, `y_cam = −X` (image-down points at the mounting wall), `z_cam = +Z`; camera-left is −Y. Depth origin (left imager) = **(71.5, −17.5, 3.7) mm** in the flange frame for `ARM_ANGLE_DEG = 0`. This is `perception.handeye.BRACKET_NOMINAL`; calibrate to finish — a printed part will not hold ±1°.
+**Nominal camera pose (hand-eye seed).** Camera axes in flange axes: `x_cam = −X`, `y_cam = −Y` (image-down points at the mounting wall), `z_cam = +Z`; camera-left is +X. Depth origin (left imager) = **(17.5, 71.5, 3.7) mm** in the flange frame for `ARM_ANGLE_DEG = 90`. (For the UR20 clocking, 45°: (62.9, 38.2, 3.7) — `build_info.json` → `export.ur20_derived`.) This is `perception.handeye.BRACKET_NOMINAL`; calibrate to finish — a printed part will not hold ±1°.
 
 ## 4. Hardware (BOM)
 
@@ -115,16 +118,17 @@ Countersunk heads are the whole point: the wrist-side face of the wall is 3 mm f
 
 ## 6. Design considerations and assumptions
 
-1. **A1 — USB-C.** Now known from Intel's mesh: back face, camera-left end (Y ≈ −36 … −45 at `ARM_ANGLE_DEG = 0`), exiting along −Z. A straight plug needs ~25 mm below the camera's back face (z < −17); that space is empty (wrist at r ≤ 50, camera at r ≥ 59). A right-angle plug is tidier. **Confirm on the unit** — Intel's mesh is the 2018 body.
+1. **A1 — USB-C.** Now known from Intel's mesh: back face, camera-left end (X ≈ +36 … +45, Y ≈ 71.5 at the default clocking), exiting along −Z. A straight plug needs ~25 mm below the camera's back face (z < −17); that space is empty (wrist at r ≤ 50, camera at r ≥ 59), and the tool-I/O cable leaves 35 mm further back on the same side, so both run down the arm together. A right-angle plug is tidier. **Confirm on the unit** — Intel's mesh is the 2018 body.
 2. **A2 — spigot depth.** UR's drawing does not state the e-Series recess depth; ISO 9409-1 recesses are ≥ 6 mm on the 50 flange. The 4 mm spigot leaves margin. If the plate rocks, the spigot is bottoming: shorten `SPIGOT_H`.
 3. **A3 — UR20 pilot not engaged.** A Ø50 spigot would hold the plate off an e-Series face, so the both-robots part locates on the UR20 by the Ø8 pin + six M8 only. For a camera that is calibrated in place this is fine; for a UR20-only part set `SPIGOT80_OD=49.8`.
 4. **A4 — 1/4-20 thread depth.** Intel's D435 drawing gives no max insertion for the 1/4-20 (the D455 says 9 mm); the mesh bore is ≈ 8 mm deep. The 1/2" flat head gives ~6.7 mm — measure before the first fit; a 7/16" screw or a 0.5 mm shim under the head is the fallback.
-5. **Field of view.** The front plate is coplanar with the adapter's tool face, so the adapter is entirely behind the lens plane. What *will* be in view is the tool: the camera looks along +Z from x ≈ 71 mm, y ≈ −17.5 mm, so a tool body wider than ~110 mm across the camera side shadows the near field. Normal eye-in-hand; mask in perception if needed.
+5. **Field of view.** The front plate is coplanar with the adapter's tool face, so the adapter is entirely behind the lens plane. What *will* be in view is the tool: the camera looks along +Z from y ≈ 71 mm, x ≈ 17.5 mm, so a tool body wider than ~110 mm across the camera side shadows the near field. Normal eye-in-hand; mask in perception if needed.
 6. **Why both patterns on one plate.** The ISO-80 holes force the plate to Ø100; the extra ~30 g and the overhang on an e-Series are the price of one printed part that moves between the UR10e and a UR20/UR30. There is no Ø63 variant with the ISO-80 holes — they don't fit inside it; the plate is Ø100 or it isn't dual.
 7. **Why the pin slots are radial.** Each flange's pilot and pin hole both define position; a round pin hole in the tool over-constrains. UR says slot it radially (both manuals).
 8. **Why hang the camera, not stand it.** Rev A stood the camera 38 mm above the plate — inside the tool's volume and looking like it pointed sideways. Hanging it beside the wrist costs nothing in reach (the wrist is there anyway), keeps the lens plane at the tool face, and makes the fasteners a pre-assembly step.
 9. **Stiffness.** L-section 66 × 8 tab + 66 × 6 × 27 wall, filleted; far beyond what 72 g needs. No gussets — anything on the wrist side of the wall is in the clearance zone.
-10. **Safety.** Adapter + camera ≈ 155 g with the CoG ~35 mm off the flange axis and ~0 mm along Z; add it to the UR payload/CoG (`Installation → Payload`) or the torque model drifts.
+10. **Tool-I/O side, and why the UR20 part is clocked.** The wall spans ±32° about its centre at r = 53 and reaches 19 mm behind the face. On an e-Series the M8 socket is 35.65 behind the face, so a straight plug (Ø12) passes 10.6 mm below the wall. On a UR20/UR30 the socket is 17.6 behind the face — the plug would be inside the wall — so `UR20_ARM_ANGLE_DEG = 45` clocks that print 45° off the connector (6.6° clear). It is the same file; only the tab/wall rotate.
+11. **Safety.** Adapter + camera ≈ 155 g with the CoG ~35 mm off the flange axis and ~0 mm along Z; add it to the UR payload/CoG (`Installation → Payload`) or the torque model drifts.
 
 ## 7. Verification checklist (fill in after the first print)
 
@@ -135,7 +139,8 @@ Countersunk heads are the whole point: the wrist-side face of the wall is 3 mm f
 - [ ] Flat heads flush or below the wrist-side face; wall clears the wrist through a full wrist-3 rotation
 - [ ] USB-C plug seats with the cable running along −Z; no contact (A1)
 - [ ] `perception rs-info` sees the camera; `perception gui` shows the tool where §6.5 predicts
-- [ ] Hand-eye calibration result vs. the nominal (71.5, −17.5, 3.7) mm / axis map in §3
+- [ ] Hand-eye calibration result vs. the nominal (17.5, 71.5, 3.7) mm / axis map in §3
+- [ ] Tool-I/O plug seats with the wall in place (e-Series: 10.6 mm predicted clearance)
 - [ ] Payload updated on the pendant
 
 ## 8. Regenerating
@@ -143,9 +148,9 @@ Countersunk heads are the whole point: the wrist-side face of the wall is 3 mm f
 ```bash
 # cadquery is a design-time tool, not a runtime dependency of this repo
 uv run --with cadquery --with matplotlib --with numpy python hardware/d435-tool-bracket/bracket.py            # defaults
-uv run --with cadquery --with matplotlib --with numpy python hardware/d435-tool-bracket/bracket.py SPIGOT80_OD=49.8 ARM_ANGLE_DEG=180
+uv run --with cadquery --with matplotlib --with numpy python hardware/d435-tool-bracket/bracket.py SPIGOT80_OD=49.8 UR20_ARM_ANGLE_DEG=135
 # re-derive the vendored Intel mesh from the pinned realsense-ros commit (network + fast-simplification)
 uv run --with numpy --with fast-simplification python hardware/d435-tool-bracket/bracket.py --refresh-camera-mesh
 ```
 
-Outputs land in `out/` (STL, STEP, two assembly STEPs, the placed camera body STL, `build_info.json` with the derived numbers) and `renders/`. Sources for every external number are cited in `bracket.py`'s docstring and `vendor/NOTICE.md`.
+Outputs land in `out/` (STL for the default clocking and the UR20 clocking, STEP, two assembly STEPs, the placed camera body STL, `build_info.json` with the derived numbers and the tool-connector clearance check) and `renders/`. Sources for every external number are cited in `bracket.py`'s docstring and `vendor/NOTICE.md`.
