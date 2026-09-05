@@ -41,10 +41,11 @@ from urctl.pose import Transform, Vec3
 # wrist on +Y (the tool-I/O connector side): camera axes in flange axes are
 # x_cam = −X, y_cam = −Y (image-down points at the mounting wall), z_cam = +Z
 # (optical axis out of the flange); depth origin (left imager) at
-# (17.5, 71.5, 1.7) mm — front plate flush with the adapter's tool face
-# (z = 6), zero-depth plane 4.3 mm behind it (Intel's URDF: 4.2 glass + 0.1).
+# (17.5, 66.5, 1.7) mm — e-Series print: wall at r = 48…54 beside the Ø90
+# wrist, front plate flush with the adapter's tool face (z = 6), zero-depth
+# plane 4.3 mm behind it (Intel's URDF: 4.2 glass + 0.1).
 BRACKET_NOMINAL = Transform.from_axes(
-    (-1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (0.0175, 0.0715, 0.0017)
+    (-1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (0.0175, 0.0665, 0.0017)
 )
 ENV_T_FLANGE_CAMERA = "PERCEPTION_T_FLANGE_CAMERA"
 DEFAULT_STANDOFF_M = 0.10

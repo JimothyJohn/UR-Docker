@@ -61,6 +61,7 @@ from pathlib import Path
 PARAMS = {
     # -- plate ---------------------------------------------------------------------------
     "PLATE_OD": 96.0,  # smallest disc that clears the ISO-80 holes (Ø9 on Ø80 + 3 mm); UR20 face is Ø100
+    "PATTERNS": ("iso50", "iso80"),  # bolt patterns + pin slots cut into the plate (base: both)
     "PLATE_T": 6.0,  # 8 → 6 saved ~20 % filament; the pin still has 6 in the flange, M6/M8 clamp fine
     "PLATE_EDGE_CHAMFER": 1.0,
     "CENTER_HOLE_D": 24.0,  # cable / air pass-through
@@ -92,6 +93,9 @@ PARAMS = {
     # -- the hanging camera wall -----------------------------------------------------------
     "ARM_ANGLE_DEG": 90.0,  # 90 = camera on +Y, the pin / tool-I/O connector side (cables leave together)
     # -- variants: two independent prints, one per flange. Overrides applied on top of the base design.
+    "ESERIES_PLATE_OD": 63.0,  # e-Series print: ISO-50 only, so the disc shrinks to the Ø63 face
+    "ESERIES_PATTERNS": ("iso50",),
+    "ESERIES_WRIST_R": 45.0,  # ...and the wall only has to clear the Ø90 wrist (UR20 housing is Ø100)
     "UR20_ARM_ANGLE_DEG": 45.0,  # UR20: its socket is only 17.6 behind the face, so clock the camera 45° off
     "UR20_SPIGOT_OD": 49.8,  # Ø50 H7 pilot engaged (a dual part can't: it would hold it off a Ø63 face)
     "UR20_TOP_RECESS_D": 50.2,  # the Ø50 pilot re-presented to an ISO-80 tool (e-Series variant keeps Ø31.7)
@@ -126,10 +130,17 @@ VARIANTS = ("eseries", "ur20")
 
 
 def variant_params(p: dict, variant: str) -> dict:
-    """Base PARAMS plus the per-flange overrides. ``eseries`` *is* the base design;
-    ``ur20`` clocks the camera off the M8 socket and engages the Ø50 pilot both ways."""
+    """Base PARAMS (both patterns, Ø96, wall clearing a Ø100 housing) plus the
+    per-flange overrides: ``eseries`` drops the ISO-80 pattern, shrinks to the Ø63
+    face and pulls the wall in to the Ø90 wrist; ``ur20`` clocks the camera off
+    the M8 socket and engages the Ø50 pilot both ways."""
     if variant == "eseries":
-        return dict(p)
+        return {
+            **p,
+            "PLATE_OD": p["ESERIES_PLATE_OD"],
+            "PATTERNS": p["ESERIES_PATTERNS"],
+            "WRIST_R": p["ESERIES_WRIST_R"],
+        }
     if variant == "ur20":
         return {
             **p,
@@ -326,17 +337,27 @@ def build_bracket(p: dict):
     body = body.cut(
         cq.Workplane("XY", origin=(0, 0, T - p["TOP_RECESS_H"])).circle(p["TOP_RECESS_D"] / 2).extrude(20)
     )
-    for pcd, dia, angles in (
-        (p["PCD50"], p["BOLT50_HOLE_D"], p["BOLT50_ANGLES_DEG"]),
-        (p["PCD80"], p["BOLT80_HOLE_D"], p["BOLT80_ANGLES_DEG"]),
-    ):
+    patterns = {
+        "iso50": (
+            p["PCD50"],
+            p["BOLT50_HOLE_D"],
+            p["BOLT50_ANGLES_DEG"],
+            p["DOWEL50_SLOT_W"],
+            p["DOWEL50_SLOT_L"],
+        ),
+        "iso80": (
+            p["PCD80"],
+            p["BOLT80_HOLE_D"],
+            p["BOLT80_ANGLES_DEG"],
+            p["DOWEL80_SLOT_W"],
+            p["DOWEL80_SLOT_L"],
+        ),
+    }
+    for name in p["PATTERNS"]:
+        pcd, dia, angles, w, ln = patterns[name]
         for a in angles:
             x, y = _pcd_xy(pcd / 2, a)
             body = body.cut(cq.Workplane("XY", origin=(x, y, -20)).circle((dia + ha) / 2).extrude(80))
-    for pcd, w, ln in (
-        (p["PCD50"], p["DOWEL50_SLOT_W"], p["DOWEL50_SLOT_L"]),
-        (p["PCD80"], p["DOWEL80_SLOT_W"], p["DOWEL80_SLOT_L"]),
-    ):
         x, y = _pcd_xy(pcd / 2, p["DOWEL_ANGLE_DEG"])
         body = body.cut(
             cq.Workplane("XY", origin=(0, 0, -20))
@@ -621,8 +642,7 @@ def render(p: dict) -> list[str]:
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     RENDERS.mkdir(parents=True, exist_ok=True)
-    d = derived(p)
-    scenes, angles = {}, {}
+    scenes, angles, derived_by_scene = {}, {}, {}
     for robot in VARIANTS:
         pp = variant_params(p, robot)
         parts = [
@@ -634,6 +654,7 @@ def render(p: dict) -> list[str]:
             parts.append((_mesh(v), (0.82, 0.68, 0.30), 0.3))
         scenes[robot] = parts
         angles[robot] = pp["ARM_ANGLE_DEG"]
+        derived_by_scene[robot] = derived_by_scene[f"bracket_{robot}"] = derived(pp)
     for robot in VARIANTS:  # robot hidden: the print itself, the camera and its three screws
         scenes[f"bracket_{robot}"] = list(scenes[robot][1:3]) + [
             (_mesh(v), (0.82, 0.68, 0.30), 0.3)
@@ -688,7 +709,7 @@ def render(p: dict) -> list[str]:
             -90,
             62,
             (35, 0, 0),
-            "Top (X–Y): ISO-50 + ISO-80 patterns; pins, M8 socket and camera all on +Y",
+            "Top (X–Y), e-Series print: ISO-50 only; pin, M8 socket and camera all on +Y",
         ),
         (
             "underside_eseries",
@@ -697,7 +718,7 @@ def render(p: dict) -> list[str]:
             -125,
             60,
             (15, 0, -2),
-            "e-Series print from below: Ø31.3 spigot into the Ø31.5 H7 recess",
+            "e-Series print from below: Ø63 disc, Ø31.3 spigot into the Ø31.5 H7 recess",
         ),
         (
             "underside_ur20",
@@ -724,6 +745,7 @@ def render(p: dict) -> list[str]:
             title = (
                 f"UR20/UR30: M8 socket only 17.6 behind the face — camera clocked {angles['ur20']:.0f}° off"
             )
+        d = derived_by_scene[robot]
         a = math.radians(angles[robot])
         cx, cy, cz = center  # views are authored for the camera on +X; follow the scene's arm angle
         center = (cx * math.cos(a) - cy * math.sin(a), cx * math.sin(a) + cy * math.cos(a), cz)
