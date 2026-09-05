@@ -163,7 +163,7 @@ The Object panel has a **Robot** section. With a segment that has depth:
 **Hand-eye transform.** `perception/handeye.py` seeds `T_flange_depth` from
 the bracket geometry (`hardware/d435-tool-bracket/README.md` §3,
 `ARM_ANGLE_DEG = 0`: camera x = flange +Y, camera y = flange −X, camera z =
-flange +Z, depth origin at (75.0, −17.5, 35.0) mm) and takes
+flange +Z, depth origin at (71.5, −17.5, 3.7) mm) and takes
 `T_depth_color` from the SDK's extrinsics at open (`rs2_get_extrinsics`,
 ~15 mm along x on a D435; identity on the synthetic camera). That is an
 **uncalibrated seed** — a printed part won't hold ±1°, and 1° at 0.5 m is

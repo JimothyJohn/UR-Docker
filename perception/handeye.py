@@ -37,12 +37,14 @@ from dataclasses import dataclass, replace
 
 from urctl.pose import Transform, Vec3
 
-# Bracket README §3, ARM_ANGLE_DEG = 0: camera axes in flange axes are
+# Bracket README §3 (Rev B), ARM_ANGLE_DEG = 0: camera axes in flange axes are
 # x_cam = +Y, y_cam = −X (image-down points at the mounting wall), z_cam = +Z
 # (optical axis out of the flange); depth origin (left imager) at
-# (75.0, −17.5, 35.0) mm — lens plane 3 mm behind the wall top.
+# (71.5, −17.5, 3.7) mm — the camera hangs beside the wrist with its front
+# plate flush with the adapter's tool face (z = 8), zero-depth plane 4.3 mm
+# behind it (Intel's URDF: 4.2 glass + 0.1).
 BRACKET_NOMINAL = Transform.from_axes(
-    (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.075, -0.0175, 0.035)
+    (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0715, -0.0175, 0.0037)
 )
 ENV_T_FLANGE_CAMERA = "PERCEPTION_T_FLANGE_CAMERA"
 DEFAULT_STANDOFF_M = 0.10
