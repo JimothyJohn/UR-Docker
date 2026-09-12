@@ -401,6 +401,7 @@ verdict: NOT READY</pre>
   <h3>Field log</h3>
   <ul class="log">
     <li><b>2026-09-12</b> — Pilot's seat built: cell profiles (<code>sim</code>/<code>ur3</code>/<code>ur20</code>), <code>perception doctor</code>, the cockpit's Pilot panel (status chips, Bring up / STOP / Freedrive / Doctor, jog pad, Events log), the combined robot + camera MCP server (<code>perception-mcp</code>, <code>.mcp.json</code>), Windows setup/launch scripts. Verified on the synthetic camera + dry-run robot only. D435 not plugged in on the dev Mac today (doctor confirmed: SDK found, no device). Not yet run on the Windows laptop, the UR3e or the UR20. Bracket not yet printed; hand-eye uncalibrated.</li>
+    <li><b>2026-09-12 (later)</b> — Hand-eye calibration routine added (touch-and-click: record the mark with the tool tip, 4–6 clicked views from varied wrist poses, Levenberg–Marquardt solve seeded from the bracket, Apply + save to <code>captures/calibration/handeye_&lt;cell&gt;.json</code>; <code>cal_*</code> MCP tools). Verified on the synthetic camera + dry-run robot and by a synthetic recovery test only. Decisions: the UR3 is a <b>UR3e on PolyScope 5</b> (cell file switched to e-series); the D435's USB-C is on an <b>end</b> face on Nick's unit; SAM stays unverified; on-controller GPU target undecided. Branch pushed to the fork <code>JimothyJohn/UR-Docker</code>.</li>
     <li><b>2026-09-04</b> — Send-to-robot flow verified on the PolyScope X sim 10.13.0 (native arm64, Remote): flange readback == controller; Locate + Move landed to 0.1 mm. Depth chain (848×480, spatial + temporal, High Accuracy, max laser) verified on the D435: temporal noise raw ~46–50 mm → filtered ~16–18 mm. Found the black-colour-on-mismatched-sizes behaviour. Decision: PolyScope X is the exclusive target from here.</li>
     <li><b>2026-09-03</b> — D435 streams at 30 fps under sudo on macOS, first open and clean re-open; earlier failures were a cascade of failed one-shot opens racing Apple's UVCAssistant (re-plug clears it).</li>
   </ul>
@@ -408,7 +409,7 @@ verdict: NOT READY</pre>
   <ul>
     <li>IP addresses of the UR3 and UR20 controllers (→ <code>UR_HOST</code> in the cell files).</li>
     <li>Is the "UR3" a UR3e running PolyScope X? The cell profile assumes PolyScope X; the doctor will flag a mismatch if it's PolyScope 5 (then <code>UR_PLATFORM=e-series</code>, Dashboard 29999).</li>
-    <li>Hand-eye calibration method (a checkerboard / a known point touched by the TCP / a fiducial) and who owns the resulting <code>PERCEPTION_T_FLANGE_CAMERA</code> per robot.</li>
+    <li>Hand-eye calibration: method decided (touch-and-click, built) — still to be run on each robot with the printed bracket; the result is saved per cell under <code>captures/calibration/</code>.</li>
     <li>Which AI Accelerator / JetPack image the controller runs, for the on-controller container (CUDA + SAM).</li>
     <li>USB-C exit and cable routing on the printed bracket (confirm on the first print; spec §6 A1).</li>
   </ul>

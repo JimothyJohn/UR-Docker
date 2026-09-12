@@ -146,6 +146,50 @@ COCKPIT_TOOLS: list[CockpitTool] = [
         lambda c, p: c.doctor(robot=p.get("robot", True)),
     ),
     CockpitTool(
+        "cal_status",
+        "Hand-eye calibration session: the touched mark (base frame), the recorded views, the solve result "
+        "if any, and the hand-eye transform currently active (bracket seed / file / env / calibrated).",
+        _schema({}),
+        lambda c, p: c.get("/api/cal"),
+    ),
+    CockpitTool(
+        "cal_record_mark",
+        "Step 1 of touch-and-click calibration: with the tool tip resting ON the mark, record the live TCP "
+        "position as the mark's base-frame position. (Freedrive first with ur_freedrive.)",
+        _schema({}),
+        lambda c, p: c.post("/api/cal/mark"),
+    ),
+    CockpitTool(
+        "cal_add_view",
+        "Step 2: from a new pose where the camera sees the mark, add a view: the camera-frame point under "
+        "pixel (x, y) (5x5 median of valid depth) plus the live flange pose. Use cam_snapshot to find the "
+        "mark's pixel. Vary wrist rotation and tilt between views; 4-6 views is typical.",
+        _schema({"x": {"type": "integer"}, "y": {"type": "integer"}}, required=["x", "y"]),
+        lambda c, p: c.post("/api/cal/view", {"x": p["x"], "y": p["y"]}),
+    ),
+    CockpitTool(
+        "cal_solve",
+        "Step 3: solve T_flange_camera from the mark + views (Levenberg-Marquardt, seeded from the bracket). "
+        "Returns the pose, RMS residual, per-view residuals, warnings (low rotation diversity, high RMS), "
+        "and the PERCEPTION_T_FLANGE_CAMERA env line. Nothing is applied yet.",
+        _schema({}),
+        lambda c, p: c.post("/api/cal/solve"),
+    ),
+    CockpitTool(
+        "cal_apply",
+        "Use the solved transform from now on and (save=true) write captures/calibration/handeye_<cell>.json "
+        "so later starts load it (precedence: PERCEPTION_T_FLANGE_CAMERA env > file > bracket seed). "
+        "Refused while the solve has warnings unless force=true.",
+        _schema({"save": {"type": "boolean"}, "force": {"type": "boolean"}}),
+        lambda c, p: c.post("/api/cal/apply", {"save": p.get("save", True), "force": p.get("force", False)}),
+    ),
+    CockpitTool(
+        "cal_reset",
+        "Drop the mark and all views.",
+        _schema({}),
+        lambda c, p: c.post("/api/cal/reset"),
+    ),
+    CockpitTool(
         "cell_jog",
         "One relative base-frame nudge of the TCP: delta [dx, dy, dz, drx, dry, drz] (metres, radians), "
         "at most 0.05 m / 0.35 rad per axis, safety-enveloped, logged in the cockpit's events. "

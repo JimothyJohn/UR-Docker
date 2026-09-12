@@ -27,7 +27,8 @@ from urctl.config import RobotConfig
 from urctl.robot import Robot
 from urctl.tools import ToolError, call_tool
 
-from .handeye import DEFAULT_STANDOFF_M, HandEye, locate
+from .calibrate import CalibrationSession
+from .handeye import DEFAULT_STANDOFF_M, HandEye, default_handeye_path, locate
 
 DEFAULT_APPROACH_VELOCITY = 0.1  # m/s — slow; this move follows a single click
 DEFAULT_APPROACH_ACCELERATION = 0.3  # m/s^2
@@ -51,10 +52,15 @@ class RobotLink:
         self.dry_run = dry_run
         self.robot = robot if robot is not None else Robot(self.config, dry_run=dry_run)
         self.handeye = handeye or HandEye.from_env()
+        self.calibration = CalibrationSession(seed=self.handeye)
+        self._extrinsics: Mapping | None = None
 
     def attach_camera(self, camera_description: Mapping) -> None:
         """Take the depth→colour extrinsics from ``camera.describe()``."""
-        self.handeye = self.handeye.with_extrinsics(camera_description.get("extrinsics_depth_to_color"))
+        self._extrinsics = camera_description.get("extrinsics_depth_to_color")
+        self.handeye = self.handeye.with_extrinsics(self._extrinsics)
+        self.calibration.extrinsics = self._extrinsics
+        self.calibration.seed = self.handeye
 
     def describe(self) -> dict:
         return {
@@ -110,6 +116,52 @@ class RobotLink:
                 "acceleration": float(acceleration),
             },
         )
+
+    # -- hand-eye calibration (touch-and-click; perception.calibrate) --------------
+
+    def cal_record_mark(self) -> dict:
+        """The live TCP position is the mark in the base frame (the tip is on it)."""
+        fp = self.flange_pose()
+        if not fp.get("ok") or not fp.get("tcp"):
+            return {"ok": False, "error": fp.get("error") or "could not read the TCP pose", "robot": fp}
+        out = self.calibration.record_mark(fp["tcp"][:3])
+        out["ok"] = True
+        return out
+
+    def cal_add_view(self, point_cam: Sequence[float], *, pixel=None, seq=None) -> dict:
+        fp = self.flange_pose()
+        if not fp.get("ok") or not fp.get("flange"):
+            return {"ok": False, "error": fp.get("error") or "could not read the flange pose", "robot": fp}
+        out = self.calibration.add_view(fp["flange"], point_cam, pixel=pixel, seq=seq)
+        out["ok"] = True
+        return out
+
+    def cal_solve(self) -> dict:
+        return self.calibration.solve()
+
+    def cal_apply(self, *, save: bool = True, path: str | None = None, force: bool = False) -> dict:
+        """Use the solved transform from now on (and write it so the next start
+        picks it up: env > file > bracket seed). A solve that carries warnings
+        (poor rotation diversity, high residual) is refused unless ``force``."""
+        result = self.calibration.result
+        if result and result.get("warnings") and not force:
+            return {
+                "ok": False,
+                "error": "solve has warnings; fix them or pass force=true: " + "; ".join(result["warnings"]),
+                "warnings": result["warnings"],
+            }
+        self.handeye = self.calibration.handeye()
+        out: dict = {"ok": True, "handeye": self.handeye.as_dict()}
+        if save:
+            saved = self.calibration.save(path or default_handeye_path())
+            out["saved"] = str(saved)
+        return out
+
+    def cal_status(self) -> dict:
+        d = self.calibration.as_dict()
+        d["ok"] = True
+        d["active_handeye"] = self.handeye.as_dict()
+        return d
 
     # -- pilot actions (each one tool call; all safety-enveloped + audited) ----
 

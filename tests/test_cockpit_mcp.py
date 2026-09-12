@@ -67,7 +67,7 @@ def test_tools_list_is_robot_plus_cockpit(cockpit):
         for t in server.handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
     ]
     assert "ur_move_tcp" in names and "ur_get_state" in names
-    assert [t.name for t in COCKPIT_TOOLS] == [n for n in names if n.startswith(("cam_", "cell_"))]
+    assert [t.name for t in COCKPIT_TOOLS] == [n for n in names if n.startswith(("cam_", "cell_", "cal_"))]
     assert len(names) == len(set(names))
     init = server.handle_message({"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {}})
     assert init["result"]["serverInfo"]["name"] == "cell"
@@ -127,3 +127,26 @@ def test_client_raises_unavailable():
         CockpitClient("http://127.0.0.1:9", timeout=1).info()
     tools = CockpitTools(CockpitClient("http://127.0.0.1:9", timeout=1))
     assert tools.owns("cam_info") and not tools.owns("ur_get_state")
+
+
+def test_cal_tools_through_mcp(cockpit, tmp_path, monkeypatch):
+    url, _, _ = cockpit
+    monkeypatch.chdir(tmp_path)
+    server = build_server(Robot(RobotConfig(), dry_run=True), cockpit_url=url)
+    err, st = _call(server, "cal_status")
+    assert not err and st["views"] == [] and st["active_handeye"]["source"].startswith("bracket")
+    err, m = _call(server, "cal_record_mark")
+    assert not err and m["ok"]
+    for _ in range(3):
+        err, v = _call(server, "cal_add_view", {"x": 48, "y": 32})
+        assert not err and v["ok"]
+    err, bad = _call(server, "cal_add_view", {"x": 48})
+    assert err and "missing required" in bad["error"]
+    err, sol = _call(server, "cal_solve")
+    assert not err and sol["ok"] and "env_line" in sol
+    err, ap = _call(server, "cal_apply", {"save": False})
+    assert err and "warnings" in ap["error"]
+    err, ap = _call(server, "cal_apply", {"save": False, "force": True})
+    assert not err and ap["handeye"]["calibrated"] and "saved" not in ap
+    err, rs = _call(server, "cal_reset")
+    assert not err and rs["views"] == []

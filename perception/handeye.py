@@ -65,6 +65,22 @@ DEFAULT_BRACKET = "eseries"
 # Kept for callers that predate the second print.
 BRACKET_NOMINAL = BRACKET_NOMINAL_ESERIES
 ENV_BRACKET = "PERCEPTION_BRACKET"
+# A saved touch-and-click calibration (perception.calibrate). Env wins over it.
+ENV_HANDEYE_FILE = "PERCEPTION_HANDEYE_FILE"
+DEFAULT_HANDEYE_DIR = "captures/calibration"
+
+
+def default_handeye_path(env: Mapping[str, str] | None = None) -> str:
+    """``$PERCEPTION_HANDEYE_FILE`` or ``captures/calibration/handeye_<cell>.json``
+    (``handeye.json`` when no cell is selected)."""
+    env = os.environ if env is None else env
+    explicit = env.get(ENV_HANDEYE_FILE, "").strip()
+    if explicit:
+        return explicit
+    cell = env.get("UR_CELL", "").strip()
+    return os.path.join(DEFAULT_HANDEYE_DIR, f"handeye_{cell}.json" if cell else "handeye.json")
+
+
 ENV_T_FLANGE_CAMERA = "PERCEPTION_T_FLANGE_CAMERA"
 DEFAULT_STANDOFF_M = 0.10
 
@@ -123,12 +139,18 @@ class HandEye:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> HandEye:
-        """:data:`ENV_T_FLANGE_CAMERA` if set (a calibration), else the seed for
-        the bracket print named by :data:`ENV_BRACKET` (default ``eseries``)."""
+        """:data:`ENV_T_FLANGE_CAMERA` if set, else a saved calibration file
+        (:func:`default_handeye_path`), else the seed for the bracket print
+        named by :data:`ENV_BRACKET` (default ``eseries``)."""
         env = os.environ if env is None else env
         raw = env.get(ENV_T_FLANGE_CAMERA, "")
         if raw.strip():
             return cls.from_pose(parse_pose_text(raw), source=f"env:{ENV_T_FLANGE_CAMERA}")
+        path = default_handeye_path(env)
+        if os.path.isfile(path):
+            from .calibrate import load_calibration_pose
+
+            return cls.from_pose(load_calibration_pose(path), source=f"file:{path}")
         return cls.for_bracket(env.get(ENV_BRACKET, DEFAULT_BRACKET))
 
     @property

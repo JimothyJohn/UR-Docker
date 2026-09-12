@@ -596,3 +596,65 @@ def test_pilot_routes_need_a_robot_link(server):
     assert "robot.reach" not in {c["name"] for c in json.loads(body)["checks"]}
     status, _, body = get(base, "/api/info")
     assert json.loads(body)["events_seq"] >= 1
+
+
+# ---- hand-eye calibration through the cockpit -----------------------------------------
+
+
+def test_point_endpoint_medians_a_window(pilot):
+    base, app, _ = pilot
+    status, _, body = get(base, "/api/point?x=32&y=24")
+    j = json.loads(body)
+    assert status == 200 and j["ok"] and len(j["point_m"]) == 3 and j["samples"] >= 9 and j["point_m"][2] > 0
+    with pytest.raises(urllib.error.HTTPError) as ei:
+        get(base, "/api/point?x=999&y=0")
+    assert ei.value.code == 400
+    with pytest.raises(urllib.error.HTTPError) as ei:
+        get(base, "/api/point?x=a")
+    assert ei.value.code == 400
+
+
+def test_calibration_flow_dry_run(pilot, tmp_path, monkeypatch):
+    """Dry-run robot: the flange pose is a stand-in, so every view carries the same
+    flange pose — the solver must refuse cleanly (no diversity) rather than emit junk,
+    and the bookkeeping/status/remove/reset/apply plumbing all works."""
+    base, app, _ = pilot
+    monkeypatch.chdir(tmp_path)
+    status, j = post(base, "/api/cal/mark", {})
+    assert status == 200 and j["ok"] and len(j["mark_base"]) == 3
+    for _ in range(3):
+        status, j = post(base, "/api/cal/view", {"x": 32, "y": 24})
+        assert status == 200 and j["ok"]
+    assert len(j["views"]) == 3 and j["views"][0]["pixel"] == [32, 24]
+    status, _, body = get(base, "/api/cal")
+    st = json.loads(body)
+    assert (
+        st["ok"]
+        and len(st["views"]) == 3
+        and st["min_views"] == 3
+        and st["active_handeye"]["source"].startswith("bracket")
+    )
+    status, j = post(base, "/api/cal/solve", {})
+    assert status == 200 and j["ok"] and any("poorly observed" in w for w in j["warnings"])
+    status, j = post(base, "/api/cal/remove", {"index": 0})
+    assert status == 200 and len(j["views"]) == 2
+    status, j = post(base, "/api/cal/solve", {})
+    assert status == 400 and "at least 3" in j["error"]
+    status, j = post(base, "/api/cal/remove", {"index": 9})
+    assert status == 400
+    post(base, "/api/cal/view", {"x": 40, "y": 20})
+    post(base, "/api/cal/solve", {})
+    status, j = post(base, "/api/cal/apply", {"save": True})
+    assert status == 200 and not j["ok"] and "warnings" in j["error"]  # zero rotation diversity → refused
+    status, j = post(base, "/api/cal/apply", {"save": True, "force": True})
+    assert status == 200 and j["ok"] and j["handeye"]["source"] == "calibrated:touch-and-click"
+    saved = Path(j["saved"])
+    assert saved.exists() and saved.name == "handeye.json"
+    status, _, body = get(base, "/api/info")
+    assert json.loads(body)["robot"]["handeye"]["calibrated"] is True
+    ev = json.loads(get(base, "/api/events")[2])["events"]
+    assert any(e["kind"] == "calibration" and e["message"].startswith("solved") for e in ev)
+    status, j = post(base, "/api/cal/reset", {})
+    assert status == 200 and j["views"] == [] and j["mark_base"] is None
+    status, j = post(base, "/api/cal/apply", {})
+    assert status == 400 and "not solved" in j["error"]

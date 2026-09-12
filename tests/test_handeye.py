@@ -222,3 +222,28 @@ def test_bracket_variant_selection():
     assert he.calibrated and he.source.startswith("env:")
     with pytest.raises(ValueError, match="unknown bracket"):
         HandEye.for_bracket("ur99")
+
+
+def test_from_env_precedence_env_then_file_then_seed(tmp_path):
+    import json
+
+    from perception.handeye import default_handeye_path
+
+    f = tmp_path / "handeye_ur20.json"
+    f.write_text(json.dumps({"flange_to_depth_pose": [0.01, 0.02, 0.03, 0, 0, 0.1]}))
+    env = {"UR_CELL": "ur20", "PERCEPTION_HANDEYE_FILE": str(f), "PERCEPTION_BRACKET": "ur20"}
+    he = HandEye.from_env(env)
+    assert (
+        he.calibrated
+        and he.source == f"file:{f}"
+        and _close(he.flange_to_depth.translation, (0.01, 0.02, 0.03))
+    )
+    env["PERCEPTION_T_FLANGE_CAMERA"] = "[0,0,0.5,0,0,0]"
+    assert HandEye.from_env(env).source.startswith("env:")
+    # default path follows the cell name; missing file → seed
+    assert default_handeye_path({"UR_CELL": "ur3"}).endswith("handeye_ur3.json")
+    assert default_handeye_path({}).endswith("handeye.json")
+    assert (
+        HandEye.from_env({"UR_CELL": "nope-no-file", "PERCEPTION_BRACKET": "ur20"}).source
+        == "bracket-nominal:ur20"
+    )

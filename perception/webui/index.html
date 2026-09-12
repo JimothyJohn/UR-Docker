@@ -89,6 +89,12 @@
   ul.events { max-height: 180px; overflow: auto; }
   ul.events li .t { color: var(--faint); font-family: "IBM Plex Mono", monospace; flex: 0 0 auto; }
   button.crit { background: var(--crit-soft); border-color: var(--crit); color: var(--crit); }
+  details.cal summary { cursor: pointer; font-size: 11.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); padding: 7px 0 4px; list-style: none; }
+  details.cal summary::before { content: "▸ "; } details.cal[open] summary::before { content: "▾ "; }
+  ul.views { margin: 0; padding: 0; list-style: none; font-size: 11.5px; }
+  ul.views li { display: flex; gap: 6px; padding: 2px 0; border-bottom: 1px solid var(--line-soft); align-items: center; }
+  ul.views li .x { margin-left: auto; padding: 0 6px; font-size: 11px; }
+  pre.env { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-all; background: var(--inset); border: 1px solid var(--line-soft); border-radius: 4px; padding: 6px; }
 </style>
 </head>
 <body>
@@ -180,6 +186,20 @@
         </div>
         <table id="robotTable"><tbody><tr><td colspan="2" class="hint">Segment an object with depth, then Locate.</td></tr></tbody></table>
         <div class="hint">Locate reads the live flange pose and maps the segment's camera point into the base frame through the hand-eye transform (bracket nominal unless <code>PERCEPTION_T_FLANGE_CAMERA</code> is set). Move sends one safety-validated <code>movel</code> to the approach pose: <em>standoff</em> short of the point along the camera ray, tool orientation unchanged.</div>
+        <details class="cal" id="calSec">
+          <summary>Calibrate hand-eye <span id="calMeta" style="font-weight:400;letter-spacing:0;text-transform:none">–</span></summary>
+          <div class="hint">1. Freedrive the tool tip onto a mark → <b>Record mark</b>. 2. From 4–6 varied poses (rotate + tilt the wrist), click the mark in the colour view → <b>Add view</b>. 3. <b>Solve</b>, check the residuals, <b>Apply</b>.</div>
+          <div class="row">
+            <button id="calMarkBtn">Record mark</button>
+            <button id="calViewBtn" disabled title="click the mark in the colour view first">Add view</button>
+            <button id="calSolveBtn" disabled>Solve</button>
+            <button id="calApplyBtn" class="primary" disabled>Apply + save</button>
+            <button id="calResetBtn" class="danger">Reset</button>
+          </div>
+          <div id="calMark" class="hint mono">mark –</div>
+          <ul id="calViews" class="views"></ul>
+          <div id="calResult" hidden><table id="calTable"><tbody></tbody></table><pre class="env" id="calEnv"></pre></div>
+        </details>
       </div>
       <div class="head" style="padding:7px 0 0;border:0"><h2>Capture</h2></div>
       <div class="row">
@@ -393,7 +413,9 @@
     renderFeatures(); drawOverlays();
     $('colorReadout').textContent = features ? `object @ (${features.centroid_px.map(v => v.toFixed(0)).join(', ')}) · ${fmt(features.depth.median_m)} m` : 'empty segment';
   }
+  let lastClick = null;
   async function segmentAt(u, v) {
+    lastClick = [u, v]; $('calViewBtn').disabled = !robotInfo; $('calViewBtn').title = `add a view at (${u}, ${v})`;
     if (inflight) return; inflight = true;
     try { await adopt(await post('/api/segment', { x: u, y: v })); } catch (e) { toast(`segment: ${e.message}`); } finally { inflight = false; }
   }
@@ -522,6 +544,35 @@
       ul.scrollTop = ul.scrollHeight; $('evMeta').textContent = `#${lastEvent}`;
     } catch (e) {}
   }
+  // ---- hand-eye calibration ----------------------------------------------------------
+  function renderCal(d) {
+    $('calMark').textContent = d.mark_base ? `mark (base) ${vec(d.mark_base, 4)} m` : 'mark – (not touched; the solver can estimate it from ≥ 4 views)';
+    $('calViews').innerHTML = d.views.map((v, i) => `<li><span class="m">#${i + 1}</span><span>px ${v.pixel ? v.pixel.join(',') : '?'} · cam ${vec(v.point_cam)} · flange z ${fmt(v.flange_pose[2])}</span><button class="x" data-i="${i}" title="remove">×</button></li>`).join('');
+    $('calViews').querySelectorAll('button.x').forEach(b => b.onclick = async () => { try { await post('/api/cal/remove', { index: +b.dataset.i }); } catch (e) {} cal(); });
+    $('calSolveBtn').disabled = d.views.length < d.min_views;
+    $('calMeta').textContent = `${d.views.length}/${d.min_views}+ views${d.result ? ` · RMS ${(d.result.rms_m * 1000).toFixed(2)} mm` : ''} · active: ${(d.active_handeye || {}).source || '?'}`;
+    if (d.result) {
+      const r = d.result;
+      $('calTable').tBodies[0].innerHTML = [
+        ['flange→depth', vec(r.flange_to_depth_pose, 4)], ['Δ from seed', r.delta_from_seed_mm.map(v => v.toFixed(1)).join(', ') + ' mm'],
+        ['RMS', `${(r.rms_m * 1000).toFixed(2)} mm · per view ${r.per_view_residual_m.map(v => (v * 1000).toFixed(1)).join(' / ')}`],
+        ['rotation diversity', `${r.rotation_diversity_deg.toFixed(1)}°`], ['warnings', r.warnings.length ? `<span class="warn">${r.warnings.join('<br>')}</span>` : 'none'],
+      ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+      $('calEnv').textContent = r.env_line; $('calResult').hidden = false; $('calApplyBtn').disabled = false;
+    } else { $('calResult').hidden = true; $('calApplyBtn').disabled = true; }
+  }
+  async function cal() { try { renderCal(await (await fetch('/api/cal')).json()); } catch (e) {} }
+  $('calMarkBtn').onclick = async () => { if (!confirm('Is the tool tip resting on the mark right now?')) return; await pilot('/api/cal/mark', {}, 'record mark'); cal(); };
+  $('calViewBtn').onclick = async () => { if (!lastClick) return; await pilot('/api/cal/view', { x: lastClick[0], y: lastClick[1] }, 'add view'); cal(); };
+  $('calSolveBtn').onclick = async () => { await pilot('/api/cal/solve', {}, 'solve'); cal(); };
+  $('calApplyBtn').onclick = async () => {
+    const d = await (await fetch('/api/cal')).json(); const w = (d.result || {}).warnings || [];
+    const msg = w.length ? `This solve has warnings:\n- ${w.join('\n- ')}\n\nApply it anyway and save it for future starts?` : 'Apply the solved hand-eye transform and save it for future starts?';
+    if (!confirm(msg)) return; await pilot('/api/cal/apply', { save: true, force: w.length > 0 }, 'apply'); cal(); info();
+  };
+  $('calResetBtn').onclick = async () => { await pilot('/api/cal/reset', {}, 'reset'); cal(); };
+  $('calSec').addEventListener('toggle', () => { if ($('calSec').open) cal(); });
+
   $('bringUpBtn').onclick = () => pilot('/api/robot/bring_up', {}, 'bring up');
   $('stopBtn').onclick = () => pilot('/api/robot/stop', {}, 'stop');
   $('freedriveBtn').onclick = async () => { freedriveOn = !freedriveOn; const j = await pilot('/api/robot/freedrive', { enable: freedriveOn }, `freedrive ${freedriveOn ? 'on' : 'off'}`); if (!j || j.ok === false) freedriveOn = !freedriveOn; $('freedriveBtn').className = freedriveOn ? 'primary' : ''; };

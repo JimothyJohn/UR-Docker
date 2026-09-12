@@ -86,7 +86,11 @@ selector for robot host/platform/ports + bracket print (`PERCEPTION_BRACKET`
 platform-mismatch diagnosis, modes, TCP offset, hand-eye status; every failure
 carries its fix; also `GET /api/doctor` and the `cell_doctor` tool). The cockpit
 has a Pilot panel (bring-up/stop/freedrive, capped jog pad, events log) and
-`POST /api/snapshot` writes PNGs an agent can read. `perception-mcp` (`.mcp.json`)
+`POST /api/snapshot` writes PNGs an agent can read. **Hand-eye calibration**
+is touch-and-click (`perception/calibrate.py`; cockpit "Calibrate hand-eye",
+`cal_*` tools): record the mark with the tool tip, 4–6 clicked views from
+varied wrist poses, LM solve seeded from the bracket, Apply + save to
+`captures/calibration/handeye_<cell>.json` (env > file > seed). `perception-mcp` (`.mcp.json`)
 serves robot + `cam_*`/`cell_*` tools; the camera tools proxy the running
 cockpit because one process owns the USB camera. Windows bring-up:
 `scripts/setup-windows.ps1` + `scripts/cockpit.ps1`. **Keep

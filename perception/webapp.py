@@ -42,6 +42,12 @@ API:
                                       ``<name>_color.png`` + ``<name>_depth.png`` (colourised)
                                       to a directory and return the paths — the
                                       "give the agent eyes" call.
+  * ``GET  /api/point?x=&y=``       the camera-frame point under a pixel (median of a
+                                      5×5 window) — what a calibration view uses.
+  * ``POST /api/cal/mark`` / ``/api/cal/view`` ``{x, y}`` / ``/api/cal/solve`` /
+    ``/api/cal/apply`` ``{save?}`` / ``/api/cal/reset`` / ``GET /api/cal`` —
+                                      touch-and-click hand-eye calibration
+                                      (:mod:`perception.calibrate`).
   * ``POST /api/capture``  ``{name, include_mask}`` save color/depth(/mask/meta).
   * ``GET  /api/captures``            what's in the capture root.
   * ``POST /api/clear``               drop the current mask.
@@ -313,6 +319,90 @@ class ViewerApp:
             text = f"{text}: {err}".rstrip(": ")
         self.events.add("robot", text, ok=ok, data={"action": name})
         return result
+
+    def point_at(self, x: int, y: int, window: int = 5) -> dict:
+        """Camera-frame metres under pixel (x, y): the per-axis median over a
+        ``window``×``window`` neighbourhood of valid-depth pixels, so a single
+        noisy or missing pixel doesn't decide a calibration view."""
+        seq, frame = self.latest()
+        if frame is None:
+            raise RuntimeError("no frame yet" + (f" ({self.last_error})" if self.last_error else ""))
+        w, h = frame.color.width, frame.color.height
+        if not (0 <= x < w and 0 <= y < h):
+            raise ValueError(f"point ({x}, {y}) outside the {w}x{h} frame")
+        r = window // 2
+        pts = []
+        for v in range(max(0, y - r), min(h, y + r + 1)):
+            for u in range(max(0, x - r), min(w, x + r + 1)):
+                p = frame.point_at(u, v)
+                if p is not None:
+                    pts.append(p)
+        if not pts:
+            return {"ok": False, "error": "no valid depth around that pixel", "seq": seq, "x": x, "y": y}
+        med = []
+        for k in range(3):
+            vals = sorted(p[k] for p in pts)
+            n = len(vals)
+            med.append(vals[n // 2] if n % 2 else 0.5 * (vals[n // 2 - 1] + vals[n // 2]))
+        return {"ok": True, "seq": seq, "x": x, "y": y, "point_m": med, "samples": len(pts)}
+
+    # -- hand-eye calibration ------------------------------------------------------------
+
+    def cal_mark(self) -> dict:
+        link = self._link()
+        return self._robot_action(
+            "cal_mark",
+            link.cal_record_mark,
+            summary=lambda r: f"calibration mark {[round(v, 4) for v in r.get('mark_base') or []]}",
+        )
+
+    def cal_view(self, x: int, y: int) -> dict:
+        link = self._link()
+        pt = self.point_at(x, y)
+        if not pt.get("ok"):
+            raise ValueError(pt["error"])
+        return self._robot_action(
+            "cal_view",
+            lambda: link.cal_add_view(pt["point_m"], pixel=(x, y), seq=pt["seq"]),
+            summary=lambda r: f"calibration view #{len(r.get('views', []))} at ({x}, {y})",
+        )
+
+    def cal_solve(self) -> dict:
+        link = self._link()
+        res = link.cal_solve()
+        self.events.add(
+            "calibration",
+            f"solved: RMS {res['rms_m'] * 1000:.2f} mm over {res['views']} views"
+            + (f"; {'; '.join(res['warnings'])}" if res["warnings"] else ""),
+            ok=not res["warnings"],
+        )
+        return res
+
+    def cal_apply(self, save: bool = True, force: bool = False) -> dict:
+        link = self._link()
+        out = link.cal_apply(save=save, force=force)
+        if out.get("ok"):
+            self.events.add(
+                "calibration",
+                f"applied {link.handeye.source}" + (f", saved {out['saved']}" if out.get("saved") else ""),
+                ok=True,
+            )
+        else:
+            self.events.add("calibration", f"apply refused: {out.get('error')}", ok=False)
+        return out
+
+    def cal_reset(self) -> dict:
+        out = self._link().calibration.reset()
+        out["ok"] = True
+        return out
+
+    def cal_remove(self, index: int) -> dict:
+        out = self._link().calibration.remove_view(index)
+        out["ok"] = True
+        return out
+
+    def cal_status(self) -> dict:
+        return self._link().cal_status()
 
     def robot_jog(self, delta: Sequence[float], velocity: float | None = None) -> dict:
         link = self._link()
@@ -590,6 +680,15 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {"ok": True, "seq": self.app.events.seq, "events": self.app.events.since(after, limit)}
             )
+        elif route == "/api/point":
+            try:
+                x, y = int(qs["x"][0]), int(qs["y"][0])
+            except (KeyError, ValueError, IndexError):
+                self._send_json({"ok": False, "error": "x and y must be integers"}, status=400)
+                return
+            self._guarded(lambda: self.app.point_at(x, y))
+        elif route == "/api/cal":
+            self._guarded(self.app.cal_status)
         elif route == "/api/robot":
             self._guarded(
                 lambda: {"ok": True, "robot": self.app.robot.describe() if self.app.robot else None}
@@ -665,6 +764,20 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._guarded(self.app.robot_stop)
         elif route == "/api/robot/freedrive":
             self._guarded(lambda: self.app.robot_freedrive(bool(payload.get("enable", False))))
+        elif route == "/api/cal/mark":
+            self._guarded(self.app.cal_mark)
+        elif route == "/api/cal/view":
+            self._guarded(lambda: self.app.cal_view(_int(payload, "x"), _int(payload, "y")))
+        elif route == "/api/cal/solve":
+            self._guarded(self.app.cal_solve)
+        elif route == "/api/cal/apply":
+            self._guarded(
+                lambda: self.app.cal_apply(bool(payload.get("save", True)), bool(payload.get("force", False)))
+            )
+        elif route == "/api/cal/reset":
+            self._guarded(self.app.cal_reset)
+        elif route == "/api/cal/remove":
+            self._guarded(lambda: self.app.cal_remove(_int(payload, "index")))
         elif route == "/api/snapshot":
             self._guarded(
                 lambda: self.app.snapshot(

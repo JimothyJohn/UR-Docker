@@ -252,6 +252,36 @@ sets `REALSENSE_LIB` to it), runs `uv sync` and the doctor. Then
 Windows: librealsense uses the native backend there. **Not yet run on the
 laptop** as of 2026-09-12 — the first run is the verification.
 
+## Hand-eye calibration (touch-and-click)
+
+The bracket seed is a drawing, not a measurement. `perception/calibrate.py`
+replaces it with a solve from the robot's own poses — no target to print, no
+extra dependency. In the cockpit's Robot panel open **Calibrate hand-eye**
+(or use the `cal_*` MCP tools):
+
+1. **Record mark** — freedrive the tool tip onto a mark on the table; the live
+   TCP position becomes the mark in the base frame. Back the tool off.
+2. **Add view** ×4–6 — from different poses (rotate the wrist, change tilt and
+   height: the *rotation diversity* between views is what makes the camera
+   offset observable) click the mark in the colour view, then Add view. Each
+   view stores the flange pose and the clicked point (5×5 median of valid
+   depth, `GET /api/point`).
+3. **Solve** — Levenberg–Marquardt on the six parameters of `T_flange_color`,
+   seeded from the bracket, then composed with the SDK's depth→colour
+   extrinsics into `T_flange_depth`. The table shows the pose, the Δ from the
+   seed, RMS + per-view residuals, rotation diversity and warnings (diversity
+   < 10°, RMS > 5 mm). Drop the worst view with × and re-solve.
+4. **Apply + save** — uses it immediately and writes
+   `captures/calibration/handeye_<cell>.json`; later starts load it
+   (precedence: `PERCEPTION_T_FLANGE_CAMERA` env > that file
+   (`PERCEPTION_HANDEYE_FILE` to relocate) > bracket seed). A solve with
+   warnings is refused unless forced (the page asks).
+
+Without a touch the mark is solved jointly (≥ 4 views) at some cost in
+conditioning. The synthetic test (`tests/test_calibrate.py`) recovers a known
+transform from noisy views to a few mm; the real check is Locate + Move
+landing on the object after applying.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
