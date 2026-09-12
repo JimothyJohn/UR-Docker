@@ -44,9 +44,12 @@ class FakeController:
         robot_mode: str = "RUNNING",
         safety_mode: str = "NORMAL",
         confirm_answer: str | None = "yes",
+        remote: bool = True,
     ):
         self.robot_mode = robot_mode
         self.safety_mode = safety_mode
+        # Dashboard `is in remote control` → "true"/"false" (control_mode REMOTE/LOCAL).
+        self.remote = remote
         # What the "operator" answers a pendant confirm dialog with: "yes",
         # "no", or None (no answer — simulates a timeout).
         self.confirm_answer = confirm_answer
@@ -82,6 +85,8 @@ class FakeController:
                 lines.append(f"Safetymode: {self.safety_mode}")
             elif cmd == "programState":
                 lines.append("STOPPED MotionDemo.urp")
+            elif cmd == "is in remote control":
+                lines.append("true" if self.remote else "false")
             elif cmd.startswith("load "):
                 lines.append(f"Loading program: /programs/{cmd[5:]}")
             elif cmd == "play":

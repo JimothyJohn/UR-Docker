@@ -31,6 +31,11 @@ from .handeye import DEFAULT_STANDOFF_M, HandEye, locate
 
 DEFAULT_APPROACH_VELOCITY = 0.1  # m/s — slow; this move follows a single click
 DEFAULT_APPROACH_ACCELERATION = 0.3  # m/s^2
+# A jog is one button press: cap the step so a mistyped unit can't send the arm
+# across the cell (the safety envelope's own relative cap is 1.0 m).
+MAX_JOG_STEP_M = 0.05
+MAX_JOG_STEP_RAD = 0.35
+DEFAULT_JOG_VELOCITY = 0.05
 
 
 class RobotLink:
@@ -105,6 +110,39 @@ class RobotLink:
                 "acceleration": float(acceleration),
             },
         )
+
+    # -- pilot actions (each one tool call; all safety-enveloped + audited) ----
+
+    def jog(self, delta: Sequence[float], *, velocity: float = DEFAULT_JOG_VELOCITY) -> dict:
+        """One relative base-frame nudge: ``[dx, dy, dz, drx, dry, drz]``,
+        each translation ≤ :data:`MAX_JOG_STEP_M`, each rotation ≤ :data:`MAX_JOG_STEP_RAD`."""
+        vals = [float(v) for v in delta]
+        if len(vals) != 6 or not all(math.isfinite(v) for v in vals):
+            raise ValueError("delta must be 6 finite numbers [dx, dy, dz, drx, dry, drz]")
+        if any(abs(v) > MAX_JOG_STEP_M for v in vals[:3]):
+            raise ValueError(f"a jog moves at most {MAX_JOG_STEP_M} m per axis (got {vals[:3]})")
+        if any(abs(v) > MAX_JOG_STEP_RAD for v in vals[3:]):
+            raise ValueError(f"a jog rotates at most {MAX_JOG_STEP_RAD} rad per axis (got {vals[3:]})")
+        if not any(vals):
+            raise ValueError("zero jog")
+        if not (0.0 < velocity <= 0.25):
+            raise ValueError("jog velocity must be within (0, 0.25] m/s")
+        return self._tool(
+            "ur_move_tcp",
+            {"pose": vals, "relative": True, "velocity": float(velocity), "acceleration": 0.3},
+        )
+
+    def bring_up(self) -> dict:
+        return self._tool("ur_bring_up")
+
+    def stop(self) -> dict:
+        return self._tool("ur_stop")
+
+    def freedrive(self, enable: bool) -> dict:
+        return self._tool("ur_freedrive", {"enable": bool(enable)})
+
+    def rtde_state(self, deep: bool = False) -> dict:
+        return self._tool("ur_rtde_state", {"deep": bool(deep)})
 
     def _tool(self, name: str, params: dict | None = None) -> dict:
         try:

@@ -27,6 +27,7 @@ urctl-mcp = "urctl.mcp_server:main"
 urctl-gui = "urctl.webapp:main"
 perception = "perception.cli:main"
 perception-gui = "perception.webapp:main"
+perception-mcp = "perception.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]

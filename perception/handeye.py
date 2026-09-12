@@ -19,9 +19,10 @@ Frames (all right-handed):
 
 ``p_base = T_base_flange · T_flange_depth · T_depth_color · p_color``.
 
-:data:`BRACKET_NOMINAL` is a *seed*: it is derived from the bracket geometry
-(``hardware/d435-tool-bracket/README.md`` §3, ``ARM_ANGLE_DEG = 0``) and the
-camera's published imager position, not from a calibration. Expect a few mm
+:data:`BRACKET_SEEDS` are *seeds*, one per print (``eseries`` / ``ur20``,
+picked by ``PERCEPTION_BRACKET``): derived from the bracket geometry
+(``hardware/d435-tool-bracket/README.md`` §3) and the camera's published
+imager position, not from a calibration. Expect a few mm
 and ~1° of error from a printed part; a hand-eye calibration replaces it via
 ``PERCEPTION_T_FLANGE_CAMERA`` (a UR pose ``[x, y, z, rx, ry, rz]`` of the depth
 frame in the flange frame, metres + rotation vector) or :meth:`HandEye.from_pose`.
@@ -37,16 +38,33 @@ from dataclasses import dataclass, replace
 
 from urctl.pose import Transform, Vec3
 
-# Bracket README §3 (Rev B), ARM_ANGLE_DEG = 90 — the camera hangs beside the
-# wrist on +Y (the tool-I/O connector side): camera axes in flange axes are
-# x_cam = −X, y_cam = −Y (image-down points at the mounting wall), z_cam = +Z
-# (optical axis out of the flange); depth origin (left imager) at
-# (17.5, 66.5, 1.7) mm — e-Series print: wall at r = 48…54 beside the Ø90
+# Bracket README §3 (Rev B.2), one seed per print (``hardware/d435-tool-bracket/
+# bracket.py`` VARIANTS; the numbers are ``out/build_info.json`` →
+# ``export.variants.<variant>.derived`` and the unit tests hold them to it).
+#
+# ``eseries`` (UR3e/UR5e/UR10e/UR16e, ISO-50 flange), ARM_ANGLE_DEG = 90 — the
+# camera hangs beside the wrist on +Y (the tool-I/O connector side): camera
+# axes in flange axes are x_cam = −X, y_cam = −Y (image-down points at the
+# mounting wall), z_cam = +Z (optical axis out of the flange); depth origin
+# (left imager) at (17.5, 66.5, 1.7) mm — wall at r = 48…54 beside the Ø90
 # wrist, front plate flush with the adapter's tool face (z = 6), zero-depth
 # plane 4.3 mm behind it (Intel's URDF: 4.2 glass + 0.1).
-BRACKET_NOMINAL = Transform.from_axes(
+BRACKET_NOMINAL_ESERIES = Transform.from_axes(
     (-1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (0.0175, 0.0665, 0.0017)
 )
+# ``ur20`` (UR20/UR30, ISO-50 + ISO-80 on a Ø96 plate): the wall is clocked
+# 45° off the M8 socket (UR20_ARM_ANGLE_DEG) and sits 5 mm further out (wall
+# r = 53…59), so the camera axes are the e-Series ones rotated −45° about Z and
+# the depth origin lands at (62.9, 38.2, 1.7) mm.
+_C45 = math.sqrt(0.5)
+BRACKET_NOMINAL_UR20 = Transform.from_axes(
+    (-_C45, _C45, 0.0), (-_C45, -_C45, 0.0), (0.0, 0.0, 1.0), (0.062932504, 0.038183766, 0.0017)
+)
+BRACKET_SEEDS: dict[str, Transform] = {"eseries": BRACKET_NOMINAL_ESERIES, "ur20": BRACKET_NOMINAL_UR20}
+DEFAULT_BRACKET = "eseries"
+# Kept for callers that predate the second print.
+BRACKET_NOMINAL = BRACKET_NOMINAL_ESERIES
+ENV_BRACKET = "PERCEPTION_BRACKET"
 ENV_T_FLANGE_CAMERA = "PERCEPTION_T_FLANGE_CAMERA"
 DEFAULT_STANDOFF_M = 0.10
 
@@ -87,22 +105,36 @@ class HandEye:
     ``depth_to_color`` (the SDK extrinsics) — everything needed to move a
     colour-frame point into the flange frame."""
 
-    flange_to_depth: Transform = BRACKET_NOMINAL
+    flange_to_depth: Transform = BRACKET_NOMINAL_ESERIES
     depth_to_color: Transform = Transform()
-    source: str = "bracket-nominal"
+    source: str = "bracket-nominal:eseries"
 
     @classmethod
     def from_pose(cls, pose: Sequence[float], *, source: str = "explicit") -> HandEye:
         return cls(Transform.from_pose(pose), Transform(), source)
 
     @classmethod
+    def for_bracket(cls, variant: str = DEFAULT_BRACKET) -> HandEye:
+        """The nominal seed for one of the two prints (``eseries`` / ``ur20``)."""
+        key = (variant or DEFAULT_BRACKET).strip().lower()
+        if key not in BRACKET_SEEDS:
+            raise ValueError(f"unknown bracket variant {variant!r}; one of {sorted(BRACKET_SEEDS)}")
+        return cls(BRACKET_SEEDS[key], Transform(), f"bracket-nominal:{key}")
+
+    @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> HandEye:
-        """:data:`ENV_T_FLANGE_CAMERA` if set (a calibration), else the bracket seed."""
+        """:data:`ENV_T_FLANGE_CAMERA` if set (a calibration), else the seed for
+        the bracket print named by :data:`ENV_BRACKET` (default ``eseries``)."""
         env = os.environ if env is None else env
         raw = env.get(ENV_T_FLANGE_CAMERA, "")
         if raw.strip():
             return cls.from_pose(parse_pose_text(raw), source=f"env:{ENV_T_FLANGE_CAMERA}")
-        return cls()
+        return cls.for_bracket(env.get(ENV_BRACKET, DEFAULT_BRACKET))
+
+    @property
+    def calibrated(self) -> bool:
+        """False while the seed is the printed-bracket nominal (mm + ~1° of error)."""
+        return not self.source.startswith("bracket-nominal")
 
     def with_extrinsics(self, ext: Mapping | None) -> HandEye:
         """Attach the camera's depth→colour extrinsics (from ``describe()``)."""
@@ -119,6 +151,7 @@ class HandEye:
     def as_dict(self) -> dict:
         return {
             "source": self.source,
+            "calibrated": self.calibrated,
             "flange_to_depth_pose": self.flange_to_depth.to_pose(),
             "depth_to_color_translation": list(self.depth_to_color.translation),
             "flange_to_color_pose": self.flange_to_color.to_pose(),

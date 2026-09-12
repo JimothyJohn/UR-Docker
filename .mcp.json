@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cell": {
+      "command": "uv",
+      "args": ["run", "perception-mcp"],
+      "env": {}
+    }
+  }
+}

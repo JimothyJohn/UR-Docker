@@ -77,6 +77,22 @@ target compute is a Jetson Orin next to the robot: `Dockerfile.perception` +
 `hardware/d435-tool-bracket/` (parametric CadQuery, STL/STEP, spec in its
 README; nominal `T_flange_camera` seed in §3).
 
+**The pilot's seat (cells, doctor, Pilot panel, MCP keys; `docs/realsense.md`
+§The pilot's seat, presentation in `docs/realsense-cell.html`):** a *cell*
+(`perception/cells/{sim,ur3,ur20}.env`, `--cell` / `UR_CELL`) is the one-word
+selector for robot host/platform/ports + bracket print (`PERCEPTION_BRACKET`
+→ `handeye.BRACKET_SEEDS`; the UR20 print is clocked 45°, so its seed differs).
+`perception doctor` is the pre-flight (SDK, camera, per-port reachability with
+platform-mismatch diagnosis, modes, TCP offset, hand-eye status; every failure
+carries its fix; also `GET /api/doctor` and the `cell_doctor` tool). The cockpit
+has a Pilot panel (bring-up/stop/freedrive, capped jog pad, events log) and
+`POST /api/snapshot` writes PNGs an agent can read. `perception-mcp` (`.mcp.json`)
+serves robot + `cam_*`/`cell_*` tools; the camera tools proxy the running
+cockpit because one process owns the USB camera. Windows bring-up:
+`scripts/setup-windows.ps1` + `scripts/cockpit.ps1`. **Keep
+`docs/realsense-cell.html` current** — it is the demo/explainer and has a dated
+field log; append to it when something is verified or changes.
+
 **Local GUI (`urctl gui` / `urctl-gui`):** a loopback-only web cockpit
 (`urctl/webapp.py` + `urctl/webui/index.html`, stdlib server, SSE telemetry at
 12.5 Hz, live FK arm view) whose every button dispatches through the same tool

@@ -196,6 +196,60 @@ segment — the approach keeps the current tool rotation; the segment's
 (the envelope's reach check is a sphere; PolyScope's IK is the final word,
 see *Cartesian moves and singularities* in CLAUDE.md).
 
+## The pilot's seat: cells, doctor, Pilot panel, and the keys for an agent
+
+Everything below is the day-to-day loop for testing on a laptop at the cell
+(the presentation-grade walkthrough is `docs/realsense-cell.html`).
+
+**Cell profiles** (`perception/cells/{sim,ur3,ur20}.env`, `--cell NAME` on any
+`perception` entry point or `UR_CELL=NAME`): one word selects the robot's
+host/platform/ports and the bracket print (`PERCEPTION_BRACKET=eseries|ur20`,
+which picks the hand-eye seed — `perception.handeye.BRACKET_SEEDS`). A variable
+already set in the shell wins over the file. The real cells ship with `UR_HOST`
+empty: fill in the controller IP once. `perception cells` prints them.
+
+**Doctor** (`perception --cell ur20 doctor [--stream] [--no-robot] [--json]`,
+`make doctor CELL=ur20`, the **Doctor** button in the cockpit, or the
+`cell_doctor` MCP tool): the pre-flight. SDK found + version, camera enumerated
+(USB link), optional stream check (fps, black-colour and sparse-depth
+symptoms), robot reachability per port with a **platform-mismatch** diagnosis
+(cell says PolyScope X but only the Dashboard port answers, or vice versa),
+robot/safety/control mode, telemetry, active TCP offset, hand-eye calibration
+status and bracket-vs-robot-model mismatch. Every failure carries the fix in
+words; the verdict is `READY`, `STATE ONLY (motion gated)` (Local mode /
+protective stop: reads work, moves won't) or `NOT READY`.
+
+**Pilot panel** (top of the cockpit's side column): live status chips
+(robot/safety/control/program), **Bring up**, **STOP**, **Freedrive**,
+**Doctor**, a base-frame **jog pad** (1–50 mm per press, each press one
+safety-checked `movel`, capped at 5 cm / 0.35 rad per axis server-side), the
+live TCP, and an **Events** log of everything the cockpit did (robot actions
+with their outcome and safety verdicts, segments, captures, camera errors).
+Endpoints: `POST /api/robot/{jog,bring_up,stop,freedrive}`, `GET /api/doctor`,
+`GET /api/events?after=N`, `POST /api/snapshot`.
+
+**The keys for an agent** (`perception-mcp --cell ur20`, wired in `.mcp.json`
+for Claude Code): one MCP server serving the whole `urctl` robot registry plus
+the camera family — `cam_info`, `cam_snapshot` (writes colour/depth/mask PNGs
+an agent can *look at*), `cam_segment`, `cam_nearest`, `cam_clear`,
+`cam_locate`, `cam_move_to_approach`, `cam_capture`, `cam_events`,
+`cell_doctor`, `cell_jog`. The camera tools go **through the running cockpit**
+(`PERCEPTION_COCKPIT_URL`, default `http://127.0.0.1:7621`) because one process
+must own the USB camera; with no cockpit up they answer with an in-band error
+and the command to start one, and the robot tools keep working. An unreachable
+controller is likewise reported in-band (`robot unreachable at …`), not as a
+server crash.
+
+**Windows laptop** (today's brain): `scripts\setup-windows.ps1` installs uv
+(winget `astral-sh.uv`), downloads and runs the Intel RealSense SDK 2.0
+installer from the librealsense GitHub release (`RealSense.SDK-WIN10-<ver>.exe`
+— the default install puts `realsense2.dll` under
+`C:\Program Files (x86)\Intel RealSense SDK 2.0\bin\x64\`, and the script
+sets `REALSENSE_LIB` to it), runs `uv sync` and the doctor. Then
+`scripts\cockpit.ps1 -Cell ur20` is the pilot's seat. No `sudo` story on
+Windows: librealsense uses the native backend there. **Not yet run on the
+laptop** as of 2026-09-12 — the first run is the verification.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

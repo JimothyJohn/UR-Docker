@@ -10,6 +10,7 @@ import pytest
 
 from perception.handeye import (
     BRACKET_NOMINAL,
+    BRACKET_SEEDS,
     ENV_T_FLANGE_CAMERA,
     HandEye,
     locate,
@@ -52,7 +53,7 @@ def test_extrinsics_move_the_colour_origin():
 
 
 def test_from_env_parses_a_calibration_or_falls_back():
-    assert HandEye.from_env({}).source == "bracket-nominal"
+    assert HandEye.from_env({}).source == "bracket-nominal:eseries"
     he = HandEye.from_env({ENV_T_FLANGE_CAMERA: "[0.07, -0.02, 0.04, 0, 0, 1.5707963]"})
     assert he.source.startswith("env:") and _close(he.flange_to_depth.translation, (0.07, -0.02, 0.04))
     assert _close(he.flange_to_depth.rotate((1, 0, 0)), (0, 1, 0), 1e-6)
@@ -82,7 +83,7 @@ def test_locate_geometry_tool_down():
     # the lateral camera offset on the bracket shows up in base xy (flange x flips under the π about Y)
     assert out["point_base_m"][0] == pytest.approx(0.5 - 0.0175, abs=1e-9)
     assert out["point_base_m"][1] == pytest.approx(0.0 + 0.0665, abs=1e-9)
-    assert out["handeye"]["source"] == "bracket-nominal" and out["standoff_m"] == 0.05
+    assert out["handeye"]["source"] == "bracket-nominal:eseries" and out["standoff_m"] == 0.05
 
 
 def test_locate_rejects_bad_input():
@@ -188,3 +189,36 @@ def test_robotlink_unreachable_is_an_error_not_a_crash():
     link = RobotLink(RobotConfig(host="127.0.0.1", dashboard_port=1, primary_port=1, timeout=0.2))
     loc = link.locate((0.0, 0.0, 0.3))
     assert not loc["ok"] and "unreachable" in loc["error"]
+
+
+def test_bracket_seeds_match_the_bracket_build_info():
+    """Both prints' seeds are the numbers ``bracket.py`` derived — the README §3
+    table and ``out/build_info.json`` are the source of truth, not this file."""
+    import json
+    from pathlib import Path
+
+    info = json.loads(
+        (Path(__file__).resolve().parents[1] / "hardware/d435-tool-bracket/out/build_info.json").read_text()
+    )
+    variants = info["export"]["variants"]
+    assert set(BRACKET_SEEDS) == set(variants)
+    for name, seed in BRACKET_SEEDS.items():
+        d = variants[name]["derived"]
+        origin_m = tuple(v / 1000.0 for v in d["depth_origin_flange_mm"])
+        assert _close(seed.translation, origin_m, tol=1e-6), name
+        axes = d["camera_axes_in_flange"]
+        assert _close(seed.rotate((1, 0, 0)), axes["x_cam"], tol=1e-5), name
+        assert _close(seed.rotate((0, 1, 0)), axes["y_cam"], tol=1e-5), name
+        assert _close(seed.rotate((0, 0, 1)), axes["z_cam"], tol=1e-5), name
+
+
+def test_bracket_variant_selection():
+    assert HandEye.for_bracket("ur20").source == "bracket-nominal:ur20"
+    assert HandEye.for_bracket("UR20 ").flange_to_depth is BRACKET_SEEDS["ur20"]
+    assert HandEye.from_env({"PERCEPTION_BRACKET": "ur20"}).source == "bracket-nominal:ur20"
+    assert not HandEye.from_env({"PERCEPTION_BRACKET": "ur20"}).calibrated
+    # an explicit calibration beats the bracket choice
+    he = HandEye.from_env({"PERCEPTION_BRACKET": "ur20", "PERCEPTION_T_FLANGE_CAMERA": "[0,0,0.1,0,0,0]"})
+    assert he.calibrated and he.source.startswith("env:")
+    with pytest.raises(ValueError, match="unknown bracket"):
+        HandEye.for_bracket("ur99")

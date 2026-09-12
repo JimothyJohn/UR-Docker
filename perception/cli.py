@@ -5,6 +5,8 @@
     perceive --depth-backend depth_anything capture
     perceive tools                         # dump the agent tool schemas (JSON)
     perceive call perceive_synthetic --json '{"width":320,"height":240}'
+    perceive --cell ur20 doctor            # pre-flight: SDK, camera, robot reachability + state
+    perceive cells                         # the shipped cell profiles (sim / ur3 / ur20)
     perceive rs-info                       # RealSense devices + SDK (needs librealsense2)
     perceive rs-capture --out captures     # one aligned RGB-D capture (+ nearest-object mask)
     perceive gui --fake                    # the RGB-D cockpit (synthetic scene; drop --fake for the camera)
@@ -24,6 +26,7 @@ import argparse
 import json
 import sys
 
+from .cell import ENV_CELL, apply_cell, list_cells
 from .config import PerceptionConfig
 from .pipeline import PerceptionPipeline
 from .tools import ToolError, call_tool, get_tool_schemas
@@ -45,6 +48,12 @@ def _emit(result: dict) -> int:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="perceive", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--cell",
+        default=None,
+        help=f"cell profile: {'|'.join(list_cells())} or a path to a .env file (default: ${ENV_CELL}); "
+        "sets UR_HOST/ports/bracket unless already set in the environment",
     )
     ap.add_argument(
         "--device", type=int, default=None, help="camera index (default: $PERCEPTION_DEVICE or 0)"
@@ -92,6 +101,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("tools", help="print the agent tool schemas as JSON")
+
+    sub.add_parser("cells", help="list the shipped cell profiles and what each sets")
+
+    dr = sub.add_parser("doctor", help="pre-flight checklist: SDK, camera, robot reachability + state")
+    dr.add_argument("--stream", action="store_true", help="also open the camera and judge frames")
+    dr.add_argument("--no-camera", action="store_true", help="skip the SDK/camera checks")
+    dr.add_argument("--no-robot", action="store_true", help="skip the controller checks")
+    dr.add_argument("--json", dest="as_json", action="store_true", help="machine-readable report")
+    dr.add_argument("--library", default=None, help="path to librealsense2 (default: $REALSENSE_LIB / auto)")
+    dr.add_argument(
+        "--cockpit-url",
+        default=f"http://127.0.0.1:{DEFAULT_PORT}",
+        help="report on a running cockpit at this URL (default: the local one)",
+    )
 
     ct = sub.add_parser("call", help="dispatch a perception tool by name")
     ct.add_argument("name")
@@ -226,11 +249,37 @@ def _realsense_command(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    try:
+        cell = apply_cell(args.cell)
+    except ValueError as exc:
+        print(f"--cell: {exc}", file=sys.stderr)
+        return 2
 
-    # `tools` needs no pipeline construction — print and exit.
+    # `tools` / `cells` need no pipeline construction — print and exit.
     if args.cmd == "tools":
         print(json.dumps(get_tool_schemas(), indent=2))
         return 0
+    if args.cmd == "cells":
+        from .cell import load_cell
+
+        print(json.dumps({"active": cell, "cells": {n: load_cell(n) for n in list_cells()}}, indent=2))
+        return 0
+    if args.cmd == "doctor":
+        from .doctor import run_doctor
+
+        report = run_doctor(
+            perception_config=_config_from_args(args),
+            camera=not args.no_camera,
+            stream=args.stream,
+            robot=not args.no_robot,
+            library=args.library,
+            cockpit_url=args.cockpit_url or None,
+        )
+        if args.as_json:
+            print(json.dumps(report.as_dict(), indent=2, default=str))
+        else:
+            print(report.render())
+        return 0 if report.ok else 1
     if args.cmd in ("rs-info", "rs-capture", "gui"):
         return _realsense_command(args)
 

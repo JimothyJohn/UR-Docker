@@ -42,11 +42,23 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
+from typing import Protocol
 
 from . import __version__
 from .config import RobotConfig
 from .robot import Robot
 from .tools import ToolError, call_tool, get_tool_schemas
+
+
+class ToolProvider(Protocol):
+    """An extra tool family for :class:`McpServer` (same plain-data shape as
+    :mod:`urctl.tools`: ``{name, description, input_schema}`` + a dispatcher)."""
+
+    def schemas(self) -> list[dict]: ...
+    def owns(self, name: str) -> bool: ...
+    def call(self, name: str, params: dict | None = None) -> dict: ...
+
 
 # The newest spec revision this server knows; echoed back only if the client
 # asks for something unknown (per spec, respond with a version you support).
@@ -68,8 +80,14 @@ class McpServer:
     no pipes required. :meth:`serve_stdio` is the production loop.
     """
 
-    def __init__(self, robot: Robot):
+    def __init__(self, robot: Robot, *, extra: Sequence[ToolProvider] = (), name: str = "urctl"):
+        """``extra`` providers add tool families beyond the robot registry (the
+        perception cockpit's ``cam_*`` tools); each must answer ``schemas()``,
+        ``owns(name)`` and ``call(name, params)``. ``name`` is what the client
+        sees in ``serverInfo``."""
         self.robot = robot
+        self.extra = list(extra)
+        self.name = name
 
     # -- JSON-RPC dispatch -----------------------------------------------------
 
@@ -116,14 +134,17 @@ class McpServer:
             # stable across revisions); fall back to the newest we know.
             "protocolVersion": params.get("protocolVersion") or FALLBACK_PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "urctl", "version": __version__},
+            "serverInfo": {"name": self.name, "version": __version__},
         }
 
     def _tools_list(self) -> dict:
+        schemas = list(get_tool_schemas())
+        for provider in self.extra:
+            schemas.extend(provider.schemas())
         return {
             "tools": [
                 {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
-                for t in get_tool_schemas()
+                for t in schemas
             ]
         }
 
@@ -132,7 +153,9 @@ class McpServer:
         if not name:
             raise ToolError("tools/call requires a 'name'")
         try:
-            result = call_tool(self.robot, name, params.get("arguments") or {})
+            args = params.get("arguments") or {}
+            provider = next((p for p in self.extra if p.owns(name)), None)
+            result = provider.call(name, args) if provider is not None else call_tool(self.robot, name, args)
         except ToolError as exc:
             # Tool-level problems are reported in-band (isError) so the model
             # can read and correct them, per the MCP tools contract.
@@ -140,6 +163,11 @@ class McpServer:
                 "content": [{"type": "text", "text": json.dumps({"ok": False, "error": str(exc)})}],
                 "isError": True,
             }
+        except OSError as exc:
+            # The controller is unreachable: that is a fact about the cell the
+            # model should read (and run cell_doctor on), not a server crash.
+            body = {"ok": False, "error": f"robot unreachable at {self.robot.config.host}: {exc}"}
+            return {"content": [{"type": "text", "text": json.dumps(body)}], "isError": True}
         return {
             "content": [{"type": "text", "text": json.dumps(result, default=str)}],
             "isError": not result.get("ok", True),

@@ -395,7 +395,9 @@ def test_robot_panel_info_and_locate_needs_a_segment(robot_server):
     base, app, fake = robot_server
     _, _, body = get(base, "/api/info")
     info = json.loads(body)
-    assert info["robot"]["host"] == "fake-ur" and info["robot"]["handeye"]["source"] == "bracket-nominal"
+    assert (
+        info["robot"]["host"] == "fake-ur" and info["robot"]["handeye"]["source"] == "bracket-nominal:eseries"
+    )
     # the synthetic camera's identity extrinsics were attached on open
     assert info["robot"]["handeye"]["depth_to_color_translation"] == [0.0, 0.0, 0.0]
     _, _, body = get(base, "/api/robot")
@@ -486,3 +488,111 @@ def test_gui_main_robot_flags(monkeypatch, tmp_path):
     assert isinstance(link, RobotLink) and link.config.host == "10.1.2.3" and link.dry_run
     monkeypatch.setenv("UR_HOST", "10.9.9.9")
     assert gui_main(common) == 0 and calls["robot"].config.host == "10.9.9.9" and not calls["robot"].dry_run
+
+
+# ---- pilot endpoints: jog / bring-up / stop / freedrive / doctor / events / snapshot -----
+
+
+@pytest.fixture
+def pilot(tmp_path):
+    from perception.robotlink import RobotLink
+    from urctl.config import RobotConfig
+
+    app = ViewerApp(
+        SyntheticRgbdCamera(width=64, height=48, fps=0),
+        config=PerceptionConfig(),
+        store=CaptureStore(tmp_path / "caps"),
+        robot=RobotLink(RobotConfig(host="fake-ur"), dry_run=True),
+    )
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), ViewerHandler)
+    srv.daemon_threads = True
+    srv.app = app  # type: ignore[attr-defined]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    app.start()
+    deadline = time.monotonic() + 5
+    while app.latest()[1] is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    yield f"http://127.0.0.1:{srv.server_address[1]}", app, tmp_path
+    srv.shutdown()
+    srv.server_close()
+    app.stop()
+
+
+def test_jog_is_capped_and_relative(pilot):
+    base, app, _ = pilot
+    status, j = post(base, "/api/robot/jog", {"delta": [0.01, 0, 0, 0, 0, 0]})
+    assert status == 200 and j["ok"] and j["dry_run"] and j["action"] == "move_tcp"
+    rec = app.robot.robot.audit.records[-1]
+    assert rec.action == "move_tcp" and rec.args["relative"] is True and rec.args["pose"][0] == 0.01
+    for bad in ([0.06, 0, 0, 0, 0, 0], [0, 0, 0, 0.5, 0, 0], [0, 0, 0, 0, 0, 0], [1, 2, 3]):
+        status, j = post(base, "/api/robot/jog", {"delta": bad})
+        assert status == 400 and not j["ok"], bad
+    status, j = post(base, "/api/robot/jog", {"delta": [0.01, 0, 0, 0, 0, 0], "velocity": 0.9})
+    assert status == 400 and "velocity" in j["error"]
+    status, j = post(base, "/api/robot/jog", {"delta": ["a", 0, 0, 0, 0, 0]})
+    assert status == 400
+
+
+def test_bring_up_stop_freedrive_are_logged_events(pilot):
+    base, app, _ = pilot
+    for route, body in (
+        ("/api/robot/bring_up", {}),
+        ("/api/robot/stop", {}),
+        ("/api/robot/freedrive", {"enable": True}),
+    ):
+        status, j = post(base, route, body)
+        assert status == 200 and j["ok"] and j["dry_run"], route
+    status, _, body = get(base, "/api/events")
+    ev = json.loads(body)["events"]
+    msgs = [e["message"] for e in ev if e["kind"] == "robot"]
+    assert any(m.startswith("bring up") for m in msgs) and "stop" in msgs and "freedrive on" in msgs
+    assert all(e["ok"] for e in ev if e["kind"] == "robot")
+    # tailing: only events after `after`
+    last = ev[-1]["seq"]
+    status, _, body = get(base, f"/api/events?after={last}")
+    assert json.loads(body)["events"] == []
+    with pytest.raises(urllib.error.HTTPError) as ei:
+        get(base, "/api/events?after=x")
+    assert ei.value.code == 400
+
+
+def test_doctor_endpoint_reports_the_live_stream_and_the_robot(pilot):
+    base, app, _ = pilot
+    status, _, body = get(base, "/api/doctor")
+    doc = json.loads(body)
+    names = {c["name"]: c for c in doc["checks"]}
+    assert names["stream"]["ok"] is True and "synthetic" in names["stream"]["detail"]
+    # a dry-run link to "fake-ur" is unreachable → robot.reach fails with a fix, no crash
+    assert names["robot.reach"]["ok"] is False and names["robot.reach"]["fix"]
+    status, _, body = get(base, "/api/doctor?robot=0")
+    assert "robot.reach" not in {c["name"] for c in json.loads(body)["checks"]}
+
+
+def test_snapshot_writes_viewable_pngs(pilot):
+    base, app, tmp_path = pilot
+    from perception.pngio import load_png
+
+    status, j = post(base, "/api/snapshot", {"dir": str(tmp_path / "s"), "name": "look"})
+    assert status == 200 and j["ok"] and j["features"] is None
+    w, h, ch, data = load_png(j["color_png"])
+    assert (w, h, ch) == (64, 48, 3) and len(data) == 64 * 48 * 3
+    w, h, ch, data = load_png(j["depth_png"])
+    assert (w, h, ch) == (64, 48, 3) and any(data)  # colourised, not blank
+    # with a segment active the mask is written and the features ride along
+    post(base, "/api/segment", {"x": 32, "y": 24})
+    status, j = post(base, "/api/snapshot", {"dir": str(tmp_path / "s"), "name": "look2"})
+    assert status == 200 and Path(j["mask_png"]).exists() and j["features"]["area_px"] > 0
+    for bad in ({"name": "../x"}, {"name": ""}, {"dir": 3}):
+        status, j = post(base, "/api/snapshot", bad)
+        assert status == 400, bad
+
+
+def test_pilot_routes_need_a_robot_link(server):
+    base, _, _ = server  # the plain fixture has no robot link
+    for route in ("/api/robot/jog", "/api/robot/bring_up", "/api/robot/stop", "/api/robot/freedrive"):
+        status, j = post(base, route, {"delta": [0.01, 0, 0, 0, 0, 0], "enable": True})
+        assert status == 400 and "no robot link" in j["error"], route
+    status, _, body = get(base, "/api/doctor")
+    assert "robot.reach" not in {c["name"] for c in json.loads(body)["checks"]}
+    status, _, body = get(base, "/api/info")
+    assert json.loads(body)["events_seq"] >= 1

@@ -74,6 +74,21 @@
            border-radius: 5px; padding: 8px 12px; font-size: 13px; display: none; max-width: 420px; }
   #toast.show { display: block; }
   ul.sets { margin: 0; padding-left: 18px; font-size: 12px; }
+  /* pilot */
+  .pilot { display: flex; flex-direction: column; gap: 8px; }
+  .status { display: flex; gap: 6px; flex-wrap: wrap; }
+  .jog { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .jog button { padding: 6px 4px; font-size: 12px; }
+  .jog .axis { text-align: center; font-size: 11px; color: var(--muted); align-self: center; letter-spacing: .1em; }
+  select { background: var(--inset); color: var(--strong); border: 1px solid var(--line); border-radius: 4px; padding: 5px 6px; font-size: 12px; }
+  ul.checks, ul.events { margin: 0; padding: 0; list-style: none; font-size: 11.5px; }
+  ul.checks li, ul.events li { padding: 3px 0; border-bottom: 1px solid var(--line-soft); display: flex; gap: 6px; align-items: baseline; }
+  ul.checks li .m, ul.events li .m { flex: 0 0 auto; font-weight: 700; font-family: "IBM Plex Mono", monospace; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .crit { color: var(--crit); } .info { color: var(--muted); }
+  ul.checks li .fix { display: block; color: var(--warn); font-size: 11px; }
+  ul.events { max-height: 180px; overflow: auto; }
+  ul.events li .t { color: var(--faint); font-family: "IBM Plex Mono", monospace; flex: 0 0 auto; }
+  button.crit { background: var(--crit-soft); border-color: var(--crit); color: var(--crit); }
 </style>
 </head>
 <body>
@@ -86,6 +101,7 @@
     <span id="chipFps" class="chip">0.0 fps</span>
     <span id="chipSeq" class="chip">seq 0</span>
     <span id="chipSeg" class="chip">seg ?</span>
+    <span id="chipRobot" class="chip" title="robot_mode · safety_mode · control_mode">robot ?</span>
     <button id="pauseBtn" title="space">Pause</button>
   </div>
 </header>
@@ -121,6 +137,33 @@
   </section>
 
   <aside id="side" class="panel">
+    <div class="head"><h2>Pilot</h2><div class="right"><span id="cellMeta">–</span></div></div>
+    <div class="body pilot" id="pilotSec">
+      <div class="status">
+        <span id="stMode" class="chip">mode ?</span><span id="stSafety" class="chip">safety ?</span>
+        <span id="stControl" class="chip">control ?</span><span id="stProgram" class="chip">program ?</span>
+      </div>
+      <div class="row">
+        <button id="bringUpBtn" class="primary" title="power on + brake release (needs Remote)">Bring up</button>
+        <button id="stopBtn" class="crit" title="stop the running program / motion">STOP</button>
+        <button id="freedriveBtn" title="hand-guide the arm">Freedrive</button>
+        <button id="doctorBtn" title="run the pre-flight checks">Doctor</button>
+        <label style="margin-left:auto"><input id="livePoll" type="checkbox" checked> live</label>
+      </div>
+      <div class="row">
+        <label>jog step</label>
+        <select id="jogStep"><option value="0.001">1 mm</option><option value="0.005">5 mm</option><option value="0.01" selected>10 mm</option><option value="0.025">25 mm</option><option value="0.05">50 mm</option></select>
+        <span class="hint">base frame · one safety-checked movel per press</span>
+      </div>
+      <div class="jog">
+        <button data-jog="0,1,0" title="+Y">+Y</button><button data-jog="0,0,1" title="+Z (up)">+Z</button><button data-jog="1,0,0" title="+X">+X</button>
+        <button data-jog="0,-1,0" title="−Y">−Y</button><button data-jog="0,0,-1" title="−Z (down)">−Z</button><button data-jog="-1,0,0" title="−X">−X</button>
+      </div>
+      <div id="tcpLine" class="hint mono">tcp –</div>
+      <ul id="checks" class="checks" hidden></ul>
+      <div class="head" style="padding:7px 0 0;border:0"><h2>Events</h2><div class="right"><span id="evMeta">–</span></div></div>
+      <ul id="events" class="events"><li class="hint">nothing yet</li></ul>
+    </div>
     <div class="head"><h2>Object</h2><div class="right"><span id="segMeta">–</span></div></div>
     <div class="body">
       <div class="row">
@@ -430,6 +473,61 @@
     tb.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
   }
 
+  // ---- pilot ----------------------------------------------------------------------------
+  let lastEvent = 0, freedriveOn = false, stateBusy = false;
+  const cls = (ok) => ok === true ? 'ok' : (ok === false ? 'crit' : 'warn');
+  function chip(id, text, klass) { const e = $(id); e.textContent = text; e.className = 'chip ' + (klass || ''); }
+  async function robotState() {
+    if (!robotInfo || stateBusy || !$('livePoll').checked) return; stateBusy = true;
+    try {
+      const j = await post('/api/robot/state');
+      const rm = j.robot_mode || '?', sm = j.safety_mode || '?', cm = j.control_mode || '?', ps = j.program_state || '?';
+      chip('stMode', rm, rm.includes('RUNNING') ? 'ok' : 'warn');
+      chip('stSafety', sm, (sm.includes('NORMAL') || sm.includes('REDUCED')) ? 'ok' : 'crit');
+      chip('stControl', cm, cm === 'REMOTE' ? 'ok' : 'warn');
+      chip('stProgram', ps, ps.includes('PLAYING') ? 'ok' : '');
+      chip('chipRobot', `${rm.replace('Robotmode: ', '')} · ${sm} · ${cm}`, rm.includes('RUNNING') && cm === 'REMOTE' && (sm.includes('NORMAL') || sm.includes('REDUCED')) ? 'ok' : 'warn');
+      $('tcpLine').textContent = j.tcp ? `tcp ${vec(j.tcp)}` : (j.joints ? `joints ${vec(j.joints, 2)}` : 'tcp – (no telemetry)');
+    } catch (e) { chip('chipRobot', /unreachable|refused|timed out/i.test(e.message) ? 'robot unreachable' : `robot: ${e.message.slice(0, 40)}`, 'crit'); $('chipRobot').title = e.message; }
+    finally { stateBusy = false; }
+  }
+  async function pilot(url, body, label) {
+    try { const j = await post(url, body || {}); toast(j.ok === false ? `${label}: ${j.error || j.reply || JSON.stringify(j.safety && j.safety.violations || '') || 'refused'}` : `${label} ok`, 4000); events(); robotState(); return j; }
+    catch (e) { toast(`${label}: ${e.message}`, 6000); events(); }
+  }
+  async function jog(dir) {
+    const step = parseFloat($('jogStep').value) || 0.01;
+    const d = dir.split(',').map(Number).map(v => v * step); await pilot('/api/robot/jog', { delta: [d[0], d[1], d[2], 0, 0, 0] }, `jog ${dir}`);
+  }
+  async function doctor() {
+    $('doctorBtn').disabled = true; const ul = $('checks'); ul.hidden = false; ul.innerHTML = '<li class="hint">running…</li>';
+    try {
+      const j = await (await fetch('/api/doctor')).json();
+      ul.innerHTML = j.checks.map(c => `<li><span class="m ${cls(c.ok)}">${c.ok === true ? 'ok' : (c.ok === false ? 'FAIL' : '--')}</span><span><b>${c.name}</b> ${c.detail}${c.ok === false && c.fix ? `<span class="fix">fix: ${c.fix}</span>` : ''}</span></li>`).join('')
+        + `<li><span class="m ${j.motion_ok ? 'ok' : (j.ok ? 'warn' : 'crit')}">${j.motion_ok ? 'READY' : (j.ok ? 'STATE ONLY' : 'NOT READY')}</span><span class="hint">${j.elapsed_s}s · click to hide</span></li>`;
+    } catch (e) { ul.innerHTML = `<li class="crit">doctor: ${e.message}</li>`; }
+    finally { $('doctorBtn').disabled = false; }
+  }
+  async function events() {
+    try {
+      const j = await (await fetch(`/api/events?after=${lastEvent}`)).json();
+      if (!j.events.length) return;
+      const ul = $('events'); if (lastEvent === 0) ul.innerHTML = '';
+      for (const e of j.events) {
+        const t = new Date(e.ts * 1000).toLocaleTimeString([], { hour12: false });
+        const li = document.createElement('li'); li.innerHTML = `<span class="t">${t}</span><span class="m ${cls(e.ok)}">${e.kind}</span><span>${e.message}</span>`;
+        ul.appendChild(li); lastEvent = e.seq;
+      }
+      while (ul.children.length > 200) ul.removeChild(ul.firstChild);
+      ul.scrollTop = ul.scrollHeight; $('evMeta').textContent = `#${lastEvent}`;
+    } catch (e) {}
+  }
+  $('bringUpBtn').onclick = () => pilot('/api/robot/bring_up', {}, 'bring up');
+  $('stopBtn').onclick = () => pilot('/api/robot/stop', {}, 'stop');
+  $('freedriveBtn').onclick = async () => { freedriveOn = !freedriveOn; const j = await pilot('/api/robot/freedrive', { enable: freedriveOn }, `freedrive ${freedriveOn ? 'on' : 'off'}`); if (!j || j.ok === false) freedriveOn = !freedriveOn; $('freedriveBtn').className = freedriveOn ? 'primary' : ''; };
+  $('doctorBtn').onclick = doctor; $('checks').onclick = () => { $('checks').hidden = true; };
+  document.querySelectorAll('button[data-jog]').forEach(b => b.onclick = () => jog(b.dataset.jog));
+
   // ---- capture ----------------------------------------------------------------------
   async function capture() {
     try {
@@ -455,6 +553,9 @@
       $('chipSeg').textContent = `seg ${j.segmenter}`;
       robotInfo = j.robot; $('robotSec').hidden = !robotInfo;
       if (robotInfo) $('robotMeta').textContent = `${robotInfo.host}${robotInfo.dry_run ? ' · dry-run' : ''} · ${robotInfo.handeye.source}`;
+      const cell = j.cell || {};
+      $('cellMeta').textContent = robotInfo ? `${cell.UR_CELL ? 'cell ' + cell.UR_CELL + ' · ' : ''}${robotInfo.platform} ${robotInfo.host}${robotInfo.dry_run ? ' · dry-run' : ''} · bracket ${cell.PERCEPTION_BRACKET || 'eseries'}` : 'no robot (--no-robot)';
+      document.querySelectorAll('#pilotSec button, #pilotSec select').forEach(el => { if (el.id !== 'doctorBtn') el.disabled = !robotInfo; });
       if (j.last_error && !j.frame) banner(j.last_error);
       const K = (c.intrinsics || {}).color, s = c.stream || {};
       const dp = c.depth || {}, ta = dp.tuning_applied || {}, tun = Object.keys(ta).map(k => `${k}=${ta[k].ok ? ta[k].value : 'x'}`).join(' ');
@@ -478,6 +579,7 @@
     else if (ev.key === ' ') { ev.preventDefault(); $('pauseBtn').click(); }
   });
   info(); setInterval(info, 2000); refreshSets(); loop();
+  setTimeout(robotState, 300); setInterval(robotState, 2500); events(); setInterval(events, 1500);
 })();
 </script>
 </body>

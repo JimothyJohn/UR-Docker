@@ -29,6 +29,19 @@ API:
                                       (reads the live flange pose; no motion).
   * ``POST /api/robot/move``          ``{pose, velocity?}`` — safety-validated
                                       ``movel`` to that approach pose.
+  * ``POST /api/robot/jog``           ``{delta:[dx,dy,dz,drx,dry,drz], velocity?}`` one
+                                      relative base-frame nudge (≤ 5 cm / 0.35 rad per axis).
+  * ``POST /api/robot/bring_up`` / ``/api/robot/stop`` / ``/api/robot/freedrive`` ``{enable}``
+  * ``GET  /api/doctor``              the pre-flight report (:mod:`perception.doctor`)
+                                      for the robot side; the camera side is this
+                                      process's own stream stats.
+  * ``GET  /api/events?after=N``      the cockpit's event log (robot actions,
+                                      segments, captures, camera errors) — what an
+                                      agent or a human reads to see what just happened.
+  * ``POST /api/snapshot`` ``{dir?, name?}`` write the latest frame as
+                                      ``<name>_color.png`` + ``<name>_depth.png`` (colourised)
+                                      to a directory and return the paths — the
+                                      "give the agent eyes" call.
   * ``POST /api/capture``  ``{name, include_mask}`` save color/depth(/mask/meta).
   * ``GET  /api/captures``            what's in the capture root.
   * ``POST /api/clear``               drop the current mask.
@@ -53,14 +66,17 @@ import threading
 import time
 import traceback
 import webbrowser
+from collections import deque
 from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .capture import CaptureStore
+from .capture import CaptureStore, validate_name
+from .cell import describe_cell
 from .config import PerceptionConfig
 from .factory import SEGMENT_BACKENDS, make_segmenter
+from .pngio import encode_png
 from .realsense import (
     DEFAULT_DEPTH_FILTERS,
     LASER_MAX,
@@ -77,8 +93,39 @@ from .segment import Mask, StubSegmenter, extract_features, normalize_box
 
 DEFAULT_PORT = 7621
 DEFAULT_CAPTURE_ROOT = "captures"
+DEFAULT_SNAPSHOT_DIR = "captures/snapshots"
 REOPEN_DELAY_S = 1.0
 REOPEN_MAX_DELAY_S = 30.0
+EVENT_LOG_SIZE = 500
+
+
+class EventLog:
+    """A bounded, numbered log of what the cockpit did — one line per robot
+    action, segment, capture, or camera error. ``/api/events?after=N`` tails
+    it, the page shows it, and the ``cam_events`` MCP tool reads it, so a
+    human and an agent looking at the same cockpit see the same history."""
+
+    def __init__(self, size: int = EVENT_LOG_SIZE):
+        self._items: deque[dict] = deque(maxlen=size)
+        self._seq = 0
+        self._lock = threading.Lock()
+
+    def add(self, kind: str, message: str, *, ok: bool | None = None, data: dict | None = None) -> dict:
+        with self._lock:
+            self._seq += 1
+            item = {"seq": self._seq, "ts": time.time(), "kind": kind, "ok": ok, "message": message}
+            if data:
+                item["data"] = data
+            self._items.append(item)
+            return item
+
+    def since(self, after: int = 0, limit: int = 200) -> list[dict]:
+        with self._lock:
+            return [i for i in self._items if i["seq"] > after][-limit:]
+
+    @property
+    def seq(self) -> int:
+        return self._seq
 
 
 def reopen_delay(failures: int) -> float:
@@ -128,6 +175,8 @@ class ViewerApp:
         self.mask_seq = 0
         self.features: dict | None = None
         self._fps_window: list[float] = []
+        self.events = EventLog()
+        self._last_logged_error: str | None = None
 
     # -- lifecycle -------------------------------------------------------------
 
@@ -161,12 +210,21 @@ class ViewerApp:
                     opened = True
                     failures = 0
                     self.last_error = None
+                    self._last_logged_error = None
+                    desc = self.camera.describe()
+                    dev = desc.get("device") or {}
+                    self.events.add(
+                        "camera", f"opened {desc.get('kind')} {dev.get('name') or ''}".strip(), ok=True
+                    )
                     if self.robot is not None:
-                        self.robot.attach_camera(self.camera.describe())  # depth→colour extrinsics
+                        self.robot.attach_camera(desc)  # depth→colour extrinsics
                 frame = self.camera.read()
             except Exception as exc:
                 hint = platform_hint(exc) if isinstance(exc, RealSenseError) else ""
                 self.last_error = f"{type(exc).__name__}: {exc}" + (f" — {hint}" if hint else "")
+                if self.last_error != self._last_logged_error:  # once per distinct failure, not per retry
+                    self.events.add("camera", self.last_error, ok=False)
+                    self._last_logged_error = self.last_error
                 try:
                     self.camera.close()
                 except Exception:
@@ -232,7 +290,113 @@ class ViewerApp:
             "frame": frame.summary() if frame else None,
             "has_mask": self.mask is not None,
             "robot": self.robot.describe() if self.robot is not None else None,
+            "cell": describe_cell(),
+            "events_seq": self.events.seq,
         }
+
+    # -- pilot: robot actions, doctor, events, snapshots -----------------------------
+
+    def _robot_action(self, name: str, fn, *, summary) -> dict:
+        """Run one robot action and log its outcome as an event."""
+        try:
+            result = fn()
+        except Exception as exc:
+            self.events.add("robot", f"{name}: {type(exc).__name__}: {exc}", ok=False)
+            raise
+        ok = bool(result.get("ok", True)) if isinstance(result, dict) else None
+        text = summary(result) if callable(summary) else str(summary)
+        if isinstance(result, dict) and not ok:
+            err = result.get("error") or result.get("reply") or ""
+            viol = (result.get("safety") or {}).get("violations")
+            if viol:
+                err = f"{err} safety: {viol}".strip()
+            text = f"{text}: {err}".rstrip(": ")
+        self.events.add("robot", text, ok=ok, data={"action": name})
+        return result
+
+    def robot_jog(self, delta: Sequence[float], velocity: float | None = None) -> dict:
+        link = self._link()
+        kwargs = {} if velocity is None else {"velocity": float(velocity)}
+        mm = [round(v * 1000.0, 1) for v in delta[:3]]
+        return self._robot_action("jog", lambda: link.jog(delta, **kwargs), summary=f"jog {mm} mm")
+
+    def robot_bring_up(self) -> dict:
+        link = self._link()
+        return self._robot_action(
+            "bring_up",
+            link.bring_up,
+            summary=lambda r: f"bring up → {r.get('robot_mode', r.get('reply', ''))}",
+        )
+
+    def robot_stop(self) -> dict:
+        link = self._link()
+        return self._robot_action("stop", link.stop, summary="stop")
+
+    def robot_freedrive(self, enable: bool) -> dict:
+        link = self._link()
+        return self._robot_action(
+            "freedrive", lambda: link.freedrive(enable), summary=f"freedrive {'on' if enable else 'off'}"
+        )
+
+    def doctor(self, *, robot: bool = True) -> dict:
+        """The pre-flight report for this cockpit's cell. The camera is *this
+        process's* (already open), so the SDK/device checks are replaced by the
+        live stream stats; the robot side runs the real checks."""
+        from .doctor import Check, run_doctor
+
+        report = run_doctor(
+            robot_config=self.robot.config if (self.robot is not None and robot) else None,
+            camera=False,
+            robot=self.robot is not None and robot,
+            robot_factory=(lambda _cfg: self.robot.robot) if self.robot is not None else None,
+        )
+        seq, frame = self.latest()
+        fps = self.fps()
+        stalled = frame is None or (fps < 1.0 and self.frames_read > 0)
+        report.checks.insert(
+            1,
+            Check(
+                "stream",
+                not stalled and self.last_error is None,
+                f"{self.camera.describe().get('kind')} camera: {fps:.1f} fps, seq {seq}, "
+                f"{self.frames_read} frames read"
+                + (f"; last error: {self.last_error}" if self.last_error else ""),
+                fix=self.last_error or "no frames yet — wait for the camera to open, or check the USB link",
+            ),
+        )
+        return report.as_dict()
+
+    def snapshot(self, directory: str | None = None, name: str | None = None) -> dict:
+        """Write the latest frame (and the mask, if any) as viewable PNGs and
+        return their paths plus the frame summary and current features."""
+        seq, frame = self.latest()
+        if frame is None:
+            raise RuntimeError("no frame yet" + (f" ({self.last_error})" if self.last_error else ""))
+        base = Path(directory or DEFAULT_SNAPSHOT_DIR)
+        stem = validate_name(name or "snapshot")
+        base.mkdir(parents=True, exist_ok=True)
+        color_path = base / f"{stem}_color.png"
+        depth_path = base / f"{stem}_depth.png"
+        color_path.write_bytes(
+            encode_png(frame.color.width, frame.color.height, frame.color.channels, frame.color.data)
+        )
+        depth_path.write_bytes(colourise_depth_png(frame))
+        out = {
+            "ok": True,
+            "seq": seq,
+            "color_png": str(color_path),
+            "depth_png": str(depth_path),
+            "frame": frame.summary(),
+            # The features describe the mask's frame (mask_seq), which may lag `seq`.
+            "features": self.features if self.mask is not None else None,
+        }
+        if self.mask is not None and self.mask.area:
+            mask_path = base / f"{stem}_mask.png"
+            mask_path.write_bytes(self.mask.to_png())
+            out["mask_png"] = str(mask_path)
+            out["mask_seq"] = self.mask_seq
+        self.events.add("snapshot", f"snapshot → {color_path}", ok=True)
+        return out
 
     # -- robot -------------------------------------------------------------------------
 
@@ -253,11 +417,27 @@ class ViewerApp:
                 raise ValueError("segment an object with depth first (no camera point to send)")
             point_m = self.features["point_m"]
         kwargs = {} if standoff_m is None else {"standoff_m": float(standoff_m)}
-        return link.locate(point_m, **kwargs)
+        return self._robot_action(
+            "locate",
+            lambda: link.locate(point_m, **kwargs),
+            summary=lambda r: (
+                "locate → base "
+                + str([round(v, 3) for v in r.get("point_base_m", [])] if r.get("ok") else "failed")
+            ),
+        )
 
     def robot_move(self, pose: Sequence[float], velocity: float | None = None) -> dict:
+        link = self._link()
         kwargs = {} if velocity is None else {"velocity": float(velocity)}
-        return self._link().move(pose, **kwargs)
+        return self._robot_action(
+            "move",
+            lambda: link.move(pose, **kwargs),
+            summary=lambda r: (
+                f"move to {[round(v, 3) for v in pose[:3]]} → landed"
+                if r.get("ok")
+                else f"move to {[round(v, 3) for v in pose[:3]]} refused"
+            ),
+        )
 
     def segment(self, x: int | None = None, y: int | None = None, box: Sequence[float] | None = None) -> dict:
         """Segment the latest frame from a click (``x, y``), a dragged ``box``
@@ -303,6 +483,13 @@ class ViewerApp:
         feats = extract_features(mask, frame)
         self.mask, self.mask_frame, self.mask_seq = mask, frame, seq
         self.features = feats.as_dict() if feats else None
+        pt = self.features.get("point_m") if self.features else None
+        self.events.add(
+            "segment",
+            f"segment {prompt} → {mask.area} px"
+            + (f", point {[round(v, 3) for v in pt]} m" if pt else ", no depth"),
+            ok=bool(mask.area),
+        )
         return {
             "ok": True,
             "seq": seq,
@@ -331,6 +518,9 @@ class ViewerApp:
             name, frame, mask=mask, features=feats, device=self.camera.describe().get("device", {})
         )
         result["with_mask"] = mask is not None
+        self.events.add(
+            "capture", f"capture {name} #{result.get('index', '?')}" + (" +mask" if mask else ""), ok=True
+        )
         return result
 
     def captures(self) -> dict:
@@ -388,6 +578,18 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._guarded(self.app.info)
         elif route == "/api/captures":
             self._guarded(self.app.captures)
+        elif route == "/api/doctor":
+            self._guarded(lambda: self.app.doctor(robot=qs.get("robot", ["1"])[0] not in ("0", "false")))
+        elif route == "/api/events":
+            try:
+                after = int(qs.get("after", ["0"])[0])
+                limit = min(500, max(1, int(qs.get("limit", ["200"])[0])))
+            except ValueError:
+                self._send_json({"ok": False, "error": "after/limit must be integers"}, status=400)
+                return
+            self._send_json(
+                {"ok": True, "seq": self.app.events.seq, "events": self.app.events.since(after, limit)}
+            )
         elif route == "/api/robot":
             self._guarded(
                 lambda: {"ok": True, "robot": self.app.robot.describe() if self.app.robot else None}
@@ -450,8 +652,88 @@ class ViewerHandler(BaseHTTPRequestHandler):
                     _number(payload, "velocity") if "velocity" in payload else None,
                 )
             )
+        elif route == "/api/robot/jog":
+            self._guarded(
+                lambda: self.app.robot_jog(
+                    _vector(payload, "delta", 6),
+                    _number(payload, "velocity") if "velocity" in payload else None,
+                )
+            )
+        elif route == "/api/robot/bring_up":
+            self._guarded(self.app.robot_bring_up)
+        elif route == "/api/robot/stop":
+            self._guarded(self.app.robot_stop)
+        elif route == "/api/robot/freedrive":
+            self._guarded(lambda: self.app.robot_freedrive(bool(payload.get("enable", False))))
+        elif route == "/api/snapshot":
+            self._guarded(
+                lambda: self.app.snapshot(
+                    _optional_str(payload, "dir"),
+                    _optional_str(payload, "name"),
+                )
+            )
         else:
             self._send_json({"ok": False, "error": f"no route {route}"}, status=404)
+
+
+def _optional_str(payload: dict, key: str) -> str | None:
+    v = payload.get(key)
+    if v is None:
+        return None
+    if not isinstance(v, str) or not v.strip():
+        raise ValueError(f"{key} must be a non-empty string")
+    return v
+
+
+# Turbo-like anchors, interpolated to 256 entries: index 0 = near, 255 = far.
+_DEPTH_ANCHORS = (
+    (48, 18, 59),
+    (70, 107, 229),
+    (27, 208, 213),
+    (163, 255, 62),
+    (245, 193, 52),
+    (220, 52, 23),
+    (122, 4, 3),
+)
+
+
+def _depth_palette() -> list[bytes]:
+    out = []
+    n = len(_DEPTH_ANCHORS) - 1
+    for i in range(256):
+        t = i / 255.0 * n
+        k = min(n - 1, int(t))
+        f = t - k
+        a, b = _DEPTH_ANCHORS[k], _DEPTH_ANCHORS[k + 1]
+        out.append(bytes(round(a[c] * (1 - f) + b[c] * f) for c in range(3)))
+    return out
+
+
+_PALETTE = _depth_palette()
+
+
+def colourise_depth_png(frame: RgbdFrame, near_m: float | None = None, far_m: float | None = None) -> bytes:
+    """The depth image as an 8-bit RGB PNG a human (or a vision model) can read:
+    near→far runs through the same turbo-like ramp the page uses, invalid
+    depth is black. Range defaults to the frame's own valid min/max."""
+    stats = frame.depth.stats()
+    near = near_m if near_m is not None else (stats["min_m"] or 0.2)
+    far = far_m if far_m is not None else (stats["max_m"] or near + 1.0)
+    if far <= near:
+        far = near + 0.001
+    scale = frame.depth.scale_m
+    span = far - near
+    black = b"\x00\x00\x00"
+    pal = _PALETTE
+    rows = bytearray()
+    for raw in frame.depth.values():
+        if not raw:
+            rows += black
+            continue
+        t = (raw * scale - near) / span
+        idx = 0 if t <= 0 else (255 if t >= 1 else int(t * 255))
+        rows += pal[idx]
+    return encode_png(frame.depth.width, frame.depth.height, 3, bytes(rows))
 
 
 def _number(payload: dict, key: str) -> float:
@@ -536,7 +818,11 @@ def serve(
 
 def add_camera_args(ap) -> None:
     """The camera/viewer flags shared by ``perception gui`` and ``perception-gui``."""
-    ap.add_argument("--fake", action="store_true", help="synthetic RGB-D scene instead of a RealSense")
+    ap.add_argument(
+        "--fake",
+        action="store_true",
+        help="synthetic RGB-D scene instead of a RealSense (or PERCEPTION_FAKE=1)",
+    )
     ap.add_argument(
         "--serial", default=None, help="RealSense serial (default: $PERCEPTION_RS_SERIAL or first)"
     )
@@ -595,6 +881,10 @@ def robot_from_args(args) -> RobotLink | None:
     )
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def parse_resolution(text: str) -> tuple[int, int]:
     """``"848x480"`` → ``(848, 480)``; a clear error otherwise."""
     try:
@@ -648,7 +938,7 @@ def camera_from_args(args, config: PerceptionConfig) -> RgbdCamera:
         getattr(args, "laser_power", None) or config.rs_laser_power,
     )
     return open_camera(
-        fake=bool(getattr(args, "fake", False)),
+        fake=bool(getattr(args, "fake", False)) or _env_flag("PERCEPTION_FAKE"),
         width=color_w,
         height=color_h,
         fps=(args.rs_fps if getattr(args, "rs_fps", None) else config.rs_fps) or None,
@@ -690,7 +980,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--bind", default="127.0.0.1", help="interface to bind (default: loopback only)")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port (default {DEFAULT_PORT})")
     ap.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+    ap.add_argument(
+        "--cell", default=None, help="cell profile (sim|ur3|ur20 or a .env path; default: $UR_CELL)"
+    )
     args = ap.parse_args(argv)
+    from .cell import apply_cell
+
+    try:
+        apply_cell(args.cell)
+    except ValueError as exc:
+        print(f"--cell: {exc}", file=sys.stderr)
+        return 2
     overrides: dict[str, object] = {}
     if args.width is not None:
         overrides["width"] = args.width

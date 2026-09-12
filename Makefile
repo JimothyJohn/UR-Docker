@@ -26,6 +26,7 @@ export UR_HOST
 .PHONY: help sim-up sim-down sim-logs sim-shell sim-poweron \
         simx-up simx-down simx-logs simx-shell \
         rs-info rs-gui rs-gui-fake rs-capture rs-test perception-build perception-up perception-down \
+        doctor cockpit cockpit-dry mcp \
         test test-unit test-integration test-all \
         lint lint-py lint-sh fmt regen-urps install-dev
 
@@ -106,6 +107,22 @@ perception-up:  ## Run the perception service (privileged, USB, cockpit on :7621
 
 perception-down:  ## Stop the perception service.
 	$(COMPOSE) --profile perception down
+
+# ---- The pilot's seat (docs/realsense-cell.html) ------------------------------------
+# One cell profile (sim | ur3 | ur20, perception/cells/*.env) selects robot host/ports + bracket.
+CELL ?= sim
+
+doctor:  ## Pre-flight checklist for CELL (SDK, camera, robot reachability + state).
+	$(PYTHON) -m perception --cell $(CELL) doctor
+
+cockpit:  ## The RGB-D cockpit for CELL (sudo on macOS for a real camera; scripts/cockpit.sh does that).
+	./scripts/cockpit.sh $(CELL)
+
+cockpit-dry:  ## Cockpit for CELL with robot actions validated + audited but not sent.
+	./scripts/cockpit.sh $(CELL) --robot-dry-run
+
+mcp:  ## The combined robot + camera MCP server for CELL over stdio (what .mcp.json runs).
+	$(PYTHON) -m perception.mcp_server --cell $(CELL)
 
 # ---- Tests ------------------------------------------------------------------
 

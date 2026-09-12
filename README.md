@@ -102,3 +102,11 @@ CI runs lint, unit tests across Windows/macOS/Linux (amd64 + arm64), a
 packaging smoke test, and CodeQL on every PR; label a PR `run-integration` to
 boot URSim in CI too. Dependabot keeps dependencies, action pins, and
 simulator images current.
+
+## The pilot's seat (RealSense on a UR3e / UR20)
+
+`scripts/cockpit.sh ur20` (macOS/Linux) or `scripts\cockpit.ps1 -Cell ur20`
+(Windows) opens the RGB-D cockpit for one *cell*; `make doctor CELL=ur20` is
+the pre-flight; `.mcp.json` hands an agent the same camera + robot tools.
+Walkthrough and field log: `docs/realsense-cell.html`; reference:
+`docs/realsense.md`.
