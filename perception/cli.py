@@ -102,7 +102,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("tools", help="print the agent tool schemas as JSON")
 
-    sub.add_parser("cells", help="list the shipped cell profiles and what each sets")
+    ce = sub.add_parser("cells", help="list the shipped cell profiles and what each sets")
+    ce.add_argument(
+        "--export",
+        metavar="CELL",
+        default=None,
+        help='print `export KEY=VALUE` lines for one cell, for `eval "$(perception cells --export ur20)"` '
+        "so plain `urctl` commands see the same host/ports",
+    )
 
     dr = sub.add_parser("doctor", help="pre-flight checklist: SDK, camera, robot reachability + state")
     dr.add_argument("--stream", action="store_true", help="also open the camera and judge frames")
@@ -262,6 +269,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "cells":
         from .cell import load_cell
 
+        if args.export:
+            try:
+                values = load_cell(args.export)
+            except ValueError as exc:
+                print(f"--export: {exc}", file=sys.stderr)
+                return 2
+            for key, value in values.items():
+                if value:
+                    print(f"export {key}={value}")
+            print(f"export {ENV_CELL}={args.export}")
+            return 0
         print(json.dumps({"active": cell, "cells": {n: load_cell(n) for n in list_cells()}}, indent=2))
         return 0
     if args.cmd == "doctor":

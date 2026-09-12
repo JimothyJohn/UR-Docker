@@ -206,7 +206,9 @@ Everything below is the day-to-day loop for testing on a laptop at the cell
 host/platform/ports and the bracket print (`PERCEPTION_BRACKET=eseries|ur20`,
 which picks the hand-eye seed — `perception.handeye.BRACKET_SEEDS`). A variable
 already set in the shell wins over the file. The real cells ship with `UR_HOST`
-empty: fill in the controller IP once. `perception cells` prints them.
+empty: fill in the controller IP once. `perception cells` prints them;
+`eval "$(uv run perception cells --export ur20)"` puts the same variables in
+your shell so plain `urctl` commands target the cell too.
 
 **Doctor** (`perception --cell ur20 doctor [--stream] [--no-robot] [--json]`,
 `make doctor CELL=ur20`, the **Doctor** button in the cockpit, or the

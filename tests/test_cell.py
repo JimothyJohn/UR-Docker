@@ -96,3 +96,13 @@ def test_describe_cell_is_a_safe_slice():
     env = {"UR_HOST": "h", "UR_CELL": "ur3", "AWS_SECRET_ACCESS_KEY": "nope", "PERCEPTION_BRACKET": ""}
     d = describe_cell(env)
     assert d == {"UR_CELL": "ur3", "UR_HOST": "h"}
+
+
+def test_cli_cells_export_is_shell_safe(capsys):
+    from perception.cli import main
+
+    assert main(["cells", "--export", "sim"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "export UR_HOST=localhost" in out and "export UR_CELL=sim" in out
+    assert all(line.startswith("export ") and "=" in line for line in out)
+    assert main(["cells", "--export", "nope"]) == 2
