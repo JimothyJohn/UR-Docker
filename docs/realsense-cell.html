@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RealSense on the tool flange — the pilot's seat</title>
+<meta name="description" content="A RealSense D435 on a UR tool flange, a laptop as the brain, and a cockpit + doctor + MCP server so a human or an agent can see what the robot sees and send it there. Living explainer for the demo and for anyone who wants to reproduce it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Caveat:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#e9eef3; --paper-deep:#d7e2ec; --cream:#ffffff;
+    --ink:#2b3440; --ink-soft:#646464;
+    --rust:#56a0d3; --rust-deep:#2f5bb7; --mustard:#e6ce4c;
+    --teal:#2f5bb7; --teal-deep:#1f3d7a; --sage:#009245; --sky:#c2e1f6;
+    --shadow:rgba(31,61,122,.18); --code-bg:#1f3d7a; --code-ink:#dcecf8;
+    --crit:#c0392b;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:"Fraunces",Georgia,serif;color:var(--ink);background:var(--paper);
+       line-height:1.65;font-size:18px;-webkit-font-smoothing:antialiased}
+  .book{max-width:960px;margin:0 auto;padding:0 18px}
+  .spread{position:relative;background:var(--cream);margin:34px 0;padding:44px 50px;border-radius:6px;
+          box-shadow:0 18px 40px -22px var(--shadow),0 2px 0 rgba(255,255,255,.6) inset}
+  .spread::before{content:"";position:absolute;inset:14px;border:1.5px solid rgba(31,61,122,.18);border-radius:3px;pointer-events:none}
+  @media(max-width:600px){.spread{padding:28px 18px}}
+  h1,h2,h3{font-weight:600;line-height:1.14;margin:0}
+  .display{font-size:clamp(34px,7vw,64px);letter-spacing:-.01em;text-align:center}
+  .dansk{font-family:"Caveat",cursive;color:var(--rust);font-size:clamp(22px,4vw,32px);text-align:center;margin-top:.15em;font-weight:700}
+  .chapter-no{font-family:"Caveat",cursive;color:var(--teal);font-size:26px;font-weight:700;text-align:center;letter-spacing:.04em;margin-bottom:2px}
+  .chapter-title{text-align:center;font-size:clamp(22px,4vw,32px);margin-bottom:.6em;font-style:italic}
+  h3{font-size:1.12em;font-style:italic;color:var(--teal-deep);margin:1.2em 0 .35em}
+  p{margin:0 0 1em}
+  .lead{font-size:1.05em}
+  em{color:var(--rust-deep);font-style:italic}
+  a{color:var(--rust-deep);text-decoration-color:rgba(47,91,183,.4);text-underline-offset:3px}
+  .rule{display:flex;align-items:center;justify-content:center;gap:14px;margin:22px 0;color:var(--rust)}
+  .rule .ln{height:1.5px;width:80px;background:currentColor;opacity:.5}
+  figure{margin:0}
+  .art-wrap{text-align:center;margin:6px 0 8px;overflow-x:auto}
+  .art-wrap svg{max-width:100%;height:auto}
+  .caption{font-family:"Caveat",cursive;font-size:1.25em;color:var(--ink-soft);text-align:center;margin-top:.2em}
+  pre{background:var(--code-bg);color:var(--code-ink);font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:.78em;line-height:1.6;padding:16px 18px;border-radius:10px;margin:0 0 1em;overflow-x:auto;
+      box-shadow:0 10px 24px -16px var(--shadow)}
+  pre .c{color:#8fb6df;font-style:italic}
+  pre .p{color:var(--mustard)}
+  pre .ok{color:#7be0a1} pre .bad{color:#ff8b7a}
+  code{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.84em;
+       background:var(--sky);color:var(--teal-deep);padding:1px 6px;border-radius:5px}
+  .step{display:flex;gap:16px;align-items:flex-start;margin:0 0 18px}
+  .step .num{flex:0 0 40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+             background:var(--sky);border:2.5px solid var(--rust-deep);font-family:"Caveat",cursive;font-weight:700;font-size:1.5em;color:var(--teal-deep)}
+  .step .body{flex:1;min-width:0}
+  .step .body p{margin:.1em 0 .5em}
+  .step h3{margin:0 0 .2em}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:8px}
+  @media(max-width:720px){.cards{grid-template-columns:1fr}}
+  .card{background:#f4f8fc;border:1.5px solid rgba(47,91,183,.18);border-radius:12px;padding:18px 16px}
+  .card h3{margin:0 0 .3em;font-size:1.08em}
+  .card p{font-size:.9em;margin:0}
+  .tblwrap{overflow-x:auto;margin:0 0 1em}
+  table{border-collapse:collapse;width:100%;font-size:.86em;margin:0}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid rgba(47,91,183,.16);vertical-align:top}
+  th{font-style:italic;color:var(--teal-deep)}
+  td code{font-size:.9em;white-space:nowrap}
+  .note{background:#fbf6da;border-left:4px solid var(--mustard);padding:12px 16px;border-radius:6px;font-size:.94em;margin:0 0 1em}
+  .note strong{color:var(--teal-deep)}
+  .warn{background:#fde8e4;border-left-color:var(--crit)}
+  ul,ol{margin:0 0 1em;padding-left:1.3em}
+  li{margin:.2em 0}
+  .tag{display:inline-block;font-family:"JetBrains Mono",monospace;font-size:.7em;letter-spacing:.06em;text-transform:uppercase;
+       padding:1px 7px;border-radius:4px;border:1px solid rgba(47,91,183,.35);color:var(--teal-deep);vertical-align:middle}
+  .tag.no{border-color:var(--crit);color:var(--crit)}
+  .tag.ok{border-color:var(--sage);color:var(--sage)}
+  .toc{columns:2;column-gap:28px;font-size:.95em}
+  @media(max-width:600px){.toc{columns:1}}
+  .toc a{text-decoration:none}
+  .log li{margin:.45em 0}
+  .log b{font-family:"JetBrains Mono",monospace;font-size:.85em;color:var(--teal-deep)}
+  footer{text-align:center;padding:10px 0 60px;color:var(--ink-soft);font-style:italic;font-size:.9em}
+</style>
+</head>
+<body>
+<div class="book">
+
+<!-- ============================================================ 0. title -->
+<section class="spread" id="top">
+  <h1 class="display">RealSense on the tool flange</h1>
+  <div class="dansk">the pilot's seat — see what the robot sees, then send it there</div>
+  <div class="rule"><span class="ln"></span>✦<span class="ln"></span></div>
+  <p class="lead">An Intel RealSense D435 rides on a printed bracket on the wrist of a Universal Robots arm (a UR3e and a UR20 in this cell). A laptop is the brain for now: it streams colour + depth from the camera, lets a person click an object, turns that click into a point in the robot's base frame, and asks the controller to move the tool to it — through one safety-checked, audited path. The same laptop exposes the whole cell to an agent (Claude) over MCP, so "look, segment, locate, move" can be driven by a human in a browser or by an agent in a terminal, and every action lands in the same event log.</p>
+  <p><strong>Demo goal:</strong> live camera on the flange, the cockpit on the laptop, a single click that lands the tool 10 cm above the object — on the simulator first, then on the real arms. Later the same stack moves onto the NVIDIA GPU inside the UR controller (UR AI Accelerator) with no code change beyond the cell profile.</p>
+  <div class="note"><strong>Status at a glance (2026-09-12):</strong> software built and tested on the synthetic camera + a dry-run robot; D435 verified streaming on the dev Mac earlier this month; <span class="tag no">not yet run on the Windows laptop, the UR3e, or the UR20</span>; bracket not yet printed; hand-eye transform is the bracket's nominal seed, <span class="tag no">uncalibrated</span>. Field log at the end.</div>
+  <div class="toc">
+    <div><a href="#arch">1 · Architecture</a></div>
+    <div><a href="#pipeline">2 · The pipeline</a></div>
+    <div><a href="#seat">3 · The pilot's seat</a></div>
+    <div><a href="#interfaces">4 · Interfaces &amp; examples</a></div>
+    <div><a href="#sims">5 · Simulators</a></div>
+    <div><a href="#howto">6 · Do it yourself</a></div>
+    <div><a href="#trouble">7 · Troubleshooting</a></div>
+    <div><a href="#log">8 · Status &amp; field log</a></div>
+  </div>
+</section>
+
+<!-- ============================================================ 1. architecture -->
+<section class="spread" id="arch">
+  <div class="chapter-no">chapter 1</div>
+  <h2 class="chapter-title">Architecture</h2>
+  <figure>
+    <div class="art-wrap">
+    <svg viewBox="0 0 900 430" width="900" height="430" font-family="Fraunces,Georgia,serif" font-size="14" role="img" aria-label="D435 on the bracket, USB to the laptop, network to the UR controller; later the same stack inside the controller">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#2f5bb7"/>
+        </marker>
+      </defs>
+      <!-- camera + bracket -->
+      <rect x="20" y="70" width="180" height="120" rx="12" fill="#f4f8fc" stroke="#2f5bb7" stroke-width="1.5"/>
+      <text x="110" y="95" text-anchor="middle" font-weight="600" fill="#1f3d7a">RealSense D435</text>
+      <text x="110" y="116" text-anchor="middle" font-size="12" fill="#646464">on the tool-flange bracket</text>
+      <text x="110" y="134" text-anchor="middle" font-size="12" fill="#646464">eseries print (ISO-50)</text>
+      <text x="110" y="150" text-anchor="middle" font-size="12" fill="#646464">ur20 print (ISO-80, +45°)</text>
+      <text x="110" y="172" text-anchor="middle" font-size="12" fill="#646464">RGB + stereo depth, 848×480</text>
+      <!-- usb -->
+      <line x1="200" y1="130" x2="290" y2="130" stroke="#2f5bb7" stroke-width="2" marker-end="url(#arr)"/>
+      <text x="245" y="120" text-anchor="middle" font-size="12" fill="#2f5bb7">USB 3</text>
+      <text x="245" y="148" text-anchor="middle" font-size="11" fill="#646464">librealsense</text>
+      <!-- laptop -->
+      <rect x="292" y="40" width="300" height="180" rx="12" fill="#f4f8fc" stroke="#2f5bb7" stroke-width="1.5"/>
+      <text x="442" y="64" text-anchor="middle" font-weight="600" fill="#1f3d7a">Laptop — the brain (today)</text>
+      <text x="442" y="82" text-anchor="middle" font-size="12" fill="#646464">Windows · uv · Python, stdlib only</text>
+      <rect x="306" y="96" width="130" height="50" rx="8" fill="#c2e1f6"/>
+      <text x="371" y="116" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perception gui</text>
+      <text x="371" y="134" text-anchor="middle" font-size="11" fill="#1f3d7a">cockpit · owns the camera</text>
+      <rect x="448" y="96" width="130" height="50" rx="8" fill="#c2e1f6"/>
+      <text x="513" y="116" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perception-mcp</text>
+      <text x="513" y="134" text-anchor="middle" font-size="11" fill="#1f3d7a">the keys for Claude</text>
+      <rect x="306" y="156" width="272" height="46" rx="8" fill="#e9eef3"/>
+      <text x="442" y="174" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perception doctor · cell profiles · urctl</text>
+      <text x="442" y="192" text-anchor="middle" font-size="11" fill="#646464">safety envelope + audit log on every robot action</text>
+      <!-- network -->
+      <line x1="592" y1="130" x2="690" y2="130" stroke="#2f5bb7" stroke-width="2" marker-end="url(#arr)"/>
+      <text x="641" y="118" text-anchor="middle" font-size="12" fill="#2f5bb7">Ethernet</text>
+      <text x="641" y="148" text-anchor="middle" font-size="11" fill="#646464">same subnet</text>
+      <!-- controller -->
+      <rect x="692" y="40" width="190" height="180" rx="12" fill="#f4f8fc" stroke="#2f5bb7" stroke-width="1.5"/>
+      <text x="787" y="64" text-anchor="middle" font-weight="600" fill="#1f3d7a">UR controller</text>
+      <text x="787" y="82" text-anchor="middle" font-size="12" fill="#646464">PolyScope X</text>
+      <text x="704" y="108" font-size="12" fill="#1f3d7a"><tspan font-weight="600">:80</tspan> Robot-API (REST)</text>
+      <text x="704" y="124" font-size="11" fill="#646464">state · power · brakes · load · play</text>
+      <text x="704" y="146" font-size="12" fill="#1f3d7a"><tspan font-weight="600">:30001</tspan> Primary</text>
+      <text x="704" y="162" font-size="11" fill="#646464">URScript in → motion (movel)</text>
+      <text x="704" y="184" font-size="12" fill="#1f3d7a"><tspan font-weight="600">:30004</tspan> RTDE</text>
+      <text x="704" y="200" font-size="11" fill="#646464">joints / TCP / force telemetry</text>
+      <!-- arm -->
+      <line x1="110" y1="190" x2="110" y2="260" stroke="#2f5bb7" stroke-width="2" stroke-dasharray="4 4"/>
+      <text x="110" y="280" text-anchor="middle" font-size="12" fill="#646464">bolted to the wrist of the</text>
+      <text x="110" y="297" text-anchor="middle" font-size="12" fill="#646464">UR3e / UR20 (same cable loom)</text>
+      <!-- later -->
+      <rect x="292" y="300" width="590" height="110" rx="12" fill="#ffffff" stroke="#56a0d3" stroke-width="1.5" stroke-dasharray="6 5"/>
+      <text x="587" y="326" text-anchor="middle" font-weight="600" fill="#1f3d7a">Later: the same stack on the controller's own NVIDIA GPU (UR AI Accelerator)</text>
+      <text x="587" y="348" text-anchor="middle" font-size="12" fill="#646464">USB from the camera into the controller; perception + urctl run next to the robot;</text>
+      <text x="587" y="366" text-anchor="middle" font-size="12" fill="#646464">the laptop just opens the cockpit in a browser. Same code, a different cell profile.</text>
+      <text x="587" y="392" text-anchor="middle" font-size="11" fill="#c0392b">unverified — no attempt on the accelerator yet; the perception container builds for linux/arm64 (Dockerfile.perception)</text>
+    </svg>
+    </div>
+    <figcaption class="caption">one process owns the camera; everything else — browser, doctor, agent — talks to it over HTTP</figcaption>
+  </figure>
+  <h3>Why these three ports</h3>
+  <div class="tblwrap"><table>
+    <tr><th>Hop</th><th>What travels</th><th>Notes</th></tr>
+    <tr><td>Camera → laptop, USB 3</td><td>Z16 depth + RGB8 colour framesets, aligned depth→colour in the SDK</td><td><code>perception/realsense.py</code> binds librealsense's C API with ctypes; no <code>pyrealsense2</code>, no numpy. Needs the SDK's shared library: <code>realsense2.dll</code> on Windows, <code>brew install librealsense</code> on macOS.</td></tr>
+    <tr><td>Laptop → controller, Robot-API <code>:80</code></td><td>HTTP JSON: robot/safety/control mode, power on, brake release, load, play</td><td>PolyScope X replaced the e-Series Dashboard (29999) with this REST API. Every mutating call answers <strong>403 in Local mode</strong>.</td></tr>
+    <tr><td>Laptop → controller, Primary <code>:30001</code></td><td>URScript text; the controller runs it immediately</td><td>Motion goes here as one <code>def … end</code> program with a done-marker; <code>urctl</code> holds the socket until it lands. Off by default on PolyScope X: enable under Settings → Security → Services, and it needs Remote mode.</td></tr>
+    <tr><td>Controller → laptop, RTDE <code>:30004</code></td><td>Structured telemetry: joints, TCP pose, speed, force, safety bits</td><td>What the cockpit's status chips and the doctor read. Also a Services toggle on PolyScope X.</td></tr>
+  </table></div>
+</section>
+
+<!-- ============================================================ 2. pipeline -->
+<section class="spread" id="pipeline">
+  <div class="chapter-no">chapter 2</div>
+  <h2 class="chapter-title">The pipeline, in five steps</h2>
+  <div class="step"><div class="num">1</div><div class="body"><h3>Capture RGB-D</h3>
+    <p>Depth and colour both at <strong>848×480</strong> (the D435's native stereo mode; on this camera mismatched sizes return an all-black colour image). The SDK's spatial + temporal filters run in the disparity domain before alignment, the sensor sits on the <em>High Accuracy</em> preset with the projector at full power (written after the first frameset — writing earlier stalls a fresh open). One thread pumps the camera; the page long-polls <code>/api/rgbd</code>.</p></div></div>
+  <div class="step"><div class="num">2</div><div class="body"><h3>Segment with a click or a box</h3>
+    <p>A click sends a point prompt, press-drag-release sends a box. The default segmenter is pure-Python region growing by colour similarity <em>and</em> depth continuity (~10 ms); <code>--segment-backend sam</code> swaps in Segment Anything (needs the <code>sam</code> extra, GPU or <code>mps</code>). Same output shape either way.</p></div></div>
+  <div class="step"><div class="num">3</div><div class="body"><h3>Measure the object</h3>
+    <p>Per segment: area, bbox, centroid, depth median, metric extent, orientation, and the <strong>3D point in the colour-camera frame</strong> (<code>point_m</code>) from the colour intrinsics and the aligned depth. A grasp hint (top-down, across the minor axis) rides along for the next step.</p></div></div>
+  <div class="step"><div class="num">4</div><div class="body"><h3>Hand-eye: camera frame → flange → base</h3>
+    <p>The flange pose comes live from the controller (<code>ur_flange_pose</code>: TCP pose, active TCP offset, and the controller's own <code>pose_trans(tcp, pose_inv(offset))</code>, cross-checked against the host's arithmetic). The camera-in-flange transform is the bracket's nominal seed for the print in use (<code>PERCEPTION_BRACKET=eseries|ur20</code>), or a real calibration via <code>PERCEPTION_T_FLANGE_CAMERA</code>.</p>
+<pre>p_base = T_base_flange · T_flange_depth · T_depth_color · p_color
+
+T_base_flange    live, from the controller (get_actual_tcp_pose + get_tcp_offset)
+T_flange_depth   bracket seed (eseries / ur20) or PERCEPTION_T_FLANGE_CAMERA
+T_depth_color    the SDK's extrinsics, read at open (~15 mm along x on a D435)
+p_color          the segment's point_m</pre></div></div>
+  <div class="step"><div class="num">5</div><div class="body"><h3>Approach pose, then one <code>movel</code></h3>
+    <p><strong>Locate</strong> returns the base-frame point plus an <em>approach pose</em>: the TCP placed <code>standoff_m</code> (default 0.10 m) short of the point along the camera's viewing ray, keeping the tool's current orientation. Nothing moves. <strong>Move</strong> is one absolute <code>ur_move_tcp</code> through the same schema-validated, safety-enveloped, audited registry the CLI and MCP use — refused when the robot isn't RUNNING, over the speed caps, or outside reach. 0.1 m/s by default.</p></div></div>
+  <div class="note"><strong>Verified so far:</strong> steps 1–3 on the D435 (dev Mac, 2026-09-04); steps 4–5 end to end on the PolyScope X simulator 10.13.0 in Remote mode with the synthetic camera (flange readback matched the controller; Move landed on the approach pose to 0.1 mm). Not yet with the camera on the bracket or on a real arm; the sim's TCP offset is zero, so the offset half of the arithmetic is covered by unit tests only.</div>
+</section>
+
+<!-- ============================================================ 3. pilot's seat -->
+<section class="spread" id="seat">
+  <div class="chapter-no">chapter 3</div>
+  <h2 class="chapter-title">The pilot's seat</h2>
+  <p>Three things, all on the laptop, all reading the same cell profile: a <strong>cockpit</strong> in the browser, a <strong>doctor</strong> in the terminal, and an <strong>MCP server</strong> that hands the whole cell to an agent.</p>
+
+  <h3>The cockpit — <code>perception --cell ur20 gui</code></h3>
+  <div class="cards">
+    <div class="card"><h3>Colour + Depth</h3><p>Live 848×480 with hover-to-measure on the depth panel (metres under the cursor), click or drag to segment on the colour panel, near/far range with auto-fit.</p></div>
+    <div class="card"><h3>Object + Robot</h3><p>The segment's features; <em>Locate in base</em> shows every intermediate frame and the approach pose; <em>Move TCP to approach</em> asks for confirmation, then sends one <code>movel</code>.</p></div>
+    <div class="card"><h3>Pilot <span class="tag">new</span></h3><p>Status chips (robot / safety / control / program), <strong>Bring up</strong>, <strong>STOP</strong>, <strong>Freedrive</strong>, <strong>Doctor</strong>, a base-frame jog pad (1–50 mm, one safety-checked <code>movel</code> per press), and the Events log.</p></div>
+  </div>
+  <p style="margin-top:1em">The header chips summarise the camera (kind, USB link, fps) and the robot (mode · safety · control). Everything a button does is one call into the same tool registry an agent uses, and lands in the Events log with its outcome and any safety verdict — so a person watching the browser and an agent reading <code>cam_events</code> see the same history.</p>
+
+  <h3>The doctor — <code>perception --cell ur20 doctor</code></h3>
+  <p>A pre-flight checklist for the four things that fail independently: the SDK, the camera, the network path, and the controller's state. Every failed check carries its fix in words. Add <code>--stream</code> to open the camera and judge real frames (black colour, sparse depth, fps); <code>--json</code> for machines. The cockpit's <em>Doctor</em> button runs the same report with the live stream. Sample output, exactly the shape it prints (this run: dev Mac, no camera plugged in, no robot):</p>
+<pre>[--  ] host: Darwin 25.6.0 arm64, python 3.13.5
+[--  ] cell: ur20 → {'UR_CELL': 'ur20', 'UR_PLATFORM': 'polyscopex', 'UR_ROBOT_API_PORT': '80', ...}
+<span class="ok">[ok  ]</span> sdk: librealsense 2.58.4 at /opt/homebrew/lib/librealsense2.dylib
+<span class="bad">[FAIL]</span> camera: no RealSense device enumerated
+       fix: plug the D435 into a USB 3 port with a short cable (≤ 2 m, no hub); on macOS run under sudo; ...
+[--  ] cockpit: no cockpit at http://127.0.0.1:7621 (start one: perception gui)
+<span class="bad">[FAIL]</span> robot.host: UR_HOST is empty
+       fix: set the controller IP in the cell file (perception/cells/&lt;cell&gt;.env) or UR_HOST
+verdict: NOT READY</pre>
+  <p>Verdicts: <strong>READY</strong> (everything, including motion), <strong>STATE ONLY (motion gated)</strong> (state reads work; a Local-mode or protective-stop check failed), <strong>NOT READY</strong>. The doctor also spots a <em>platform mismatch</em> — cell says PolyScope X but only the e-Series Dashboard port answers — and tells you which <code>UR_PLATFORM</code> to set.</p>
+
+  <h3>The keys — <code>perception-mcp</code></h3>
+  <p>One MCP server (stdio, stdlib JSON-RPC, zero deps) serving two tool families. The robot tools are the full <code>urctl</code> registry, driving the controller directly through the safety envelope + audit log. The camera and cell tools go <em>through the running cockpit</em>, because one process must own the USB camera and the cockpit is it. When no cockpit is up, the <code>cam_*</code> tools answer with an in-band error that says how to start one; the robot tools keep working.</p>
+  <div class="tblwrap"><table>
+    <tr><th>Tool</th><th>Does</th></tr>
+    <tr><td><code>cam_info</code></td><td>camera kind/serial/fw/USB link, stream + filters, intrinsics, last error, cell, robot link</td></tr>
+    <tr><td><code>cam_snapshot</code></td><td>writes <code>&lt;name&gt;_color.png</code> + a colourised <code>&lt;name&gt;_depth.png</code> (+ mask) to a directory — the agent reads the PNGs to see</td></tr>
+    <tr><td><code>cam_segment</code> · <code>cam_nearest</code> · <code>cam_clear</code></td><td>point/box segment (or nearest object) → features incl. <code>point_m</code>; drop the segment</td></tr>
+    <tr><td><code>cam_locate</code> · <code>cam_move_to_approach</code></td><td>the Locate → Move flow, same arithmetic and same envelope as the browser buttons</td></tr>
+    <tr><td><code>cam_capture</code></td><td>save into the RealSenseTrainer-style dataset layout under <code>captures/</code></td></tr>
+    <tr><td><code>cam_events</code></td><td>the cockpit's event log after a sequence number</td></tr>
+    <tr><td><code>cell_doctor</code> · <code>cell_jog</code></td><td>the pre-flight report; one ≤ 5 cm base-frame nudge</td></tr>
+    <tr><td><code>ur_get_state</code> · <code>ur_bring_up</code> · <code>ur_move_tcp</code> · <code>ur_move_trajectory</code> · <code>ur_run_script</code> …</td><td>the <code>urctl</code> registry (32 tools in total with the cockpit family)</td></tr>
+  </table></div>
+  <p>Claude Code picks the server up from <code>.mcp.json</code> at the repo root; the cell comes from <code>UR_CELL</code> in the shell (or add <code>"--cell", "ur20"</code> to <code>args</code>):</p>
+<pre>{
+  "mcpServers": {
+    "cell": { "command": "uv", "args": ["run", "perception-mcp"], "env": {} }
+  }
+}</pre>
+</section>
+
+<!-- ============================================================ 4. interfaces -->
+<section class="spread" id="interfaces">
+  <div class="chapter-no">chapter 4</div>
+  <h2 class="chapter-title">Interfaces &amp; examples</h2>
+  <h3>Commands</h3>
+  <div class="tblwrap"><table>
+    <tr><th>Command</th><th>What it does</th></tr>
+    <tr><td><code>scripts\setup-windows.ps1 -Cell ur20</code></td><td>Windows: install uv, fetch + run the RealSense SDK installer, set <code>REALSENSE_LIB</code>, <code>uv sync</code>, then the doctor. Idempotent.</td></tr>
+    <tr><td><code>scripts\cockpit.ps1 -Cell ur20</code></td><td>Windows: the cockpit for that cell. <code>-DryRun</code> validates + audits robot actions without sending; <code>-Doctor</code> runs only the checklist.</td></tr>
+    <tr><td><code>scripts/cockpit.sh ur20</code></td><td>macOS/Linux equivalent (re-runs itself under sudo on macOS for a real camera). <code>make cockpit CELL=ur20</code> is the same.</td></tr>
+    <tr><td><code>uv run perception --cell ur20 doctor --stream</code></td><td>Pre-flight incl. opening the camera. <code>make doctor CELL=ur20</code>.</td></tr>
+    <tr><td><code>uv run perception --cell ur20 gui</code></td><td>The cockpit on <code>http://127.0.0.1:7621</code> (loopback only; <code>--bind 0.0.0.0</code> for a cell LAN, no auth).</td></tr>
+    <tr><td><code>uv run perception-mcp --cell ur20</code></td><td>The MCP server over stdio (<code>make mcp CELL=ur20</code>). <code>--dry-run</code> for a safe rehearsal.</td></tr>
+    <tr><td><code>uv run perception cells</code></td><td>Lists the shipped cell profiles and what each sets.</td></tr>
+    <tr><td><code>make simx-up</code> · <code>HOST_ARCH=arm64 make simx-up</code></td><td>The PolyScope X simulator (web UI on <code>localhost:8000</code>); arm64 variant for Apple Silicon.</td></tr>
+    <tr><td><code>make simx-state</code> · <code>make simx-bring-up</code></td><td><code>urctl state</code> / <code>bring-up</code> against the sim with the right env set.</td></tr>
+  </table></div>
+  <h3>Cell profiles</h3>
+  <p>A cell is a <code>KEY=VALUE</code> file in <code>perception/cells/</code> holding the environment the toolkit already reads. <code>--cell</code> (or <code>UR_CELL</code>) loads it; <strong>a variable already set in the shell wins</strong>, and only <code>UR_*</code>, <code>PERCEPTION_*</code>, <code>REALSENSE_*</code> keys are accepted.</p>
+  <div class="tblwrap"><table>
+    <tr><th>Cell</th><th>Robot</th><th>Ports</th><th>Camera / bracket</th></tr>
+    <tr><td><code>sim</code></td><td>PolyScope X container on this machine, <code>UR_HOST=localhost</code></td><td>Robot-API 8000 · Primary 31001 · RTDE 31004</td><td><code>PERCEPTION_FAKE=1</code> (synthetic scene) · <code>eseries</code></td></tr>
+    <tr><td><code>ur3</code></td><td>UR3e, <code>UR_HOST=</code> <span class="tag no">fill in</span></td><td>80 · 30001 · 30004</td><td>D435 · <code>eseries</code> print</td></tr>
+    <tr><td><code>ur20</code></td><td>UR20, <code>UR_HOST=</code> <span class="tag no">fill in</span></td><td>80 · 30001 · 30004</td><td>D435 · <code>ur20</code> print</td></tr>
+  </table></div>
+  <h3>The cockpit's HTTP API</h3>
+  <div class="tblwrap"><table>
+    <tr><th>Route</th><th>Body / query</th><th>Returns</th></tr>
+    <tr><td><code>GET /api/info</code></td><td>—</td><td>camera description, config, backends, fps, last error, cell, robot link</td></tr>
+    <tr><td><code>GET /api/rgbd?after=N</code></td><td>long-polls until a frame newer than N</td><td>binary container: JSON header + colour PNG + zlib'd uint16 depth</td></tr>
+    <tr><td><code>POST /api/segment</code></td><td><code>{x, y}</code> and/or <code>{box:[x0,y0,x1,y1]}</code></td><td>mask PNG (base64) + features</td></tr>
+    <tr><td><code>POST /api/nearest</code> · <code>POST /api/clear</code></td><td><code>{near_ratio?}</code></td><td>nearest-object mask; drop the mask</td></tr>
+    <tr><td><code>GET /api/robot</code> · <code>POST /api/robot/state</code></td><td>—</td><td>link description; <code>ur_get_state</code></td></tr>
+    <tr><td><code>POST /api/robot/locate</code></td><td><code>{standoff_m?, point_m?}</code></td><td>base point + approach pose, every intermediate frame</td></tr>
+    <tr><td><code>POST /api/robot/move</code></td><td><code>{pose, velocity?}</code></td><td>the safety-validated <code>movel</code> result</td></tr>
+    <tr><td><code>POST /api/robot/jog</code></td><td><code>{delta:[dx,dy,dz,drx,dry,drz], velocity?}</code></td><td>one relative nudge, ≤ 0.05 m / 0.35 rad per axis</td></tr>
+    <tr><td><code>POST /api/robot/bring_up</code> · <code>/stop</code> · <code>/freedrive</code></td><td><code>{enable}</code> for freedrive</td><td>the tool result</td></tr>
+    <tr><td><code>GET /api/doctor</code></td><td><code>?robot=0</code> to skip the controller</td><td>the pre-flight report (live stream stats + robot checks)</td></tr>
+    <tr><td><code>GET /api/events?after=N</code></td><td>—</td><td>the event log after N</td></tr>
+    <tr><td><code>POST /api/snapshot</code></td><td><code>{dir?, name?}</code></td><td>paths of <code>&lt;name&gt;_color.png</code>, <code>_depth.png</code> (+ <code>_mask.png</code>), frame summary, features</td></tr>
+    <tr><td><code>POST /api/capture</code> · <code>GET /api/captures</code></td><td><code>{name, include_mask}</code></td><td>dataset save; what's in the capture root</td></tr>
+  </table></div>
+<pre><span class="c"># a snapshot the agent (or you) can open</span>
+<span class="p">$</span> curl -s -X POST -H 'Content-Type: application/json' \
+    -d '{"dir":"captures/snapshots","name":"look"}' http://127.0.0.1:7621/api/snapshot
+{"ok": true, "seq": 22, "color_png": "captures/snapshots/look_color.png",
+ "depth_png": "captures/snapshots/look_depth.png", "frame": {...}, "features": null}
+
+<span class="c"># +10 mm in base X, one safety-checked movel (refused above 50 mm per axis)</span>
+<span class="p">$</span> curl -s -X POST -H 'Content-Type: application/json' \
+    -d '{"delta":[0.01,0,0,0,0,0]}' http://127.0.0.1:7621/api/robot/jog
+{"action": "move_tcp", "ok": true, "safety": {"ok": true, "violations": []}, "landed": [...], ...}</pre>
+</section>
+
+<!-- ============================================================ 5. simulators -->
+<section class="spread" id="sims">
+  <div class="chapter-no">chapter 5</div>
+  <h2 class="chapter-title">Simulators</h2>
+  <h3>PolyScope X simulator (<code>ursim-px</code>)</h3>
+  <p>The controller without the robot: <code>make simx-up</code> (Apple Silicon: <code>HOST_ARCH=arm64 make simx-up</code>; <code>ROBOT_TYPE=UR20</code> picks the model). Web UI on <code>http://localhost:8000</code> — open it in Chrome. Pinned to image <strong>10.13.0</strong>: on 10.14 the Services toggles never stick. Published ports are offset so it can coexist with the e-Series sim: Robot-API <code>8000</code>, Primary <code>31001</code>, RTDE <code>31004</code> — exactly what the <code>sim</code> cell sets.</p>
+  <div class="note"><strong>Two pendant steps with no network equivalent</strong> (they apply to the real robots too): <br>1. <strong>Remote control mode</strong> — a toggle on the Safety screen. Every mutating Robot-API call (power on, brake release, load, play) returns 403 in Local, and on PolyScope X Primary URScript is <em>silently ignored</em> in Local (verified 2026-09-04 on the sim). State reads work in Local. <br>2. <strong>Services</strong> — hamburger → Settings → Security → Services: enable <em>Primary Client Interface</em> and <em>RTDE</em> (admin password). Off by default.</div>
+  <p>UR's published default passwords (first use forces a change): admin <code>easybot</code>, operational mode <code>operator</code>.</p>
+  <h3>The synthetic camera</h3>
+  <p><code>--fake</code> or <code>PERCEPTION_FAKE=1</code> replaces the RealSense with a deterministic scene — three coloured disks on a wall at ~1.2 m, plausible D435 intrinsics, identity depth→colour extrinsics, a slow wobble so long-polls always have a new frame. The whole cockpit, the doctor's <code>--stream</code> check, the MCP tools and the test suite run on it with no hardware.</p>
+  <h3>The <code>sim</code> cell ties them together</h3>
+<pre><span class="p">$</span> HOST_ARCH=arm64 make simx-up          <span class="c"># then in Chrome: Remote mode + Services toggles</span>
+<span class="p">$</span> uv run perception --cell sim doctor  <span class="c"># expect: stream ok, robot reachable, control REMOTE</span>
+<span class="p">$</span> uv run perception --cell sim gui     <span class="c"># synthetic camera + the sim: Bring up → jog → click → Locate → Move</span></pre>
+  <p>Docker note for the dev Mac: the e-Series URSim image does not boot under Docker Desktop's Rosetta or QEMU emulation here, which is one reason the perception work targets PolyScope X (native arm64 image).</p>
+</section>
+
+<!-- ============================================================ 6. how-to -->
+<section class="spread" id="howto">
+  <div class="chapter-no">chapter 6</div>
+  <h2 class="chapter-title">Do it yourself</h2>
+  <h3>Windows laptop setup</h3>
+  <ol>
+    <li>Clone the repo. In PowerShell: <code>powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1 -Cell sim</code>. It installs <code>uv</code> (winget <code>astral-sh.uv</code>, or the official script), downloads <code>RealSense.SDK-WIN10-2.58.4.*.exe</code> from the librealsense GitHub release and runs it (click through; you need the SDK, not just the Viewer), sets <code>REALSENSE_LIB</code> to <code>C:\Program Files (x86)\Intel RealSense SDK 2.0\bin\x64\realsense2.dll</code>, runs <code>uv sync</code>, then the doctor. <span class="tag no">not yet run on the laptop</span></li>
+    <li>Plug the D435 into a <strong>USB 3 port</strong> with a short cable (≤ 2 m, no hub). Re-run <code>scripts\cockpit.ps1 -Doctor -Stream</code>: expect <code>sdk</code>, <code>camera</code> and <code>stream</code> to pass.</li>
+    <li>Put the controller's IP into the cell file: <code>perception\cells\ur3.env</code> or <code>ur20.env</code>, <code>UR_HOST=…</code> (pendant: Settings → System → Network). Or export <code>UR_HOST</code> in the shell — the shell wins.</li>
+  </ol>
+  <h3>On the pendant (once per robot)</h3>
+  <ul>
+    <li>Settings → Security → Services: enable <em>Primary Client Interface</em> and <em>RTDE</em>.</li>
+    <li>Switch to <strong>Remote</strong> control (Safety screen on PolyScope X). Leave it there for the session; the doctor's <code>robot.control</code> check tells you if it slipped back.</li>
+  </ul>
+  <h3>First-run checklist</h3>
+  <ol>
+    <li><code>scripts\cockpit.ps1 -Cell ur20 -Doctor</code> → <strong>verdict: READY</strong> (or read the <code>fix:</code> lines).</li>
+    <li><code>scripts\cockpit.ps1 -Cell ur20 -DryRun</code> first: every button validates and audits but sends nothing. Then without <code>-DryRun</code>.</li>
+    <li><strong>Bring up</strong> → chips show RUNNING · NORMAL · REMOTE.</li>
+    <li>Jog <strong>+Z 10 mm</strong>, then −Z: the TCP line under the pad moves by 0.010 m and the Events log shows both moves with their safety verdicts.</li>
+    <li>Put an object 30–60 cm in front of the camera, click it, read <code>point (cam) m</code>.</li>
+    <li><strong>Locate in base</strong>: check <code>host/controller Δ</code> is ~0 mm and the approach pose is sane (above the object, tool orientation unchanged).</li>
+    <li><strong>Move TCP to approach</strong>: confirm. First time, from an elbow-bent pose (not fully extended — see C154A0 below), with nothing between the tool and the object.</li>
+    <li>Same from Claude: <code>cell_doctor</code> → <code>cam_snapshot</code> → <code>cam_segment</code> → <code>cam_locate</code> → <code>cam_move_to_approach</code>, then <code>cam_events</code> to read back.</li>
+  </ol>
+  <h3>The bracket (<code>hardware/d435-tool-bracket/</code>)</h3>
+  <p>Two independent prints, one per flange (parametric CadQuery; STL/STEP in <code>out/</code>; spec in its README). Rev B.2, <span class="tag no">not yet printed</span>.</p>
+  <div class="tblwrap"><table>
+    <tr><th></th><th><code>eseries</code> print — UR3e (and UR5e/10e/16e)</th><th><code>ur20</code> print — UR20 / UR30</th></tr>
+    <tr><td>Flange pattern</td><td>ISO-50 only, Ø63 × 6 disc, 4× M6</td><td>ISO-50 + ISO-80 on a Ø96 plate, engages the Ø50 pilot</td></tr>
+    <tr><td>Camera clocking</td><td>on +Y, the tool-I/O connector side (<code>ARM_ANGLE_DEG = 90</code>)</td><td>clocked <strong>45°</strong> off the M8 socket (it sits only 17.6 mm behind the face), 5 mm further out</td></tr>
+    <tr><td>Nominal depth origin in the flange frame</td><td><strong>(17.5, 66.5, 1.7) mm</strong>, axes x_cam = −X, y_cam = −Y, z_cam = +Z</td><td><strong>(62.9, 38.2, 1.7) mm</strong>, the same axes rotated −45° about Z</td></tr>
+    <tr><td>Selected by</td><td><code>PERCEPTION_BRACKET=eseries</code> (cells <code>sim</code>, <code>ur3</code>)</td><td><code>PERCEPTION_BRACKET=ur20</code> (cell <code>ur20</code>)</td></tr>
+    <tr><td>Mass, printed</td><td>≈ 27 g (29.7 cm³)</td><td>≈ 40 g (44.2 cm³)</td></tr>
+  </table></div>
+  <p>These seeds come straight from the CAD (<code>out/build_info.json</code>; a unit test holds the code to it) and are <strong>not a calibration</strong>: a printed part will not hold ±1°, and 1° at 0.5 m is ~9 mm. A hand-eye calibration replaces the seed via <code>PERCEPTION_T_FLANGE_CAMERA="[x, y, z, rx, ry, rz]"</code> (depth frame in the flange frame, metres + UR rotation vector); the cockpit's <em>hand-eye</em> row and the doctor say which is active. The active TCP offset is read live from the controller, so tool changes need no code — but if the tool is not at the flange, author any saved programs with script nodes, not MoveJ/Waypoint nodes (PolyScope's MoveJ IK goes through the active TCP).</p>
+</section>
+
+<!-- ============================================================ 7. troubleshooting -->
+<section class="spread" id="trouble">
+  <div class="chapter-no">chapter 7</div>
+  <h2 class="chapter-title">Troubleshooting</h2>
+  <p>Start with <code>perception --cell &lt;cell&gt; doctor --stream</code>; most of this table is what its <code>fix:</code> lines say.</p>
+  <div class="tblwrap"><table>
+    <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+    <tr><td><code>librealsense2 not found</code> on Windows</td><td>SDK not installed, or the DLL isn't where the loader looks</td><td>Run the SDK installer; set <code>REALSENSE_LIB</code> to <code>C:\Program Files (x86)\Intel RealSense SDK 2.0\bin\x64\realsense2.dll</code> (the setup script does)</td></tr>
+    <tr><td>Colour panel black, depth fine, room lit</td><td>Depth and colour streaming at <strong>different sizes</strong> (848×480 depth + 640×480 colour on this D435)</td><td>Keep both at 848×480 (the default); if you pass <code>--width/--height</code>, pass a matching <code>--depth-res</code></td></tr>
+    <tr><td><code>usb 2.x</code> in the header / doctor; ~15 fps</td><td>USB 2 link</td><td>Direct USB 3 port (blue), short cable, no hub</td></tr>
+    <tr><td>macOS: <code>failed to set power state</code> / no frame on first open</td><td>libusb needs root; a lost race with Apple's UVC driver after failed opens</td><td>Run under <code>sudo</code>; unplug/re-plug; don't retry opens in a tight loop (the cockpit backs off 1→30 s)</td></tr>
+    <tr><td>Robot-API answers 403 on power / brake / load / play</td><td>Local control mode</td><td>Remote on the Safety screen — no network way to switch</td></tr>
+    <tr><td>Moves return <code>ok:false, landed:null</code>, no safety violation; textmsg scripts still work</td><td>Local mode gates Primary <em>motion</em> (PolyScope X: any URScript); or Primary not enabled</td><td>Remote mode; Settings → Security → Services → Primary Client Interface; doctor's <code>robot.control</code> / <code>robot.primary</code></td></tr>
+    <tr><td><code>move-tcp</code> fails with <code>protective_stop:true</code>; every later move fails too</td><td>A <code>movel</code> from a near-singular pose (fully extended, or elbow = 0) — controller error <strong>C154A0</strong>. <code>robot_mode</code> stays RUNNING; only <code>safety_mode</code> flips</td><td><code>movej</code> to an elbow-bent pose before Cartesian moves; <strong>Bring up</strong> (or <code>unlock protective stop</code>) clears the latch</td></tr>
+    <tr><td>Moves start failing fast after a burst; robot ends POWER_OFF</td><td>~10+ rapid per-move Primary reconnects wedge URControl</td><td>Don't loop single moves — <code>ur_move_trajectory</code> sends a path over one connection; <strong>Bring up</strong> to recover; container restart if the Primary broadcast stays dead</td></tr>
+    <tr><td>A move is refused instantly with a <code>velocity</code> / <code>tcp_velocity</code> violation</td><td>Above the envelope caps (~2.09 rad/s joints, 1.0 m/s TCP)</td><td>Lower the speed; the jog pad's own cap is 0.25 m/s</td></tr>
+    <tr><td>Doctor: <code>robot.reach</code> says platform mismatch</td><td>Cell says <code>polyscopex</code> but only port 29999 answers (or vice versa)</td><td>Set <code>UR_PLATFORM</code> as the fix line says</td></tr>
+    <tr><td>PolyScope X sim: Services toggles revert</td><td>Image 10.14 (firewall <code>ethCB0</code> 404)</td><td>Stay on 10.13.0 (pinned in <code>docker-compose.yml</code>)</td></tr>
+    <tr><td><code>cam_*</code> MCP tools answer "no cockpit at …"</td><td>The cockpit isn't running (it owns the camera; the MCP server talks to it)</td><td>Start <code>perception --cell &lt;cell&gt; gui</code>; or set <code>PERCEPTION_COCKPIT_URL</code></td></tr>
+  </table></div>
+</section>
+
+<!-- ============================================================ 8. status & log -->
+<section class="spread" id="log">
+  <div class="chapter-no">chapter 8</div>
+  <h2 class="chapter-title">Status &amp; field log</h2>
+  <div class="tblwrap"><table>
+    <tr><th>Piece</th><th>State</th></tr>
+    <tr><td>RGB-D capture, filters, tuning</td><td><span class="tag ok">verified on the D435</span> dev Mac, 2026-09-04 (3/3 hardware tests)</td></tr>
+    <tr><td>Segment → locate → move</td><td><span class="tag ok">verified on the PolyScope X sim</span> synthetic camera, Remote mode, 2026-09-04</td></tr>
+    <tr><td>Cell profiles, doctor, Pilot panel, combined MCP, Windows scripts</td><td><span class="tag ok">built + unit-tested</span> synthetic camera + dry-run robot, 2026-09-12</td></tr>
+    <tr><td>Windows laptop</td><td><span class="tag no">not run yet</span></td></tr>
+    <tr><td>UR3e / UR20 (real arms)</td><td><span class="tag no">not run yet</span> — IPs not known</td></tr>
+    <tr><td>Bracket Rev B.2</td><td><span class="tag no">not printed</span></td></tr>
+    <tr><td>Hand-eye</td><td><span class="tag no">uncalibrated</span> — bracket nominal seed in use</td></tr>
+    <tr><td>Stack on the controller's GPU (AI Accelerator)</td><td><span class="tag no">not attempted</span> — perception container builds for linux/arm64 only</td></tr>
+  </table></div>
+  <h3>Field log</h3>
+  <ul class="log">
+    <li><b>2026-09-12</b> — Pilot's seat built: cell profiles (<code>sim</code>/<code>ur3</code>/<code>ur20</code>), <code>perception doctor</code>, the cockpit's Pilot panel (status chips, Bring up / STOP / Freedrive / Doctor, jog pad, Events log), the combined robot + camera MCP server (<code>perception-mcp</code>, <code>.mcp.json</code>), Windows setup/launch scripts. Verified on the synthetic camera + dry-run robot only. D435 not plugged in on the dev Mac today (doctor confirmed: SDK found, no device). Not yet run on the Windows laptop, the UR3e or the UR20. Bracket not yet printed; hand-eye uncalibrated.</li>
+    <li><b>2026-09-04</b> — Send-to-robot flow verified on the PolyScope X sim 10.13.0 (native arm64, Remote): flange readback == controller; Locate + Move landed to 0.1 mm. Depth chain (848×480, spatial + temporal, High Accuracy, max laser) verified on the D435: temporal noise raw ~46–50 mm → filtered ~16–18 mm. Found the black-colour-on-mismatched-sizes behaviour. Decision: PolyScope X is the exclusive target from here.</li>
+    <li><b>2026-09-03</b> — D435 streams at 30 fps under sudo on macOS, first open and clean re-open; earlier failures were a cascade of failed one-shot opens racing Apple's UVCAssistant (re-plug clears it).</li>
+  </ul>
+  <h3>Open questions</h3>
+  <ul>
+    <li>IP addresses of the UR3 and UR20 controllers (→ <code>UR_HOST</code> in the cell files).</li>
+    <li>Is the "UR3" a UR3e running PolyScope X? The cell profile assumes PolyScope X; the doctor will flag a mismatch if it's PolyScope 5 (then <code>UR_PLATFORM=e-series</code>, Dashboard 29999).</li>
+    <li>Hand-eye calibration method (a checkerboard / a known point touched by the TCP / a fiducial) and who owns the resulting <code>PERCEPTION_T_FLANGE_CAMERA</code> per robot.</li>
+    <li>Which AI Accelerator / JetPack image the controller runs, for the on-controller container (CUDA + SAM).</li>
+    <li>USB-C exit and cable routing on the printed bracket (confirm on the first print; spec §6 A1).</li>
+  </ul>
+  <div class="note"><strong>Keeping this document current.</strong> It lives in <code>docs/realsense-cell.html</code> and ships with the PR. When something is learned on hardware: append a dated line to the field log, flip the row in the status table, and correct the section it belongs to (a new symptom goes in Troubleshooting with its fix; a new command goes in Interfaces). Anything not yet seen on real hardware stays marked <span class="tag no">unverified</span>.</div>
+</section>
+
+<footer>UR-utils · <a href="index.html">the sandbox</a> · <a href="realsense.md">docs/realsense.md</a> · <a href="harness.md">docs/harness.md</a></footer>
+</div>
+</body>
+</html>
