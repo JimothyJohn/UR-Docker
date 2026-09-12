@@ -35,3 +35,9 @@ updates:
       # run-integration pass and a human eye.
       interval: "monthly"
     labels: ["dependencies", "simulator"]
+    ignore:
+      # PolyScope X sim is pinned at 10.13.0 on purpose: in 10.14.0 the
+      # Settings -> Security -> Services toggles (Primary, RTDE) never stick
+      # (firewall "ethCB0" 404), so urctl can't move the robot. Re-test a new
+      # tag by hand (see the comment in docker-compose.yml) before unpinning.
+      - dependency-name: "universalrobots/ursim_polyscopex"
