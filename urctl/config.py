@@ -105,6 +105,11 @@ class RobotConfig:
     platform: str = DEFAULT_PLATFORM
     robot_api_port: int = DEFAULT_ROBOT_API_PORT
     robot_api_base_path: str = DEFAULT_ROBOT_API_BASE_PATH
+    # Arm model (``UR_ROBOT_MODEL``, e.g. "UR3e" — the cell files set it). Sizes
+    # the safety envelope's reach cap; blank = ask the controller on first use.
+    robot_model: str = ""
+    # Explicit reach cap in metres (``UR_MAX_REACH_M``); None = per-model table.
+    max_reach: float | None = None
 
     @classmethod
     def from_env(cls, host: str | None = None, **overrides) -> RobotConfig:
@@ -127,6 +132,8 @@ class RobotConfig:
             "platform": os.environ.get("UR_PLATFORM", DEFAULT_PLATFORM),
             "robot_api_port": _env_int("UR_ROBOT_API_PORT", DEFAULT_ROBOT_API_PORT),
             "robot_api_base_path": os.environ.get("UR_ROBOT_API_BASE_PATH", DEFAULT_ROBOT_API_BASE_PATH),
+            "robot_model": os.environ.get("UR_ROBOT_MODEL", "").strip(),
+            "max_reach": _env_float("UR_MAX_REACH_M", 0.0) or None,
         }
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]

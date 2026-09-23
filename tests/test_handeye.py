@@ -247,3 +247,144 @@ def test_from_env_precedence_env_then_file_then_seed(tmp_path):
         HandEye.from_env({"UR_CELL": "nope-no-file", "PERCEPTION_BRACKET": "ur20"}).source
         == "bracket-nominal:ur20"
     )
+
+
+def test_locate_reports_reach_against_the_arm():
+    """The verdict is on screen before Move: the approach pose is checked against
+    the arm's reach (the same cap the envelope enforces)."""
+    he = HandEye()
+    flange = [0.5, 0.0, 0.5, *TOOL_DOWN]
+    out = locate(he, flange, (0.0, 0.0, 0.3), tcp_pose=flange, standoff_m=0.05)
+    assert out["reachable"] is None and out["max_reach_m"] is None
+    assert out["approach_distance_m"] == pytest.approx(
+        math.sqrt(sum(v * v for v in out["approach_pose"][:3])), abs=1e-12
+    )
+    assert out["point_distance_m"] == pytest.approx(
+        math.sqrt(sum(v * v for v in out["point_base_m"])), abs=1e-12
+    )
+    # a UR10e reaches it; a UR3e (0.5 m) does not
+    assert locate(he, flange, (0, 0, 0.3), tcp_pose=flange, max_reach_m=1.3)["reachable"] is True
+    near = locate(he, flange, (0, 0, 0.3), tcp_pose=flange, max_reach_m=0.5)
+    assert near["reachable"] is False and near["max_reach_m"] == 0.5
+
+
+def test_robotlink_locate_carries_the_models_reach(monkeypatch):
+    FakeController().install(monkeypatch)
+    link = RobotLink(RobotConfig(host="fake", robot_model="UR3e"))
+    loc = link.locate((0.0, 0.0, 0.3))
+    assert loc["ok"] and loc["max_reach_m"] == 0.5 and loc["model"] == "UR3E"
+    assert loc["reachable"] is (loc["approach_distance_m"] <= 0.5)
+
+
+def test_locate_can_measure_the_standoff_from_the_flange():
+    """Tool down, 120 mm active TCP. 'flange' puts the *flange* 75 mm above
+    the point; the returned approach is the TCP pose that achieves it."""
+    he = HandEye()
+    flange = [0.5, 0.0, 0.5, *TOOL_DOWN]
+    offset = [0, 0, 0.12, 0, 0, 0]
+    tcp = pose_trans(flange, offset)
+    out = locate(
+        he, flange, (0.0, 0.0, 0.3), tcp_pose=tcp, standoff_m=0.075, reference="flange", tcp_offset=offset
+    )
+    assert out["reference"] == "flange" and out["tcp_offset"] == offset
+    # the flange target is 75 mm up the (downward) view ray from the point
+    expect_flange = [p - 0.075 * r for p, r in zip(out["point_base_m"], out["view_ray_base"], strict=True)]
+    assert _close(out["flange_target_pose"][:3], expect_flange, 1e-9)
+    assert out["flange_target_pose"][3:] == pytest.approx(flange[3:], abs=1e-9)  # orientation kept
+    # the approach (TCP) pose is that flange pose pushed through the offset: 120 mm further down
+    assert _close(out["approach_pose"], pose_trans(out["flange_target_pose"], offset), 1e-9)
+    assert out["approach_pose"][2] == pytest.approx(out["flange_target_pose"][2] - 0.12, abs=1e-9)
+    # tcp reference (the default) still reports where the flange would end up
+    out2 = locate(he, flange, (0.0, 0.0, 0.3), tcp_pose=tcp, standoff_m=0.075, tcp_offset=offset)
+    assert out2["reference"] == "tcp"
+    assert _close(out2["flange_target_pose"], pose_trans(out2["approach_pose"], pose_inv(offset)), 1e-9)
+    assert locate(he, flange, (0, 0, 0.3), tcp_pose=tcp)["flange_target_pose"] is None
+    with pytest.raises(ValueError):
+        locate(he, flange, (0, 0, 0.3), tcp_pose=tcp, reference="flange")  # needs the offset
+    with pytest.raises(ValueError):
+        locate(he, flange, (0, 0, 0.3), tcp_pose=tcp, reference="wrist")
+    with pytest.raises(ValueError):
+        locate(he, flange, (0, 0, 0.3), tcp_pose=tcp, reference="flange", tcp_offset=[0, 0, 0])
+
+
+def test_robotlink_approach_defaults_come_from_the_cell_env(monkeypatch):
+    fake = FakeController().install(monkeypatch)
+    link = RobotLink(RobotConfig(host="fake"))
+    assert link.describe()["approach"] == {
+        "standoff_m": 0.10,
+        "reference": "tcp",
+        "velocity": 0.1,
+        "acceleration": 0.3,
+    }
+    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "flange")
+    monkeypatch.setenv("PERCEPTION_STANDOFF_M", "0.075")
+    link = RobotLink(RobotConfig(host="fake"))
+    assert (
+        link.describe()["approach"]["standoff_m"] == 0.075
+        and link.describe()["approach"]["reference"] == "flange"
+    )
+    loc = link.locate((0.0, 0.0, 0.3))
+    assert loc["ok"] and loc["reference"] == "flange" and loc["standoff_m"] == 0.075
+    assert loc["tcp_offset"] == pytest.approx(fake.tcp_offset, abs=1e-6)
+    # a per-call override wins
+    loc = link.locate((0.0, 0.0, 0.3), standoff_m=0.2, reference="tcp")
+    assert loc["reference"] == "tcp" and loc["standoff_m"] == 0.2
+    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "wrist")
+    with pytest.raises(ValueError):
+        RobotLink(RobotConfig(host="fake"))
+    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "tcp")
+    monkeypatch.setenv("PERCEPTION_STANDOFF_M", "5")
+    with pytest.raises(ValueError):
+        RobotLink(RobotConfig(host="fake"))
+
+
+def test_robotlink_move_passes_the_tcp_override(monkeypatch):
+    fake = FakeController().install(monkeypatch)
+    link = RobotLink(RobotConfig(host="fake", robot_model="UR3e"))
+    res = link.move([0.3, 0.1, 0.2, 0, 3.14, 0], tcp=[0, 0, 0, 0, 0, 0])
+    assert res["ok"] and "set_tcp(p[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])" in fake.primary_sends[-1]
+    with pytest.raises(ValueError):
+        link.move([0.3, 0.1, 0.2, 0, 3.14, 0], tcp=[0, 0])
+
+
+def test_robotlink_approach_cycle_is_one_flange_program_that_returns_home(monkeypatch):
+    fake = FakeController().install(monkeypatch)
+    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "flange")
+    monkeypatch.setenv("PERCEPTION_STANDOFF_M", "0.075")
+    link = RobotLink(RobotConfig(host="fake", robot_model="UR10e"))  # the fake's flange sits 0.5 m out
+    res = link.approach_cycle((0.0, 0.0, 0.3), clearance_m=0.1, hold_s=1.0, velocity=0.15)
+    assert res["ok"] and res["completed_legs"] == 4, res
+    cyc = res["cycle"]
+    loc = res["locate"]
+    assert cyc["reference"] == "flange" and cyc["standoff_m"] == 0.075 and cyc["tcp"] == [0.0] * 6
+    assert cyc["target_pose"] == loc["flange_target_pose"] and cyc["capture_pose"] == loc["flange_pose"]
+    assert (
+        cyc["over_pose"][2] == pytest.approx(cyc["target_pose"][2] + 0.1)
+        and cyc["over_pose"][:2] == cyc["target_pose"][:2]
+    )
+    legs = [leg["pose"] for leg in res["legs"]]
+    assert legs == [cyc["over_pose"], cyc["target_pose"], cyc["over_pose"], cyc["capture_pose"]]
+    assert res["legs"][1]["dwell_s"] == 1.0 and res["legs"][0]["dwell_s"] == 0.0
+    (sent,) = [s for s in fake.primary_sends if "movel(" in s]
+    assert sent.count("movel(") == 4 and "set_tcp(p[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])" in sent
+    # tcp reference: no override, capture/target are TCP poses
+    res = link.approach_cycle((0.0, 0.0, 0.3), reference="tcp")
+    assert (
+        res["ok"]
+        and res["cycle"]["tcp"] is None
+        and res["cycle"]["capture_pose"] == res["locate"]["tcp_pose"]
+    )
+    assert "set_tcp(" not in [s for s in fake.primary_sends if "movel(" in s][-1]
+
+
+def test_robotlink_approach_cycle_refuses_out_of_reach_and_bad_params(monkeypatch):
+    fake = FakeController().install(monkeypatch)
+    link = RobotLink(RobotConfig(host="fake", robot_model="UR3e"))
+    # the fake's flange sits 0.5 m out, tool down; a point 1 m below it is beyond a UR3e
+    res = link.approach_cycle((0.0, 0.0, 1.0), reference="flange")
+    assert not res["ok"], res
+    assert "out of reach" in res["error"] and res["locate"]["reachable"] is False
+    assert not any("movel(" in s for s in fake.primary_sends)
+    for kw in ({"clearance_m": 2.0}, {"hold_s": -1}, {"velocity": 0}, {"velocity": 5}):
+        with pytest.raises(ValueError):
+            link.approach_cycle((0.0, 0.0, 0.3), **kw)

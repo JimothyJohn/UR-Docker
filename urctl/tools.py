@@ -125,7 +125,18 @@ def _h_move_tcp(robot: Robot, p: dict) -> dict:
         kwargs["velocity"] = p["velocity"]
     if "acceleration" in p:
         kwargs["acceleration"] = p["acceleration"]
+    if p.get("tcp") is not None:
+        kwargs["tcp"] = p["tcp"]
     return robot.move_tcp(p["pose"], **kwargs)
+
+
+def _h_move_tcp_path(robot: Robot, p: dict) -> dict:
+    kwargs = {}
+    if p.get("tcp") is not None:
+        kwargs["tcp"] = p["tcp"]
+    if "timeout" in p:
+        kwargs["timeout"] = p["timeout"]
+    return robot.move_tcp_path(p["legs"], **kwargs)
 
 
 def _h_move_home(robot: Robot, p: dict) -> dict:
@@ -146,7 +157,10 @@ def _h_move_trajectory(robot: Robot, p: dict) -> dict:
 
 
 def _h_freedrive(robot: Robot, p: dict) -> dict:
-    return robot.freedrive(p["enable"])
+    kwargs = {}
+    if p.get("hold_s") is not None:
+        kwargs["hold_s"] = float(p["hold_s"])
+    return robot.freedrive(p["enable"], **kwargs)
 
 
 def _h_popup(robot: Robot, p: dict) -> dict:
@@ -286,10 +300,45 @@ TOOLS: list[Tool] = [
                 },
                 "velocity": _TCP_VELOCITY_SCHEMA,
                 "acceleration": _TCP_ACCELERATION_SCHEMA,
+                "tcp": {
+                    **_POSE_SCHEMA,
+                    "description": "Override the active TCP for this move (set_tcp in the same program); "
+                    "[0,0,0,0,0,0] makes pose the tool-flange target.",
+                },
             },
             required=["pose"],
         ),
         _h_move_tcp,
+    ),
+    Tool(
+        "ur_move_tcp_path",
+        "Run several absolute movel legs as ONE program on one connection (an "
+        "approach cycle: over → down → dwell → up → back). Each leg: pose "
+        "[x,y,z,rx,ry,rz], optional velocity/acceleration (m/s, m/s^2) and dwell_s "
+        "to pause after landing. All legs are safety-validated before anything is "
+        "sent; tcp overrides the active TCP for the whole path ([0]*6 = flange).",
+        _object_schema(
+            {
+                "legs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": _object_schema(
+                        {
+                            "pose": _POSE_SCHEMA,
+                            "velocity": _TCP_VELOCITY_SCHEMA,
+                            "acceleration": _TCP_ACCELERATION_SCHEMA,
+                            "dwell_s": {"type": "number", "minimum": 0, "maximum": 60},
+                        },
+                        required=["pose"],
+                    ),
+                },
+                "tcp": _POSE_SCHEMA,
+                "timeout": {"type": "number", "minimum": 1, "maximum": 600},
+            },
+            required=["legs"],
+        ),
+        _h_move_tcp_path,
     ),
     Tool(
         "ur_move_trajectory",
@@ -333,8 +382,17 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         "ur_freedrive",
-        "Enable or disable freedrive (hand-guiding) on all six axes.",
-        _object_schema({"enable": {"type": "boolean"}}, required=["enable"]),
+        "Enable or disable freedrive (hand-guiding) on all six axes. Enabling holds "
+        "freedrive for hold_s seconds (default 600) or until disabled — a real "
+        "e-Series drops freedrive the moment its script ends, so the hold is a program "
+        "that stays running.",
+        _object_schema(
+            {
+                "enable": {"type": "boolean"},
+                "hold_s": {"type": "number", "minimum": 1, "maximum": 3600},
+            },
+            required=["enable"],
+        ),
         _h_freedrive,
     ),
     Tool(

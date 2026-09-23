@@ -447,6 +447,19 @@ them over hand-rolled URScript.
   def-wrapped `movel` moved the robot with `is in remote control` → `false`).
   Only the **Dashboard `play` command** requires Remote mode. Don't add a
   remote-control precondition to motion — it would reject moves that work.
+- **Absolute moves are reach-checked per model.** `SafetyEnvelope.max_reach`
+  is sized by `SafetyEnvelope.for_model` (`UR_ROBOT_MODEL` from the cell file,
+  else the Dashboard's `get robot model`, probed once) — a UR3e is capped at
+  0.5 m, a UR20 at 1.75 m, unknown falls back to the UR10's 1.3 m and says so
+  in the `tcp_reach` violation. Reach is to the flange; `UR_MAX_REACH_M`
+  overrides for a long TCP. Check `locate(...)["reachable"]` before offering a
+  Move.
+- **One program at a time.** A new submission on 30001 replaces whatever is
+  running. `Robot.move_tcp_path` runs a whole multi-leg Cartesian path
+  (over → down → dwell → up → back) as one program on one connection, and
+  `PrimaryClient` refuses a concurrent submission (`PrimaryBusyError`) so a
+  state poll or a Locate can't kill it. `tcp=` on `move_tcp`/`move_tcp_path`
+  runs `set_tcp` in the same program (`[0]*6` = the flange).
 - **Relative moves are base-frame.** `move_tcp(..., relative=True)` adds the
   delta to the live TCP via `pose_add(get_actual_tcp_pose(), p[...])`, so the
   XYZ delta is in the **base** frame (use `pose_trans` if you ever want the
@@ -620,6 +633,11 @@ runs and one that pops "cannot reach the required pose" mid-cycle.
 | URSim container is `Up` but 29999 refuses / resets and `docker logs` shows `Trace/breakpoint trap   Xvfb` | Docker Desktop is emulating amd64 with **Rosetta**; Xvfb crashes under it, PolyScope (which serves the Dashboard) never starts, and URControl stops listening within minutes. Seen 2026-09-04 on the Mac Studio; the `Exited (101)` containers from weeks earlier were the same | Switch Docker Desktop to QEMU emulation (Settings → General → untick "Use Rosetta for x86_64/amd64 emulation") and restart Docker, or run the sim on an amd64 host / CI |
 | RealSense colour panel black, depth fine, RGB options at factory | depth and colour streaming at **different sizes** on the D435 | keep both at 848×480 (the default); `docs/realsense.md` §Depth quality |
 | RealSense first open of a process never delivers a frame, re-opens work | sensor options written between pipeline start and the first frameset | write them on the first `read()` (`DepthTuning` does); never at open |
+| **On a real e-Series**, `move-tcp` / cockpit **Move** to a target the arm can't reach returns `ok:false`, `landed:null`, no violation — and the arm **stretches to a straight elbow** chasing it (UR3e, 2026-09-23: a 0.69 m target on a 0.5 m arm) | The envelope's reach cap used to be a hardcoded UR10 1.3 m, whatever the arm | Fixed: `SafetyEnvelope.for_model` sizes `max_reach` from `UR_ROBOT_MODEL` (the cell files) or the Dashboard's `get robot model` (probed once before the first absolute move); `MODEL_REACH_M` covers UR3/5/7e/10/12e/15/16e/20/30. `locate` now returns `reachable` and the cockpit's event says **OUT OF REACH** before you press Move. `UR_MAX_REACH_M` overrides (long TCP). Doctor line `robot.model` shows the cap and flags a cell/controller model mismatch. |
+| A multi-leg move (`ur_move_tcp_path`, the cockpit **Approach** cycle) stops part-way with `ok:false`, no protective stop, robot parked mid-path | **Any new URScript on 30001 replaces the running program.** A concurrent state poll whose RTDE read hiccuped (legacy `textmsg` fallback), a Locate (`get_flange_pose` is a script), or a second Move kills the cycle silently. Seen once on the UR3e 2026-09-23 (4-leg cycle died after leg 2) | Fixed inside one process: `PrimaryClient` holds a non-blocking in-flight lock — a concurrent submission raises `PrimaryBusyError`, and `get_state` reports `primary_busy` with no joints instead of sending. Across *processes* (a CLI `run-script` while the cockpit drives) nothing can protect you — don't. |
+| The cockpit's flange-referenced approach lands a constant ~35 mm off the object, even with the TCP forced to zero | The hand-measured `PERCEPTION_T_FLANGE_CAMERA` (to the camera housing) was 21 mm off in X, 36 mm in Z and had the tilt sign inverted — the depth origin is the **left IR imager**, not the housing centre | Run the touch-and-click hand-eye (mark = flange centre on the part with `set_tcp(p[0,…])`, 3 clicked views from varied wrist poses); 2026-09-23 on the UR3e: RMS 1.7 mm, located point 3 mm from the mark afterwards. The solved pose is in `perception/cells/ur3.env` + `captures/calibration/handeye_ur3.json`. |
+| `ur_flange_pose` / Locate gives a flange pose that is wrong by tens of mm while `get_tcp_offset()` looks plausible | The controller reported an active-TCP offset (`0,-0.035,0.22,…`) that was **not** what its motion actually used; `pose_trans(tcp, inv(offset))` then puts the "flange" in the wrong place | Force the TCP yourself: `set_tcp(p[0,0,0,0,0,0])` (persists until the next `set_tcp`/installation load) — then TCP == flange and every read/move agrees. `move_tcp(..., tcp=[0]*6)` / `--tcp` puts it in the same program as the `movel`; the flange-referenced cycle does this on every leg. |
+| Cockpit **Freedrive** (or `urctl freedrive on`, `ur_freedrive`) reports ok but the real arm stays stiff; the reteach/inspect dialogs *do* hand-guide | Freedrive lives only while the program that called `freedrive_mode()` runs. A one-line script ends instantly → freedrive ends instantly (URSim is lenient, hardware isn't) | Fixed: `Robot.freedrive(True, hold_s=600)` sends a bounded `sleep` loop that keeps the program alive and confirms via `textmsg("urctl/freedrive=on")` (`ok:false` if the echo never comes); `off` sends `end_freedrive_mode()` as a new program, which also kills the hold; the hold releases itself when it expires (`--hold`, tool `hold_s`, max 1 h). |
 
 ## Working in this repo
 

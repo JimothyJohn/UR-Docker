@@ -111,16 +111,46 @@ COCKPIT_TOOLS: list[CockpitTool] = [
         "Map the active segment's camera point (or an explicit point_m) into the robot base frame using the "
         "live flange pose and the hand-eye transform, and compute an approach pose standoff_m short of it "
         "along the viewing ray. Reads the robot; moves nothing. Returns every intermediate frame.",
-        _schema({"standoff_m": {"type": "number"}, "point_m": _POINT}),
-        lambda c, p: c.locate(standoff_m=p.get("standoff_m"), point_m=p.get("point_m")),
+        _schema(
+            {
+                "standoff_m": {"type": "number"},
+                "point_m": _POINT,
+                "reference": {"type": "string", "enum": ["tcp", "flange"]},
+            }
+        ),
+        lambda c, p: c.locate(
+            standoff_m=p.get("standoff_m"), point_m=p.get("point_m"), reference=p.get("reference")
+        ),
     ),
     CockpitTool(
         "cam_move_to_approach",
         "movel the TCP to an absolute base-frame pose — normally the approach_pose cam_locate just returned. "
         "Safety-enveloped and audited; slow by default (0.1 m/s). Needs the robot RUNNING and, on "
         "PolyScope X or a real e-Series, Remote control mode.",
-        _schema({"pose": _POSE, "velocity": {"type": "number"}}, required=["pose"]),
-        lambda c, p: c.move(p["pose"], velocity=p.get("velocity")),
+        _schema({"pose": _POSE, "velocity": {"type": "number"}, "tcp": _POSE}, required=["pose"]),
+        lambda c, p: c.move(p["pose"], velocity=p.get("velocity"), tcp=p.get("tcp")),
+    ),
+    CockpitTool(
+        "cam_approach_cycle",
+        "The test loop: over the current segment at clearance_m, down to the standoff (cell default; "
+        "reference tcp|flange), hold hold_s, back up, back to the capture pose — one safety-validated "
+        "program. Refused when out of reach. Segment first (cam_segment / cam_nearest).",
+        _schema(
+            {
+                "standoff_m": {"type": "number"},
+                "reference": {"type": "string", "enum": ["tcp", "flange"]},
+                "clearance_m": {"type": "number"},
+                "hold_s": {"type": "number"},
+                "velocity": {"type": "number"},
+            }
+        ),
+        lambda c, p: c.approach_cycle(
+            standoff_m=p.get("standoff_m"),
+            reference=p.get("reference"),
+            clearance_m=p.get("clearance_m"),
+            hold_s=p.get("hold_s"),
+            velocity=p.get("velocity"),
+        ),
     ),
     CockpitTool(
         "cam_capture",

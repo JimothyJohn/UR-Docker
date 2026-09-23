@@ -36,7 +36,7 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
-from urctl.pose import Transform, Vec3
+from urctl.pose import Transform, Vec3, pose_inv, pose_trans
 
 # Bracket README §3 (Rev B.2), one seed per print (``hardware/d435-tool-bracket/
 # bracket.py`` VARIANTS; the numbers are ``out/build_info.json`` →
@@ -83,6 +83,14 @@ def default_handeye_path(env: Mapping[str, str] | None = None) -> str:
 
 ENV_T_FLANGE_CAMERA = "PERCEPTION_T_FLANGE_CAMERA"
 DEFAULT_STANDOFF_M = 0.10
+# What the standoff is measured from: the active TCP ("tcp", the historical
+# behaviour) or the tool flange ("flange"). A cell whose active TCP is a
+# training/gripper offset the physical tool doesn't match wants "flange":
+# "put the flange 75 mm above the part" is the number the integrator knows.
+APPROACH_REFERENCES = ("tcp", "flange")
+DEFAULT_APPROACH_REFERENCE = "tcp"
+ENV_APPROACH_REFERENCE = "PERCEPTION_APPROACH_REFERENCE"
+ENV_STANDOFF_M = "PERCEPTION_STANDOFF_M"
 
 
 def transform_from_extrinsics(ext: Mapping | None) -> Transform:
@@ -196,6 +204,9 @@ def locate(
     *,
     tcp_pose: Sequence[float],
     standoff_m: float = DEFAULT_STANDOFF_M,
+    max_reach_m: float | None = None,
+    reference: str = DEFAULT_APPROACH_REFERENCE,
+    tcp_offset: Sequence[float] | None = None,
 ) -> dict:
     """Turn a colour-camera point into base coordinates and an **approach pose**
     for the tool: the TCP placed ``standoff_m`` short of the point along the
@@ -206,6 +217,17 @@ def locate(
     it was already pointing — with the camera looking along the flange +Z
     axis that is straight down the tool axis. Returns every intermediate
     frame so the cockpit can show its work before anything moves.
+
+    ``reference`` picks what sits ``standoff_m`` short of the point: the active
+    TCP (``"tcp"``) or the tool flange (``"flange"``, needs ``tcp_offset`` —
+    the live active-TCP offset, flange→TCP UR pose — to express the flange
+    target as the TCP pose ``movel`` takes). The move always keeps the tool's
+    current orientation, so ``flange_target_pose`` is reported either way.
+
+    ``max_reach_m`` (the arm's datasheet reach — ``SafetyEnvelope.max_reach``)
+    adds ``reachable`` / ``approach_distance_m`` so the verdict is on screen
+    *before* Move: an approach beyond the arm's reach is a move the envelope
+    will refuse, and a point beyond it can't be picked from this base at all.
     """
     p_cam = _check_point(point_cam, "point_cam")
     if not math.isfinite(standoff_m) or standoff_m < 0.0 or standoff_m > 1.0:
@@ -214,12 +236,45 @@ def locate(
     tcp = [float(v) for v in tcp_pose]
     if len(tcp) != 6:
         raise ValueError("tcp_pose must have 6 elements")
+    if reference not in APPROACH_REFERENCES:
+        raise ValueError(f"reference must be one of {APPROACH_REFERENCES}, not {reference!r}")
+    offset = None
+    if tcp_offset is not None:
+        offset = [float(v) for v in tcp_offset]
+        if len(offset) != 6 or not all(math.isfinite(v) for v in offset):
+            raise ValueError("tcp_offset must be 6 finite numbers")
+    if reference == "flange" and offset is None:
+        raise ValueError("reference='flange' needs the active tcp_offset")
     p_flange = handeye.camera_to_flange(p_cam)
     p_base = base_from_flange.apply(p_flange)
     ray_base = base_from_flange.rotate(handeye.flange_to_color.rotate((0.0, 0.0, 1.0)))
-    approach = tuple(p - standoff_m * r for p, r in zip(p_base, ray_base, strict=True))
-    target = [*approach, *tcp[3:]]
+    short = tuple(p - standoff_m * r for p, r in zip(p_base, ray_base, strict=True))
+    flange_now = [float(v) for v in flange_pose]
+    if reference == "flange":
+        flange_target = [*short, *flange_now[3:]]
+        target = pose_trans(flange_target, offset)  # the TCP pose that puts the flange there
+    else:
+        target = [*short, *tcp[3:]]
+        flange_target = pose_trans(target, pose_inv(offset)) if offset is not None else None
+    approach = tuple(target[:3])
+    approach_dist = math.sqrt(sum(v * v for v in approach))
+    point_dist = math.sqrt(sum(v * v for v in p_base))
+    # Reach is judged on the pose that will be *commanded*: with the flange
+    # reference the moves run with the TCP overridden to the flange, so the
+    # flange target is what the envelope sees (the TCP pose is a virtual point
+    # that can sit nearer the base than the flange does).
+    commanded = flange_target if reference == "flange" else target
+    commanded_dist = math.sqrt(sum(v * v for v in commanded[:3]))
+    reachable = None if max_reach_m is None else bool(commanded_dist <= max_reach_m)
     return {
+        "approach_distance_m": approach_dist,
+        "commanded_distance_m": commanded_dist,
+        "point_distance_m": point_dist,
+        "max_reach_m": None if max_reach_m is None else float(max_reach_m),
+        "reachable": reachable,
+        "reference": reference,
+        "flange_target_pose": flange_target,
+        "tcp_offset": offset,
         "point_cam_m": list(p_cam),
         "point_flange_m": list(p_flange),
         "point_base_m": list(p_base),

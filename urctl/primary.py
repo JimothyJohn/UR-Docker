@@ -11,6 +11,7 @@ RTDE on 30004 — out of scope for this control-oriented toolkit.)
 from __future__ import annotations
 
 import re
+import threading
 
 from . import transport
 from .config import RobotConfig
@@ -39,21 +40,56 @@ def _wrap(fn_name: str, body: str) -> str:
     return f"def {fn_name}():\n{indented}end\n{fn_name}()\n"
 
 
+BUSY_MESSAGE = (
+    "Primary channel busy: a program sent by this client is still running. "
+    "Any new URScript would replace (kill) it — wait for it to finish or stop it first."
+)
+
+
+class PrimaryBusyError(OSError):
+    """A second URScript submission was refused while one is still in flight.
+
+    The controller runs one program at a time: a new submission on 30001
+    silently kills the current one. That is exactly how a state poll's
+    ``textmsg`` fallback, a Locate, or a second Move can cut an approach cycle
+    short mid-path (seen 2026-09-23 on the UR3e: a 4-leg cycle stopped after
+    leg 2 with no fault). So one client never lets that happen: the second
+    caller gets this error instead, and ``Robot.get_state`` leaves joints
+    unset rather than send anything.
+    """
+
+
 class PrimaryClient:
     def __init__(self, config: RobotConfig | None = None):
         self.config = config or RobotConfig.from_env()
+        # Held for the whole send(+capture) of one submission. Non-blocking:
+        # a concurrent caller is refused, never queued behind a running move.
+        self._inflight = threading.Lock()
+
+    @property
+    def busy(self) -> bool:
+        """True while a submission from this client is on the wire / being waited on."""
+        if self._inflight.acquire(blocking=False):
+            self._inflight.release()
+            return False
+        return True
 
     def send(self, urscript: str) -> None:
         """Stream a URScript snippet; the controller runs it immediately.
 
         Does not wait for a response — Primary is a broadcast channel.
         """
-        transport.send(
-            self.config.host,
-            self.config.primary_port,
-            urscript.encode("utf-8"),
-            timeout=self.config.timeout,
-        )
+        if not self._inflight.acquire(blocking=False):
+            raise PrimaryBusyError(BUSY_MESSAGE)
+        try:
+            transport.send(
+                self.config.host,
+                self.config.primary_port,
+                urscript.encode("utf-8"),
+                timeout=self.config.timeout,
+            )
+        finally:
+            self._inflight.release()
 
     def send_and_capture(
         self,
@@ -70,14 +106,19 @@ class PrimaryClient:
         appears in the stream rather than waiting the whole window — used to
         return promptly once a move's ``done`` textmsg lands.
         """
-        raw = transport.send_and_collect(
-            self.config.host,
-            self.config.primary_port,
-            urscript.encode("utf-8"),
-            collect_for=collect_for,
-            timeout=self.config.timeout,
-            stop_marker=stop_marker.encode("utf-8") if stop_marker else None,
-        )
+        if not self._inflight.acquire(blocking=False):
+            raise PrimaryBusyError(BUSY_MESSAGE)
+        try:
+            raw = transport.send_and_collect(
+                self.config.host,
+                self.config.primary_port,
+                urscript.encode("utf-8"),
+                collect_for=collect_for,
+                timeout=self.config.timeout,
+                stop_marker=stop_marker.encode("utf-8") if stop_marker else None,
+            )
+        finally:
+            self._inflight.release()
         marker_b = marker.encode("utf-8")
         return [
             m.group(0).decode("ascii", errors="replace")

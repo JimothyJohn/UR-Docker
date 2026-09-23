@@ -5,6 +5,7 @@ browser (or anything else on loopback) could throw at it."""
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 import urllib.error
@@ -369,7 +370,7 @@ def robot_server(tmp_path, monkeypatch):
     from urctl.config import RobotConfig
 
     fake = FakeController().install(monkeypatch)
-    link = RobotLink(RobotConfig(host="fake-ur"))
+    link = RobotLink(RobotConfig(host="fake-ur.invalid"))
     app = ViewerApp(
         SyntheticRgbdCamera(width=64, height=48, fps=0),
         config=PerceptionConfig(),
@@ -396,7 +397,8 @@ def test_robot_panel_info_and_locate_needs_a_segment(robot_server):
     _, _, body = get(base, "/api/info")
     info = json.loads(body)
     assert (
-        info["robot"]["host"] == "fake-ur" and info["robot"]["handeye"]["source"] == "bracket-nominal:eseries"
+        info["robot"]["host"] == "fake-ur.invalid"
+        and info["robot"]["handeye"]["source"] == "bracket-nominal:eseries"
     )
     # the synthetic camera's identity extrinsics were attached on open
     assert info["robot"]["handeye"]["depth_to_color_translation"] == [0.0, 0.0, 0.0]
@@ -493,6 +495,14 @@ def test_gui_main_robot_flags(monkeypatch, tmp_path):
 # ---- pilot endpoints: jog / bring-up / stop / freedrive / doctor / events / snapshot -----
 
 
+def _closed_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
 @pytest.fixture
 def pilot(tmp_path):
     from perception.robotlink import RobotLink
@@ -502,7 +512,19 @@ def pilot(tmp_path):
         SyntheticRgbdCamera(width=64, height=48, fps=0),
         config=PerceptionConfig(),
         store=CaptureStore(tmp_path / "caps"),
-        robot=RobotLink(RobotConfig(host="fake-ur"), dry_run=True),
+        # An unreachable robot must fail *fast*: a made-up hostname is not safe
+        # (corporate DNS search suffixes wildcard-resolve even ".invalid" names),
+        # so point at loopback ports nothing listens on.
+        robot=RobotLink(
+            RobotConfig(
+                host="127.0.0.1",
+                dashboard_port=_closed_port(),
+                robot_api_port=_closed_port(),
+                primary_port=_closed_port(),
+                rtde_port=_closed_port(),
+            ),
+            dry_run=True,
+        ),
     )
     srv = ThreadingHTTPServer(("127.0.0.1", 0), ViewerHandler)
     srv.daemon_threads = True
@@ -562,7 +584,7 @@ def test_doctor_endpoint_reports_the_live_stream_and_the_robot(pilot):
     doc = json.loads(body)
     names = {c["name"]: c for c in doc["checks"]}
     assert names["stream"]["ok"] is True and "synthetic" in names["stream"]["detail"]
-    # a dry-run link to "fake-ur" is unreachable → robot.reach fails with a fix, no crash
+    # a dry-run link to closed loopback ports is unreachable → robot.reach fails with a fix, no crash
     assert names["robot.reach"]["ok"] is False and names["robot.reach"]["fix"]
     status, _, body = get(base, "/api/doctor?robot=0")
     assert "robot.reach" not in {c["name"] for c in json.loads(body)["checks"]}
@@ -658,3 +680,50 @@ def test_calibration_flow_dry_run(pilot, tmp_path, monkeypatch):
     assert status == 200 and j["views"] == [] and j["mark_base"] is None
     status, j = post(base, "/api/cal/apply", {})
     assert status == 400 and "not solved" in j["error"]
+
+
+def test_robot_locate_accepts_a_reference(robot_server):
+    base, app, fake = robot_server
+    code, loc = post(
+        base, "/api/robot/locate", {"point_m": [0.0, 0.0, 0.3], "reference": "flange", "standoff_m": 0.075}
+    )
+    assert code == 200 and loc["ok"] and loc["reference"] == "flange", loc
+    assert loc["flange_target_pose"] and loc["tcp_offset"] == pytest.approx(fake.tcp_offset, abs=1e-6)
+    code, loc2 = post(base, "/api/robot/locate", {"point_m": [0.0, 0.0, 0.3]})
+    assert code == 200 and loc2["reference"] == "tcp"
+    code, bad = post(base, "/api/robot/locate", {"point_m": [0.0, 0.0, 0.3], "reference": "wrist"})
+    assert code == 400, bad
+    code, bad = post(base, "/api/robot/locate", {"point_m": [0.0, 0.0, 0.3], "reference": 7})
+    assert code == 400, bad
+
+
+def test_robot_move_accepts_a_tcp_override(robot_server):
+    base, app, fake = robot_server
+    code, mv = post(base, "/api/robot/move", {"pose": [0.3, 0.1, 0.2, 0, 3.14, 0], "tcp": [0, 0, 0, 0, 0, 0]})
+    assert code == 200 and mv["ok"], mv
+    assert "set_tcp(" in [s for s in fake.primary_sends if "movel(" in s][-1]
+    code, bad = post(base, "/api/robot/move", {"pose": [0.3, 0.1, 0.2, 0, 3.14, 0], "tcp": [0, 0]})
+    assert code == 400, bad
+
+
+def test_robot_approach_cycle_endpoint_runs_from_the_segment(robot_server):
+    base, app, fake = robot_server
+    code, j = post(base, "/api/robot/approach_cycle", {})
+    assert code == 400 and "segment" in (j.get("error") or "").lower(), j  # nothing segmented yet
+    code, seg = post(base, "/api/nearest", {})
+    assert code == 200 and seg["features"]["point_m"]
+    code, j = post(
+        base, "/api/robot/approach_cycle", {"hold_s": 0.5, "clearance_m": 0.05, "reference": "flange"}
+    )
+    assert code == 200 and j["ok"] and j["completed_legs"] == 4, j
+    assert (
+        j["cycle"]["hold_s"] == 0.5
+        and j["cycle"]["clearance_m"] == 0.05
+        and j["locate"]["reference"] == "flange"
+    )
+    assert [s for s in fake.primary_sends if "movel(" in s][-1].count("movel(") == 4
+    msgs = [e["message"] for e in json.loads(get(base, "/api/events")[2])["events"]]
+    assert any(m.startswith("approach cycle") for m in msgs)
+    for bad in ({"reference": "wrist"}, {"hold_s": "long"}, {"clearance_m": 3}, {"velocity": 0}):
+        code, j = post(base, "/api/robot/approach_cycle", bad)
+        assert code == 400, (bad, j)

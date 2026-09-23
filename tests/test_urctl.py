@@ -60,6 +60,8 @@ class FakeController:
         # echoed as pose_trans(tcp, pose_inv(offset)) computed host-side.
         self.tcp_pose = [0.5, -0.1, 0.4, 0.0, 3.14159265, 0.0]
         self.tcp_offset = [0.0, 0.0, 0.12, 0.0, 0.0, 0.0]
+        # Dashboard `get robot model` reply (an e-Series arm reports without the e).
+        self.model = "UR10"
 
     def install(self, monkeypatch) -> FakeController:
         from urctl import transport
@@ -87,6 +89,8 @@ class FakeController:
                 lines.append("STOPPED MotionDemo.urp")
             elif cmd == "is in remote control":
                 lines.append("true" if self.remote else "false")
+            elif cmd == "get robot model":
+                lines.append(self.model)
             elif cmd.startswith("load "):
                 lines.append(f"Loading program: /programs/{cmd[5:]}")
             elif cmd == "play":
@@ -115,6 +119,16 @@ class FakeController:
                     return b"urctl/reteach/pose=[1,2,3,4,5,6]\n"
                 return b"urctl/reteach=cancel\n"
             return f"urctl/confirm={self.confirm_answer}\n".encode()
+        if "urctl/path/" in body:
+            # A multi-leg TCP path echoes each leg's landed pose, then the final marker.
+            vecs = re.findall(r"movel\(p\[([^\]]+)\]", body)
+            lines = [f"urctl/path/leg{i}=[{v}]" for i, v in enumerate(vecs)]
+            lines.append(f"urctl/path/done=[{vecs[-1]}]")
+            return ("\n".join(lines) + "\n").encode()
+        if "urctl/freedrive" in body:
+            # The hold/release programs echo their marker once freedrive flips.
+            marker = "urctl/freedrive=on" if "while" in body else "urctl/freedrive=off"
+            return (marker + "\n").encode()
         if "urctl/flange" in body:
             from urctl.pose import pose_inv, pose_trans
 
@@ -125,9 +139,12 @@ class FakeController:
                 f"urctl/flange/offset={fmt(self.tcp_offset)}\n"
                 f"urctl/flange/pose={fmt(flange)}\n"
             ).encode()
-        # Echo the first bracketed vector back as the "done"/state marker so
-        # move/read round-trips parse successfully.
-        m = _VEC_RX.search(body)
+        # Echo the move's target vector back as the "done"/state marker so
+        # move/read round-trips parse successfully (a set_tcp(p[...]) override
+        # may precede the movel; skip it and take the movel's own literal).
+        m = re.search(
+            r"movel\((?:pose_add\(get_actual_tcp_pose\(\), )?p\[([^\]]+)\]", body
+        ) or _VEC_RX.search(body)
         vec = m.group(1) if m else "0,0,0,0,0,0"
         echo = f"urctl/move/done=[{vec}]\nurctl/state/joints=[{vec}]\nurctl/state/tcp=[0,0,0,0,0,0]\n"
         return echo.encode()
@@ -981,3 +998,347 @@ class TestCli:
         # fake fixture refuses RTDE connect -> rtde-state reports not ok.
         rc = cli_main(["rtde-state"])
         assert rc == 1
+
+
+# ----- reach cap per robot model ---------------------------------------------
+# 2026-09-23: a UR3e (0.5 m reach) was sent a 0.65 m approach pose because the
+# envelope's cap was the UR10's 1.3 m; the arm chased it to a straight elbow.
+
+
+class TestReachPerModel:
+    def test_reach_table_accepts_every_spelling(self):
+        from urctl.safety import reach_for_model
+
+        assert reach_for_model("UR3e") == reach_for_model("ur3") == reach_for_model("UR 3e") == 0.5
+        assert reach_for_model("UR5") == reach_for_model("UR5e") == reach_for_model("UR7e") == 0.85
+        assert reach_for_model("UR10") == reach_for_model("UR10e") == reach_for_model("UR12e") == 1.3
+        assert reach_for_model("UR15") == reach_for_model("UR30") == 1.3
+        assert reach_for_model("UR16e") == 0.9 and reach_for_model("UR20") == 1.75
+        assert reach_for_model("") is None and reach_for_model(None) is None
+        assert reach_for_model("KUKA") is None
+
+    def test_for_model_sizes_the_cap_and_names_the_model_in_the_violation(self):
+        from urctl.safety import DEFAULT_MAX_REACH
+
+        env = SafetyEnvelope.for_model("UR3e")
+        assert env.max_reach == 0.5 and env.model == "UR3E" and env.reach_known
+        v = env.validate_move_tcp(
+            [-0.43, -0.42, 0.24, 2.44, 0.86, -0.99],  # the pose that stretched the UR3e
+            velocity=0.05,
+            acceleration=0.3,
+            relative=False,
+            robot_mode="RUNNING",
+        )
+        assert not v.ok and any(x.rule == "tcp_reach" and "UR3E" in x.detail for x in v.violations)
+        # an explicit override wins over the table (long TCP, measured reach)
+        assert SafetyEnvelope.for_model("UR3e", max_reach=0.72).max_reach == 0.72
+        unknown = SafetyEnvelope.for_model("")
+        assert unknown.max_reach == DEFAULT_MAX_REACH and not unknown.reach_known and unknown.model == ""
+        v = unknown.validate_move_tcp(
+            [2, 0, 0, 0, 0, 0], velocity=0.1, acceleration=0.3, robot_mode="RUNNING"
+        )
+        assert any("model unknown" in x.detail for x in v.violations)
+
+    def test_config_reads_model_and_override_from_env(self, monkeypatch):
+        monkeypatch.setenv("UR_ROBOT_MODEL", "UR3e")
+        monkeypatch.setenv("UR_MAX_REACH_M", "0.6")
+        cfg = RobotConfig.from_env()
+        assert cfg.robot_model == "UR3e" and cfg.max_reach == 0.6
+        monkeypatch.delenv("UR_MAX_REACH_M")
+        assert RobotConfig.from_env().max_reach is None
+        monkeypatch.delenv("UR_ROBOT_MODEL")
+        assert RobotConfig.from_env().robot_model == ""
+
+    def test_robot_sizes_reach_from_the_configured_model_without_asking(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        robot = Robot(RobotConfig(robot_model="UR3e"))
+        assert robot.max_reach() == 0.5 and robot.safety.model == "UR3E"
+        res = robot.move_tcp([-0.43, -0.42, 0.24, 2.44, 0.86, -0.99])
+        assert not res["ok"] and any(v["rule"] == "tcp_reach" for v in res["safety"]["violations"])
+        assert not any("movel" in s for s in fake.primary_sends)
+        assert not any("get robot model" in s for s in fake.dashboard_sends)
+
+    def test_robot_asks_the_controller_once_when_the_model_is_unknown(self, monkeypatch):
+        from urctl.safety import DEFAULT_MAX_REACH
+
+        fake = FakeController().install(monkeypatch)
+        fake.model = "UR3"  # what a UR3e's Dashboard actually says
+        robot = Robot(RobotConfig())
+        assert robot.safety.max_reach == DEFAULT_MAX_REACH and not robot.safety.reach_known
+        res = robot.move_tcp([0.5, 0.5, 0.3, 0.0, 3.14, 0.0])
+        assert not res["ok"] and any(v["rule"] == "tcp_reach" for v in res["safety"]["violations"])
+        assert robot.safety.max_reach == 0.5 and robot.safety.model == "UR3"
+        assert sum("get robot model" in s for s in fake.dashboard_sends) == 1
+        assert robot.move_tcp([0.3, 0.2, 0.3, 0.0, 3.14, 0.0])["ok"]  # in reach: sent
+        assert sum("get robot model" in s for s in fake.dashboard_sends) == 1  # probed once
+
+    def test_unknown_controller_reply_keeps_the_default(self, monkeypatch):
+        from urctl.safety import DEFAULT_MAX_REACH
+
+        fake = FakeController().install(monkeypatch)
+        fake.model = "ack"  # pre-5.6 firmware: no such command
+        robot = Robot(RobotConfig())
+        assert robot.max_reach() == DEFAULT_MAX_REACH and robot.safety.model == ""
+
+    def test_explicit_envelope_and_relative_moves_never_probe(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        fake.model = "UR3"
+        robot = Robot(RobotConfig(), safety=SafetyEnvelope(max_reach=2.0))
+        assert robot.max_reach() == 2.0
+        robot = Robot(RobotConfig())
+        assert robot.move_tcp([0, 0.05, 0, 0, 0, 0], relative=True)["ok"]
+        assert not any("get robot model" in s for s in fake.dashboard_sends)
+        # dry-run never touches the wire either
+        assert Robot(RobotConfig(), dry_run=True).max_reach() == 1.3
+        assert not any("get robot model" in s for s in fake.dashboard_sends)
+
+
+# ----- freedrive holds a running program -------------------------------------
+# A real e-Series leaves freedrive the instant the calling script ends, so a
+# bare freedrive_mode() one-liner is a no-op on hardware (UR3e, 2026-09-23).
+
+
+class TestFreedriveHold:
+    def test_enable_holds_a_bounded_loop_and_confirms(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        res = Robot(RobotConfig()).freedrive(True, hold_s=120)
+        assert res["ok"] and res["confirmed"] and res["held_s"] == 120.0
+        (sent,) = fake.primary_sends
+        assert "freedrive_mode()" in sent and "while (urctl_fd_t < 120.0)" in sent
+        assert "end_freedrive_mode()" in sent and "urctl/freedrive=expired" in sent
+        assert sent.index("freedrive_mode()") < sent.index("while") < sent.index("end_freedrive_mode()")
+
+    def test_hold_is_clamped_to_sane_bounds(self, monkeypatch):
+        FakeController().install(monkeypatch)
+        assert Robot(RobotConfig()).freedrive(True, hold_s=99999)["held_s"] == 3600.0
+        assert Robot(RobotConfig()).freedrive(True, hold_s=0)["held_s"] == 1.0
+        assert Robot(RobotConfig()).freedrive(True)["held_s"] == 600.0
+
+    def test_disable_sends_end_as_its_own_program(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        res = Robot(RobotConfig()).freedrive(False)
+        assert res["ok"] and res["confirmed"] and "held_s" not in res
+        (sent,) = fake.primary_sends
+        assert "end_freedrive_mode()" in sent and "while" not in sent
+        assert re.search(r"(?<!end_)freedrive_mode\(\)", sent) is None  # never re-enabled
+
+    def test_enable_without_the_echo_is_not_ok(self, monkeypatch):
+        from urctl import transport
+
+        FakeController().install(monkeypatch)
+        monkeypatch.setattr(transport, "send_and_collect", lambda *a, **k: b"")
+        res = Robot(RobotConfig()).freedrive(True)
+        assert not res["ok"] and res["confirmed"] is False
+        # disabling stays best-effort: ok, but honest about the missing echo
+        res = Robot(RobotConfig()).freedrive(False)
+        assert res["ok"] and res["confirmed"] is False
+
+    def test_tool_passes_the_hold_through(self, monkeypatch):
+        FakeController().install(monkeypatch)
+        robot = Robot(RobotConfig())
+        assert urctl_tools.call_tool(robot, "ur_freedrive", {"enable": True, "hold_s": 30})["held_s"] == 30.0
+        assert urctl_tools.call_tool(robot, "ur_freedrive", {"enable": True})["held_s"] == 600.0
+        schema = next(t for t in urctl_tools.get_tool_schemas() if t["name"] == "ur_freedrive")
+        assert "hold_s" in json.dumps(schema)
+
+    def test_dry_run_sends_nothing(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        res = Robot(RobotConfig(), dry_run=True).freedrive(True)
+        assert res["ok"] and res["dry_run"] and fake.primary_sends == []
+
+
+class TestMoveTcpOverride:
+    """``tcp=`` runs ``set_tcp`` inside the same program as the ``movel`` so the
+    pose is where *that* TCP lands ([0]*6 = the flange), whatever the pendant says."""
+
+    def test_set_tcp_precedes_the_movel_in_one_program(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        res = Robot(RobotConfig(robot_model="UR3e")).move_tcp(
+            [0.3, 0.1, 0.2, 0, 3.14, 0], tcp=[0, 0, 0, 0, 0, 0]
+        )
+        assert res["ok"]
+        (sent,) = [s for s in fake.primary_sends if "movel(" in s]
+        assert "set_tcp(p[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])" in sent
+        assert sent.index("set_tcp(") < sent.index("movel(")
+        assert sent.count("def ") == 1  # one program: the override can't outlive/precede the move
+        # without the override nothing is set
+        fake.primary_sends.clear()
+        Robot(RobotConfig(robot_model="UR3e")).move_tcp([0.3, 0.1, 0.2, 0, 3.14, 0])
+        assert not any("set_tcp" in s for s in fake.primary_sends)
+
+    def test_relative_moves_take_the_override_too(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        res = Robot(RobotConfig()).move_tcp(
+            [0, 0, 0.1, 0, 0, 0], relative=True, tcp=[0, -0.035, 0.22, 0, 0, 0]
+        )
+        assert res["ok"]
+        (sent,) = [s for s in fake.primary_sends if "movel(" in s]
+        assert (
+            "set_tcp(p[0.0, -0.035, 0.22, 0.0, 0.0, 0.0])" in sent
+            and "pose_add(get_actual_tcp_pose()" in sent
+        )
+
+    def test_bad_override_is_rejected_before_anything_is_sent(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        with pytest.raises(ValueError):
+            Robot(RobotConfig()).move_tcp([0.3, 0.1, 0.2, 0, 3.14, 0], tcp=[0, 0, 0])
+        with pytest.raises(ValueError):
+            Robot(RobotConfig()).move_tcp([0.3, 0.1, 0.2, 0, 3.14, 0], tcp=[0, 0, float("nan"), 0, 0, 0])
+        assert fake.primary_sends == []
+
+    def test_tool_and_cli_pass_the_override(self, monkeypatch, capsys):
+        fake = FakeController().install(monkeypatch)
+        robot = Robot(RobotConfig(robot_model="UR3e"))
+        res = urctl_tools.call_tool(
+            robot, "ur_move_tcp", {"pose": [0.3, 0.1, 0.2, 0, 3.14, 0], "tcp": [0] * 6}
+        )
+        assert res["ok"] and "set_tcp(" in fake.primary_sends[-1]
+        with pytest.raises(ValueError):
+            urctl_tools.call_tool(robot, "ur_move_tcp", {"pose": [0.3, 0.1, 0.2, 0, 3.14, 0], "tcp": [0, 0]})
+        fake.primary_sends.clear()
+        monkeypatch.setenv("UR_ROBOT_MODEL", "UR3e")
+        assert (
+            cli_main(
+                ["move-tcp", "0.3", "0.1", "0.2", "0", "3.14", "0", "--tcp", "0", "0", "0", "0", "0", "0"]
+            )
+            == 0
+        )
+        assert any("set_tcp(p[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])" in s for s in fake.primary_sends)
+
+
+# ----- multi-leg TCP path: one program, one connection -----------------------
+
+
+class TestMoveTcpPath:
+    LEGS = [
+        {"pose": [-0.3, 0.0, 0.25, 0, 3.14, 0], "velocity": 0.15, "acceleration": 0.5},
+        {"pose": [-0.3, 0.0, 0.12, 0, 3.14, 0], "velocity": 0.15, "acceleration": 0.5, "dwell_s": 1.0},
+        {"pose": [-0.3, 0.0, 0.25, 0, 3.14, 0], "velocity": 0.15, "acceleration": 0.5},
+        {"pose": [-0.25, -0.05, 0.4, 0, 3.14, 0], "velocity": 0.15, "acceleration": 0.5},
+    ]
+
+    def test_one_program_with_set_tcp_legs_and_dwell(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        res = Robot(RobotConfig(robot_model="UR3e")).move_tcp_path(self.LEGS, tcp=[0] * 6)
+        assert res["ok"] and res["completed_legs"] == 4 and len(res["legs"]) == 4
+        assert all(leg["ok"] for leg in res["legs"]) and res["landed"][:3] == pytest.approx(
+            [-0.25, -0.05, 0.4]
+        )
+        (sent,) = [s for s in fake.primary_sends if "movel(" in s]
+        assert sent.count("def ") == 1 and sent.count("movel(") == 4
+        assert sent.index("set_tcp(p[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])") < sent.index("movel(")
+        # the dwell sleeps after leg 1 lands (after its marker), nowhere else
+        assert sent.count("sleep(") == 1 and sent.index("urctl/path/leg1=") < sent.index(
+            "sleep(1.0)"
+        ) < sent.index("urctl/path/leg2=")
+        assert "urctl/path/done=" in sent
+        # one Dashboard mode check for the whole path, not one per leg
+        assert sum("robotmode" in s for s in fake.dashboard_sends) == 1
+
+    def test_any_bad_leg_sends_nothing(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        legs = [dict(self.LEGS[0]), {"pose": [-0.9, 0.0, 0.2, 0, 3.14, 0]}]  # leg 1 beyond a UR3e's reach
+        res = Robot(RobotConfig(robot_model="UR3e")).move_tcp_path(legs)
+        assert not res["ok"] and res["safety"]["leg"] == 1
+        assert any(v["rule"] == "tcp_reach" for v in res["safety"]["violations"])
+        assert not any("movel(" in s for s in fake.primary_sends)
+        robot = Robot(RobotConfig())
+        for bad in ([], [{"pose": [0, 0, 0]}], [{"pose": [0.3, 0, 0.2, 0, 0, 0], "dwell_s": 99}]):
+            with pytest.raises(ValueError):
+                robot.move_tcp_path(bad)
+        with pytest.raises(ValueError):
+            robot.move_tcp_path(self.LEGS, tcp=[0, 0])
+        assert not any("movel(" in s for s in fake.primary_sends)
+
+    def test_missed_leg_is_reported_per_leg(self, monkeypatch):
+        from urctl import transport
+
+        FakeController().install(monkeypatch)
+        # legs 0 and 1 echo, then nothing (a protective stop mid-path)
+        monkeypatch.setattr(
+            transport,
+            "send_and_collect",
+            lambda *a, **k: (
+                b"urctl/path/leg0=[-0.3,0,0.25,0,3.14,0]\nurctl/path/leg1=[-0.3,0,0.12,0,3.14,0]\n"
+            ),
+        )
+        res = Robot(RobotConfig(robot_model="UR3e")).move_tcp_path(self.LEGS)
+        assert not res["ok"] and res["completed_legs"] == 2 and res["landed"] is None
+        assert [leg["ok"] for leg in res["legs"]] == [True, True, False, False]
+
+    def test_dry_run_validates_and_sends_nothing(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        res = Robot(RobotConfig(robot_model="UR3e"), dry_run=True).move_tcp_path(self.LEGS, tcp=[0] * 6)
+        assert res["ok"] and res["dry_run"] and res["safety"]["legs"] == 4 and fake.primary_sends == []
+
+    def test_tool_registry_exposes_it(self, monkeypatch):
+        fake = FakeController().install(monkeypatch)
+        robot = Robot(RobotConfig(robot_model="UR3e"))
+        res = urctl_tools.call_tool(robot, "ur_move_tcp_path", {"legs": self.LEGS, "tcp": [0] * 6})
+        assert res["ok"] and res["completed_legs"] == 4 and "set_tcp(" in fake.primary_sends[-1]
+        with pytest.raises(ValueError):
+            urctl_tools.call_tool(robot, "ur_move_tcp_path", {"legs": []})
+        with pytest.raises(ValueError):
+            urctl_tools.call_tool(
+                robot, "ur_move_tcp_path", {"legs": [{"pose": [0, 0, 0, 0, 0, 0], "dwell_s": 999}]}
+            )
+
+
+# ----- one program at a time on Primary -------------------------------------
+
+
+class TestPrimaryBusy:
+    def test_second_submission_is_refused_while_one_is_in_flight(self, monkeypatch):
+        import threading
+        import time
+
+        from urctl import transport
+        from urctl.primary import PrimaryBusyError
+
+        FakeController().install(monkeypatch)
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_collect(host, port, payload, *, collect_for=2.0, timeout=5.0, stop_marker=None):
+            started.set()
+            release.wait(5)
+            return b"urctl/path/leg0=[0.3,0,0.2,0,3.14,0]\nurctl/path/done=[0.3,0,0.2,0,3.14,0]\n"
+
+        monkeypatch.setattr(transport, "send_and_collect", slow_collect)
+        robot = Robot(RobotConfig(robot_model="UR10e"))
+        out = {}
+        t = threading.Thread(
+            target=lambda: out.update(robot.move_tcp_path([{"pose": [0.3, 0, 0.2, 0, 3.14, 0]}])), daemon=True
+        )
+        t.start()
+        assert started.wait(2)
+        assert robot.primary.busy
+        # a state read must not fall back to a Primary program mid-motion
+        st = robot.get_state()
+        assert st["joints"] is None and st["primary_busy"] is True
+        # any other submission is refused outright, nothing sent
+        with pytest.raises(PrimaryBusyError):
+            robot.run_script('textmsg("hi")')
+        with pytest.raises(PrimaryBusyError):
+            robot.get_flange_pose()
+        with pytest.raises(PrimaryBusyError):
+            robot.move_tcp([0.3, 0.1, 0.2, 0, 3.14, 0])
+        release.set()
+        t.join(5)
+        assert out["ok"] and not robot.primary.busy
+        time.sleep(0)  # the lock is released even though the capture thread is done
+        assert robot.run_script('textmsg("hi")')["ok"]
+
+    def test_lock_is_released_after_a_transport_error(self, monkeypatch):
+        from urctl import transport
+
+        FakeController().install(monkeypatch)
+
+        def boom(*a, **k):
+            raise OSError("link down")
+
+        monkeypatch.setattr(transport, "send_and_collect", boom)
+        robot = Robot(RobotConfig())
+        with pytest.raises(OSError):
+            robot.run_script('textmsg("hi")', capture=True)
+        assert not robot.primary.busy

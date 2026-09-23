@@ -152,8 +152,24 @@ The Object panel has a **Robot** section. With a segment that has depth:
    `p_base = T_base_flange · T_flange_depth · T_depth_color · p_color`. It
    shows every intermediate frame plus an **approach pose**: the TCP placed
    *standoff* metres short of the point along the camera's viewing ray, with
-   the tool's current orientation. Nothing moves.
-2. **Move TCP to approach** — `POST /api/robot/move` with the pose you just
+   the tool's current orientation. Nothing moves. The panel's **from** picks
+   what the standoff is measured to: the active TCP, or the tool **flange**
+   (`reference: "flange"` — the flange target is converted to the TCP pose
+   `movel` takes through the live active-TCP offset). Use flange when the
+   controller's active TCP is not the physical tool (the UR3e's 223 mm
+   training TCP; the cell file says `PERCEPTION_APPROACH_REFERENCE=flange`,
+   `PERCEPTION_STANDOFF_M=0.075` — "flange 75 mm above the part"). Locate also
+   reports `reachable` against the arm's reach; the Move button stays disabled
+   when it is false.
+2. **Approach** (the test loop) — `POST /api/robot/approach_cycle`: over the
+   segment at `clearance_m` (0.10), down to the standoff, hold `hold_s` (1 s),
+   back up, back to where the picture was taken — **one** URScript program
+   (`ur_move_tcp_path`) on one connection, every leg safety-validated first,
+   refused when out of reach. With the `flange` reference every leg runs with
+   the TCP forced to the flange (`set_tcp(p[0,…])`). Click the object (depth +
+   colour region growing, no model), press Approach, watch the cycle, move the
+   object, repeat. Also `cam_approach_cycle` over MCP.
+3. **Move TCP to approach** — `POST /api/robot/move` with the pose you just
    saw. One absolute `movel` through `ur_move_tcp` — the same schema-validated,
    safety-enveloped, audited path as the `urctl` CLI and MCP server (refused
    when not RUNNING, over the speed caps, or outside reach). Slow by default
@@ -179,7 +195,9 @@ cross-checked against the controller's own `pose_trans` on every locate
 Flags / env: `--robot-host` (`$UR_HOST`, default localhost = URSim),
 `--robot-dry-run` (validate + audit, send nothing; a stand-in flange pose
 lets the whole flow run on `--fake`), `--no-robot` (no panel). The
-standoff is per-click in the panel (default 0.10 m).
+standoff and its reference are per-click in the panel, defaulting to the
+cell's `PERCEPTION_STANDOFF_M` / `PERCEPTION_APPROACH_REFERENCE` (0.10 m from
+the TCP unless the cell file says otherwise).
 
 **Verified 2026-09-04 against the PolyScope X simulator (10.13.0, native
 arm64, Remote mode):** `ur_flange_pose` matched the controller's own

@@ -18,13 +18,14 @@ anything to the controller — useful for previewing what an agent would do.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 from .audit import AuditLog
 from .config import RobotConfig
 from .dashboard import DashboardClient
-from .primary import PrimaryClient
+from .primary import PrimaryBusyError, PrimaryClient
 from .robotapi import RobotAPIClient
-from .safety import SafetyEnvelope, SafetyVerdict
+from .safety import SafetyEnvelope, SafetyVerdict, normalize_model, reach_for_model
 
 # A safe candle-ish home pose for a UR10 — straight up, wrists folded. Far from
 # singularities, well within joint limits, no self-collision.
@@ -41,6 +42,9 @@ DEFAULT_TCP_ACCELERATION = 1.2  # m/s^2
 # For an absolute move, the TCP must land within this many metres (~2 mm) of
 # the commanded XYZ to count as arrived.
 TCP_LANDING_TOLERANCE = 0.002
+# How long a cockpit/CLI "freedrive on" keeps the arm hand-guidable before the
+# hold program releases it on its own (see :meth:`Robot.freedrive`).
+DEFAULT_FREEDRIVE_HOLD_S = 600.0
 
 
 def _sanitize_prompt(text: str, *, max_len: int = 200) -> str:
@@ -65,7 +69,15 @@ class Robot:
         dry_run: bool = False,
     ):
         self.config = config or RobotConfig.from_env()
-        self.safety = safety or SafetyEnvelope()
+        # The reach cap is per model (a UR3e reaches 0.5 m, a UR20 1.75 m). An
+        # explicit envelope is the caller's business; otherwise size it from the
+        # configured model (``UR_ROBOT_MODEL``, the cell files) and, failing
+        # that, ask the controller once before the first absolute TCP move.
+        self._safety_explicit = safety is not None
+        self.safety = safety or SafetyEnvelope.for_model(
+            self.config.robot_model, max_reach=self.config.max_reach
+        )
+        self._model_probed = self._safety_explicit or self.safety.reach_known
         self.audit = audit or AuditLog()
         self.dry_run = dry_run
         # The orchestration client (power/brake/load/play/state). On PolyScope X
@@ -82,6 +94,31 @@ class Robot:
         # output recipe the cached client negotiated (default vs DEEP_OUTPUTS).
         self._rtde = None
         self._rtde_deep = False
+
+    # ----- reach / model -----------------------------------------------------
+
+    def _ensure_reach(self) -> None:
+        """Size the envelope's reach cap from the controller's reported model
+        (Dashboard ``get robot model``) when nothing configured it. Runs once;
+        an unreachable controller or an unknown reply keeps the UR10 default,
+        and the ``tcp_reach`` violation text then says the model is unknown."""
+        if self._model_probed or self.dry_run:
+            return
+        self._model_probed = True
+        try:
+            reported = self.dashboard.robot_model()
+        except OSError:
+            return
+        reach = reach_for_model(reported)
+        if reach is not None:
+            self.safety = replace(self.safety, max_reach=reach, model=normalize_model(reported))
+
+    def max_reach(self) -> float:
+        """The reach cap absolute TCP moves are validated against, in metres —
+        after the one-time model probe, so a cockpit can show the verdict
+        (``locate`` → ``reachable``) before it offers a Move."""
+        self._ensure_reach()
+        return self.safety.max_reach
 
     def _rtde_client(self, *, deep: bool = False):
         """Lazily build (and cache) the RTDE client. Dropped on read failure so
@@ -193,7 +230,14 @@ class Robot:
                 # Any RTDE protocol error (RtdeError, recipe mismatch): fall back.
                 self._rtde = None
         if joints is None and running:
-            state = self.primary.read_state(collect_for=collect_for)
+            # Legacy path: a textmsg *program*. Never send it while a motion
+            # from this client is in flight — it would replace (kill) the
+            # running program (see PrimaryBusyError). Report no joints instead.
+            try:
+                state = self.primary.read_state(collect_for=collect_for)
+            except PrimaryBusyError:
+                state = {"joints": None, "tcp": None}
+                extra["primary_busy"] = True
             joints, tcp = state["joints"], state["tcp"]
         result = {
             "robot_mode": robot_mode,
@@ -437,10 +481,18 @@ class Robot:
         acceleration: float = DEFAULT_TCP_ACCELERATION,
         wait: bool = True,
         timeout: float = 30.0,
+        tcp: list[float] | None = None,
     ) -> dict:
         """Linear Cartesian move (``movel``), after safety validation.
 
         ``pose`` is ``[x, y, z, rx, ry, rz]`` (metres + rotation-vector radians).
+        ``tcp`` overrides the controller's active TCP for this move: the program
+        runs ``set_tcp(p[...])`` before the ``movel`` so ``pose`` is where *that*
+        TCP lands — ``[0]*6`` targets the tool flange itself, regardless of what
+        the installation/pendant says. (Verified need: 2026-09-23 the UR3e's
+        active TCP carried a -35 mm Y offset the physical tool didn't, and the
+        flange landed 35 mm off.) The override sticks on the controller until
+        the next ``set_tcp`` / installation reload, as any URScript ``set_tcp`` does.
         With ``relative=True`` it is a **base-frame delta** added to the live TCP
         pose (e.g. ``[0, 0.05, 0, 0, 0, 0]`` nudges +50 mm along base +Y); with
         ``relative=False`` it is an absolute base-frame target.
@@ -456,6 +508,13 @@ class Robot:
             "velocity": velocity,
             "acceleration": acceleration,
         }
+        if tcp is not None:
+            tcp = [float(v) for v in tcp]
+            if len(tcp) != 6 or not all(math.isfinite(v) for v in tcp):
+                raise ValueError("tcp must be 6 finite numbers [x, y, z, rx, ry, rz]")
+            args["tcp"] = tcp
+        if not relative:
+            self._ensure_reach()
         verdict: SafetyVerdict = self.safety.validate_move_tcp(
             pose,
             velocity=velocity,
@@ -476,8 +535,9 @@ class Robot:
 
         pose_literal = "p[" + ", ".join(str(float(x)) for x in pose) + "]"
         target_expr = f"pose_add(get_actual_tcp_pose(), {pose_literal})" if relative else pose_literal
+        set_tcp = ("set_tcp(p[" + ", ".join(str(v) for v in tcp) + "])\n") if tcp is not None else ""
         body = (
-            f"movel({target_expr}, a={acceleration}, v={velocity})\n"
+            set_tcp + f"movel({target_expr}, a={acceleration}, v={velocity})\n"
             "sync()\n"
             'textmsg("urctl/move/done=", get_actual_tcp_pose())\n'
         )
@@ -514,6 +574,110 @@ class Robot:
             if "PROTECTIVE_STOP" in self.dashboard.safety_mode():
                 result["protective_stop"] = True
         return self._log("move_tcp", args, ok=ok, safety=verdict.as_dict(), result=result)
+
+    def move_tcp_path(
+        self,
+        legs: list[dict],
+        *,
+        tcp: list[float] | None = None,
+        timeout: float = 120.0,
+    ) -> dict:
+        """Run several absolute ``movel`` legs as **one** program on one Primary
+        connection — an approach cycle (over → down → dwell → up → back) is one
+        submission instead of four reconnects (rapid reconnects wedge URControl;
+        see CLAUDE.md "How fast can you actually drive it").
+
+        Each leg is ``{"pose": [x,y,z,rx,ry,rz], "velocity"?, "acceleration"?,
+        "dwell_s"?}`` — the robot ``sleep``s ``dwell_s`` after landing that leg.
+        Every leg is validated against the envelope (reach, speed) up front with
+        one mode check; nothing is sent if any leg fails. ``tcp`` runs
+        ``set_tcp`` first (``[0]*6`` = the flange). Each leg echoes its landed
+        pose (``urctl/path/leg<i>=``); ``ok`` means every leg landed within
+        :data:`TCP_LANDING_TOLERANCE` of its target and the final marker came.
+        """
+        if not legs:
+            raise ValueError("legs must not be empty")
+        norm: list[dict] = []
+        for idx, leg in enumerate(legs):
+            pose = [float(v) for v in leg["pose"]]
+            if len(pose) != 6 or not all(math.isfinite(v) for v in pose):
+                raise ValueError(f"legs[{idx}].pose must be 6 finite numbers")
+            dwell = float(leg.get("dwell_s", 0.0) or 0.0)
+            if not math.isfinite(dwell) or dwell < 0.0 or dwell > 60.0:
+                raise ValueError(f"legs[{idx}].dwell_s must be within 0..60 s")
+            norm.append(
+                {
+                    "pose": pose,
+                    "velocity": float(leg.get("velocity", DEFAULT_TCP_VELOCITY)),
+                    "acceleration": float(leg.get("acceleration", DEFAULT_TCP_ACCELERATION)),
+                    "dwell_s": dwell,
+                }
+            )
+        if tcp is not None:
+            tcp = [float(v) for v in tcp]
+            if len(tcp) != 6 or not all(math.isfinite(v) for v in tcp):
+                raise ValueError("tcp must be 6 finite numbers [x, y, z, rx, ry, rz]")
+        args = {"legs": norm, "tcp": tcp}
+        self._ensure_reach()
+        robot_mode = None if self.dry_run else self.dashboard.robot_mode()
+        verdicts = []
+        for idx, leg in enumerate(norm):
+            verdict = self.safety.validate_move_tcp(
+                leg["pose"],
+                velocity=leg["velocity"],
+                acceleration=leg["acceleration"],
+                relative=False,
+                robot_mode=robot_mode,
+            )
+            if not verdict.ok:
+                safety = verdict.as_dict()
+                safety["leg"] = idx
+                return self._log("move_tcp_path", args, ok=False, safety=safety)
+            verdicts.append(verdict)
+        safety = {"ok": True, "violations": [], "legs": len(norm)}
+        if self.dry_run:
+            return self._log("move_tcp_path", args, ok=True, safety=safety, result={"reply": "(dry-run)"})
+
+        lines = []
+        if tcp is not None:
+            lines.append("set_tcp(p[" + ", ".join(str(v) for v in tcp) + "])")
+        for idx, leg in enumerate(norm):
+            literal = "p[" + ", ".join(str(x) for x in leg["pose"]) + "]"
+            lines.append(f"movel({literal}, a={leg['acceleration']}, v={leg['velocity']})")
+            lines.append("sync()")
+            lines.append(f'textmsg("urctl/path/leg{idx}=", get_actual_tcp_pose())')
+            if leg["dwell_s"] > 0:
+                lines.append(f"sleep({leg['dwell_s']})")
+        lines.append('textmsg("urctl/path/done=", get_actual_tcp_pose())')
+        body = "\n".join(lines) + "\n"
+        captured = self.primary.run_and_capture(
+            body,
+            fn_name="urctl_tcp_path",
+            marker="urctl/path",
+            collect_for=timeout,
+            stop_marker="urctl/path/done=",
+        )
+        from .primary import parse_vector
+
+        leg_results = []
+        for idx, leg in enumerate(norm):
+            landed = parse_vector(captured, f"urctl/path/leg{idx}=")
+            hit = landed is not None and (
+                max(abs(a - b) for a, b in zip(landed[:3], leg["pose"][:3], strict=False))
+                < TCP_LANDING_TOLERANCE
+            )
+            leg_results.append({"pose": leg["pose"], "landed": landed, "ok": hit, "dwell_s": leg["dwell_s"]})
+        final = parse_vector(captured, "urctl/path/done=")
+        ok = final is not None and all(r["ok"] for r in leg_results)
+        result = {
+            "legs": leg_results,
+            "completed_legs": sum(1 for r in leg_results if r["landed"] is not None),
+            "landed": final,
+            "waited": True,
+        }
+        if final is None and "PROTECTIVE_STOP" in self.dashboard.safety_mode():
+            result["protective_stop"] = True
+        return self._log("move_tcp_path", args, ok=ok, safety=safety, result=result)
 
     def move_trajectory(
         self,
@@ -599,14 +763,55 @@ class Robot:
             result["protective_stop"] = True
         return self._log("move_trajectory", args, ok=ok, result=result)
 
-    def freedrive(self, enable: bool) -> dict:
-        """Enable/disable freedrive (hand-guiding). All six axes in base frame."""
-        args = {"enable": enable}
+    def freedrive(self, enable: bool, *, hold_s: float = DEFAULT_FREEDRIVE_HOLD_S) -> dict:
+        """Enable/disable freedrive (hand-guiding). All six axes in base frame.
+
+        Freedrive lives exactly as long as the program that called
+        ``freedrive_mode()``: a real e-Series drops it the instant the script
+        ends (verified on the UR3e, 2026-09-23 — a bare one-liner "worked" on
+        URSim and did nothing on hardware). So enabling sends a program that
+        stays running — a ``sleep`` loop bounded by ``hold_s`` (default 10 min,
+        max 1 h) — and confirms the mode is up by its ``textmsg`` marker;
+        ``ok`` is False when that marker never surfaces. Disabling sends
+        ``end_freedrive_mode()`` as a new program, which also kills the hold.
+        The hold releases itself when it expires (``urctl/freedrive=expired``
+        in the broadcast), so an orphaned button press can't leave the arm
+        limp indefinitely.
+        """
+        hold = max(1.0, min(float(hold_s), 3600.0))
+        args = {"enable": enable, "hold_s": hold} if enable else {"enable": enable}
         if self.dry_run:
             return self._log("freedrive", args, ok=True, result={"reply": "(dry-run)"})
-        body = "freedrive_mode()\n" if enable else "end_freedrive_mode()\n"
-        self.primary.run(body, fn_name="urctl_freedrive")
-        return self._log("freedrive", args, ok=True)
+        if enable:
+            body = (
+                "freedrive_mode()\n"
+                'textmsg("urctl/freedrive=on")\n'
+                "urctl_fd_t = 0.0\n"
+                f"while (urctl_fd_t < {hold:.1f}):\n"
+                "  sleep(0.5)\n"
+                "  urctl_fd_t = urctl_fd_t + 0.5\n"
+                "end\n"
+                "end_freedrive_mode()\n"
+                'textmsg("urctl/freedrive=expired")\n'
+            )
+            marker = "urctl/freedrive=on"
+        else:
+            body = 'end_freedrive_mode()\ntextmsg("urctl/freedrive=off")\n'
+            marker = "urctl/freedrive=off"
+        captured = self.primary.run_and_capture(
+            body,
+            fn_name="urctl_freedrive",
+            marker="urctl/freedrive",
+            collect_for=5.0,
+            stop_marker=marker,
+        )
+        confirmed = any(marker in line for line in captured)
+        result = {"confirmed": confirmed}
+        if enable:
+            result["held_s"] = hold
+        # Disabling is best-effort by design (the program may already be gone):
+        # report it ok and let ``confirmed`` say whether the controller echoed.
+        return self._log("freedrive", args, ok=confirmed or not enable, result=result)
 
     # ----- RTDE writes -------------------------------------------------------
 

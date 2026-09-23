@@ -170,3 +170,25 @@ def test_render_lists_fixes_under_failures():
     )
     text = run_doctor(robot_config=cfg, camera=False, env={"UR_CELL": "sim"}).render()
     assert "[FAIL] robot.reach" in text and "fix:" in text and text.endswith("verdict: NOT READY")
+
+
+def test_model_check_reports_the_reach_cap_and_catches_a_mismatch(listener, monkeypatch):
+    # Nothing configured: the controller's answer sizes the cap.
+    cfg, robot = _fake_robot(listener, monkeypatch)
+    c = _by_name(run_doctor(robot_config=cfg, camera=False, robot_factory=lambda _c: robot).as_dict())
+    assert c["robot.model"]["ok"] is True and c["robot.model"]["data"]["reported"] == "UR10"
+    assert c["robot.model"]["data"]["max_reach_m"] == 1.3 and "1.30 m" in c["robot.model"]["detail"]
+    # The cell file names a UR3e but the arm on the network says UR10: motion is gated.
+    cfg = RobotConfig(
+        host="127.0.0.1",
+        dashboard_port=listener,
+        primary_port=listener,
+        rtde_port=listener,
+        robot_model="UR3e",
+    )
+    FakeController().install(monkeypatch)
+    rep = run_doctor(robot_config=cfg, camera=False, robot_factory=lambda _c: Robot(cfg)).as_dict()
+    c = _by_name(rep)
+    assert c["robot.model"]["ok"] is False and "UR_ROBOT_MODEL" in c["robot.model"]["fix"]
+    assert c["robot.model"]["data"] == {"configured": "UR3E", "reported": "UR10", "max_reach_m": 0.5}
+    assert rep["motion_ok"] is False

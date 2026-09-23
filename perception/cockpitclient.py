@@ -111,16 +111,32 @@ class CockpitClient:
     def robot_state(self) -> dict:
         return self.post("/api/robot/state")
 
-    def locate(self, *, standoff_m: float | None = None, point_m: Sequence[float] | None = None) -> dict:
+    def locate(
+        self,
+        *,
+        standoff_m: float | None = None,
+        point_m: Sequence[float] | None = None,
+        reference: str | None = None,
+    ) -> dict:
         body: dict = {}
         if standoff_m is not None:
             body["standoff_m"] = float(standoff_m)
         if point_m is not None:
             body["point_m"] = [float(v) for v in point_m]
+        if reference is not None:
+            body["reference"] = str(reference)
         return self.post("/api/robot/locate", body)
 
-    def move(self, pose: Sequence[float], *, velocity: float | None = None) -> dict:
+    def approach_cycle(self, **kwargs) -> dict:
+        body = {k: v for k, v in kwargs.items() if v is not None}
+        return self.post("/api/robot/approach_cycle", body)
+
+    def move(
+        self, pose: Sequence[float], *, velocity: float | None = None, tcp: Sequence[float] | None = None
+    ) -> dict:
         body: dict = {"pose": [float(v) for v in pose]}
+        if tcp is not None:
+            body["tcp"] = [float(v) for v in tcp]
         if velocity is not None:
             body["velocity"] = float(velocity)
         return self.post("/api/robot/move", body)

@@ -83,6 +83,14 @@ class DashboardClient:
         # Returns "true"/"false"; absent on CB-series or older firmware.
         return "true" in self.command("is in remote control").lower()
 
+    def robot_model(self) -> str:
+        """``get robot model`` → ``"UR3"`` / ``"UR5"`` / ``"UR10"`` / ``"UR16"`` /
+        ``"UR20"`` / ``"UR30"`` (an e-Series arm reports without the ``e``).
+        Blank on firmware that lacks the command (pre-5.6)."""
+        reply = self.command("get robot model").strip()
+        first = reply.split()[0] if reply else ""
+        return first if first.upper().startswith("UR") else ""
+
     def control_mode(self) -> str:
         """``"REMOTE"`` / ``"LOCAL"`` — the Dashboard analogue of the PolyScope X
         ``/system/v1/controlmode``. Lets :meth:`Robot.get_state` report the same

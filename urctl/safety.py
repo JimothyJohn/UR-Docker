@@ -37,9 +37,59 @@ NUM_JOINTS = 6
 # (DEFAULT_TCP_VELOCITY in robot.py) is much gentler.
 DEFAULT_MAX_TCP_SPEED = 1.0  # m/s
 DEFAULT_MAX_TCP_ACCEL = 5.0  # m/s^2 — conservative, below firmware max
-# UR10 reach is ~1.3 m from the base. An absolute target whose XYZ distance
-# from the base exceeds this is unreachable (and likely a mistake).
+# An absolute target whose XYZ distance from the base exceeds the arm's reach
+# is unreachable (and likely a mistake). The cap is per model — a UR3e reaches
+# 0.5 m, a UR20 1.75 m — so the envelope is built with
+# :meth:`SafetyEnvelope.for_model` (``UR_ROBOT_MODEL`` from the cell file, or
+# the Dashboard's ``get robot model``). The UR10 value is the fallback for an
+# unknown model. Reach is measured to the tool flange; a long TCP can extend a
+# little beyond it, so an override (``UR_MAX_REACH_M``) is allowed — a rejection
+# is cheap, an arm chasing an unreachable point across the cell is not
+# (2026-09-23: a UR3e stretched to a straight elbow after a 0.69 m target).
 DEFAULT_MAX_REACH = 1.3  # m
+# Datasheet reach, metres, keyed by the normalised model name (see
+# :func:`normalize_model`). Covers CB3, e-Series, the UR series (UR20/UR30)
+# and the 2025 "Gen 7" additions (UR7e, UR12e, UR15).
+MODEL_REACH_M: dict[str, float] = {
+    "UR3": 0.5,
+    "UR3E": 0.5,
+    "UR5": 0.85,
+    "UR5E": 0.85,
+    "UR7E": 0.85,
+    "UR10": 1.3,
+    "UR10E": 1.3,
+    "UR12E": 1.3,
+    "UR15": 1.3,
+    "UR16E": 0.9,
+    "UR20": 1.75,
+    "UR30": 1.3,
+}
+
+
+def normalize_model(model: str | None) -> str:
+    """``"ur3e"`` / ``"UR 3e"`` / ``"UR3e"`` → ``"UR3E"``; ``None``/blank → ``""``."""
+    if not model:
+        return ""
+    return "".join(ch for ch in str(model).upper() if ch.isalnum())
+
+
+def reach_for_model(model: str | None) -> float | None:
+    """Datasheet reach in metres for ``model`` (any spelling), or ``None`` when
+    the model is unknown. A trailing/missing ``E`` is tolerated both ways: the
+    Dashboard reports a UR3e as ``UR3``, and every e-Series arm shares its
+    CB3 predecessor's reach."""
+    key = normalize_model(model)
+    if not key:
+        return None
+    if key in MODEL_REACH_M:
+        return MODEL_REACH_M[key]
+    if key.endswith("E") and key[:-1] in MODEL_REACH_M:
+        return MODEL_REACH_M[key[:-1]]
+    if key + "E" in MODEL_REACH_M:
+        return MODEL_REACH_M[key + "E"]
+    return None
+
+
 # A single *relative* TCP step larger than this is almost always a unit error
 # (e.g. passing inches as metres: 5 in -> 5.0 "m"). Caught before it executes.
 DEFAULT_MAX_RELATIVE_STEP = 1.0  # m
@@ -91,11 +141,33 @@ class SafetyEnvelope:
     max_tcp_speed: float = DEFAULT_MAX_TCP_SPEED
     max_tcp_accel: float = DEFAULT_MAX_TCP_ACCEL
     max_reach: float = DEFAULT_MAX_REACH
+    # The robot model the reach cap was derived from ("" = unknown → the
+    # DEFAULT_MAX_REACH fallback). Informational; shows up in the violation.
+    model: str = ""
     max_relative_step: float = DEFAULT_MAX_RELATIVE_STEP
     # Global speed-slider cap (RTDE write). 0 < fraction <= this.
     max_speed_fraction: float = DEFAULT_MAX_SPEED_FRACTION
     # When True, motion is only permitted while the controller reports RUNNING.
     require_running: bool = True
+
+    @classmethod
+    def for_model(cls, model: str | None, *, max_reach: float | None = None, **overrides) -> SafetyEnvelope:
+        """An envelope whose reach cap matches ``model`` (see :data:`MODEL_REACH_M`).
+
+        ``max_reach`` pins the cap explicitly (``UR_MAX_REACH_M``) and wins over
+        the table; an unknown/blank model keeps :data:`DEFAULT_MAX_REACH`. Other
+        keyword overrides go straight to the dataclass.
+        """
+        key = normalize_model(model)
+        reach = max_reach if max_reach is not None else reach_for_model(key)
+        if reach is not None:
+            overrides["max_reach"] = float(reach)
+        return cls(model=key, **overrides)
+
+    @property
+    def reach_known(self) -> bool:
+        """True once the reach cap comes from a model (or an explicit override)."""
+        return bool(self.model) or self.max_reach != DEFAULT_MAX_REACH
 
     def validate_move_joints(
         self,
@@ -214,7 +286,8 @@ class SafetyEnvelope:
                     violations.append(
                         SafetyViolation(
                             "tcp_reach",
-                            f"target {dist:.4f} m from base exceeds max reach {self.max_reach:.4f} m",
+                            f"target {dist:.4f} m from base exceeds max reach {self.max_reach:.4f} m"
+                            + (f" ({self.model})" if self.model else " (model unknown — UR10 default)"),
                         )
                     )
 

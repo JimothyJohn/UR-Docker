@@ -30,6 +30,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 
 from urctl.config import RobotConfig
+from urctl.safety import normalize_model
 
 from .cell import ENV_CELL, describe_cell
 from .config import PerceptionConfig
@@ -384,6 +385,37 @@ def check_robot_state(report: Report, robot) -> dict | None:
             "There is no network way to do it. State reads work in Local; motion and bring-up do not.",
             severity="motion",
             data={"control_mode": cm},
+        )
+    )
+    # Reach cap: the envelope refuses absolute TCP targets beyond the arm's
+    # datasheet reach, but only if it knows the model. Say which model sized
+    # it, and catch a cell file that names a different arm than the one on the
+    # network (the Dashboard reports a UR3e as "UR3").
+    configured = normalize_model(getattr(robot.config, "robot_model", ""))
+    reported = ""
+    if not getattr(robot, "dry_run", False):  # dry-run: nothing on the wire
+        try:
+            reported = normalize_model(robot.dashboard.robot_model())
+        except Exception:
+            reported = ""
+    reach = robot.max_reach()
+    mismatch = bool(configured and reported and reported not in (configured, configured.rstrip("E")))
+    report.add(
+        Check(
+            "robot.model",
+            bool(robot.safety.reach_known) and not mismatch,
+            f"{configured or reported or 'unknown model'}: reach cap {reach:.2f} m"
+            + (f" (controller reports {reported})" if reported else ""),
+            fix=(
+                f"the cell file says {configured} but the controller reports {reported} — fix UR_ROBOT_MODEL"
+                if mismatch
+                else "set UR_ROBOT_MODEL in the cell file (UR3e/UR5e/UR7e/UR10e/UR12e/UR15/UR16e/UR20/UR30) "
+                "or UR_MAX_REACH_M; until then absolute moves are capped at the UR10's 1.3 m"
+            ),
+            # A mismatch gates motion (the cap is sized for the wrong arm); an
+            # unknown model only warns — the UR10 default still applies.
+            severity="motion" if mismatch else "warn",
+            data={"configured": configured, "reported": reported, "max_reach_m": reach},
         )
     )
     if state.get("joints") is None:

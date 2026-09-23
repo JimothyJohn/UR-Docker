@@ -205,6 +205,11 @@ class RobotAPIClient:
         e-Series Dashboard beyond ``is in remote control``."""
         return self._mode("/system/v1/controlmode", "mode")
 
+    def robot_model(self) -> str:
+        """No verified Robot-API endpoint reports the arm model yet; blank so the
+        safety envelope keeps the ``UR_ROBOT_MODEL`` / default reach."""
+        return ""
+
     def operational_mode(self) -> str:
         """``"AUTOMATIC"`` or ``"MANUAL"``."""
         return self._mode("/system/v1/operationalmode", "mode")

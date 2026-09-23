@@ -24,7 +24,9 @@ API:
   * ``POST /api/nearest``             RealSenseTrainer's nearest-object mask.
   * ``GET  /api/robot``               the robot link: host, hand-eye, dry-run.
   * ``POST /api/robot/state``         ``ur_get_state`` through the tool registry.
-  * ``POST /api/robot/locate``        ``{standoff_m?, point_m?}`` — the segment's
+  * ``POST /api/robot/approach_cycle`` ``{standoff_m?, reference?, clearance_m?, hold_s?, velocity?}``
+    — over the segment → down to the standoff → hold → up → back to the capture pose (one program)
+  * ``POST /api/robot/locate``        ``{standoff_m?, point_m?, reference?}`` — the segment's
                                       camera point → base frame + approach pose
                                       (reads the live flange pose; no motion).
   * ``POST /api/robot/move``          ``{pose, velocity?}`` — safety-validated
@@ -404,6 +406,47 @@ class ViewerApp:
     def cal_status(self) -> dict:
         return self._link().cal_status()
 
+    def robot_approach_cycle(
+        self,
+        standoff_m: float | None = None,
+        reference: str | None = None,
+        clearance_m: float | None = None,
+        hold_s: float | None = None,
+        velocity: float | None = None,
+    ) -> dict:
+        """Click → segment → **Approach**: over the object, down to the standoff,
+        hold, back up, back to the capture pose — one program. Uses the current
+        segment's camera point; the cell's standoff/reference unless given."""
+        link = self._link()
+        if not self.features or not self.features.get("point_m"):
+            raise ValueError("segment an object with depth first (no camera point to approach)")
+        point_m = self.features["point_m"]
+        kwargs: dict = {}
+        if standoff_m is not None:
+            kwargs["standoff_m"] = float(standoff_m)
+        if reference is not None:
+            if not isinstance(reference, str):
+                raise ValueError("reference must be 'tcp' or 'flange'")
+            kwargs["reference"] = reference
+        if clearance_m is not None:
+            kwargs["clearance_m"] = float(clearance_m)
+        if hold_s is not None:
+            kwargs["hold_s"] = float(hold_s)
+        if velocity is not None:
+            kwargs["velocity"] = float(velocity)
+
+        def summary(r):
+            loc = r.get("locate") or {}
+            base = [round(v, 3) for v in loc.get("point_base_m", [])]
+            if r.get("ok"):
+                ref, so = loc.get("reference"), loc.get("standoff_m")
+                return f"approach cycle → {base} ({ref} standoff {so} m) → back"
+            return f"approach cycle → {base} refused/failed"
+
+        return self._robot_action(
+            "approach_cycle", lambda: link.approach_cycle(point_m, **kwargs), summary=summary
+        )
+
     def robot_jog(self, delta: Sequence[float], velocity: float | None = None) -> dict:
         link = self._link()
         kwargs = {} if velocity is None else {"velocity": float(velocity)}
@@ -498,7 +541,12 @@ class ViewerApp:
     def robot_state(self) -> dict:
         return self._link().state()
 
-    def robot_locate(self, standoff_m: float | None = None, point_m: Sequence[float] | None = None) -> dict:
+    def robot_locate(
+        self,
+        standoff_m: float | None = None,
+        point_m: Sequence[float] | None = None,
+        reference: str | None = None,
+    ) -> dict:
         """The current segment's camera point (or an explicit ``point_m``) → base
         frame + approach pose. Reads the flange pose; moves nothing."""
         link = self._link()
@@ -507,18 +555,32 @@ class ViewerApp:
                 raise ValueError("segment an object with depth first (no camera point to send)")
             point_m = self.features["point_m"]
         kwargs = {} if standoff_m is None else {"standoff_m": float(standoff_m)}
+        if reference is not None:
+            if not isinstance(reference, str):
+                raise ValueError("reference must be 'tcp' or 'flange'")
+            kwargs["reference"] = reference
         return self._robot_action(
             "locate",
             lambda: link.locate(point_m, **kwargs),
             summary=lambda r: (
                 "locate → base "
                 + str([round(v, 3) for v in r.get("point_base_m", [])] if r.get("ok") else "failed")
+                + (
+                    f" — OUT OF REACH: approach {r['commanded_distance_m']:.3f} m from base, "
+                    f"{r.get('model') or 'arm'} reaches {r['max_reach_m']:.2f} m; move the part closer"
+                    if r.get("ok") and r.get("reachable") is False
+                    else ""
+                )
             ),
         )
 
-    def robot_move(self, pose: Sequence[float], velocity: float | None = None) -> dict:
+    def robot_move(
+        self, pose: Sequence[float], velocity: float | None = None, tcp: Sequence[float] | None = None
+    ) -> dict:
         link = self._link()
         kwargs = {} if velocity is None else {"velocity": float(velocity)}
+        if tcp is not None:
+            kwargs["tcp"] = tcp
         return self._robot_action(
             "move",
             lambda: link.move(pose, **kwargs),
@@ -742,12 +804,24 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 lambda: self.app.robot_locate(
                     _number(payload, "standoff_m") if "standoff_m" in payload else None,
                     _vector(payload, "point_m", 3) if "point_m" in payload else None,
+                    payload.get("reference"),
                 )
             )
         elif route == "/api/robot/move":
             self._guarded(
                 lambda: self.app.robot_move(
                     _vector(payload, "pose", 6),
+                    _number(payload, "velocity") if "velocity" in payload else None,
+                    _vector(payload, "tcp", 6) if payload.get("tcp") is not None else None,
+                )
+            )
+        elif route == "/api/robot/approach_cycle":
+            self._guarded(
+                lambda: self.app.robot_approach_cycle(
+                    _number(payload, "standoff_m") if "standoff_m" in payload else None,
+                    payload.get("reference"),
+                    _number(payload, "clearance_m") if "clearance_m" in payload else None,
+                    _number(payload, "hold_s") if "hold_s" in payload else None,
                     _number(payload, "velocity") if "velocity" in payload else None,
                 )
             )

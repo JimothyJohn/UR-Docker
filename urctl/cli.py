@@ -307,6 +307,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="treat pose as a base-frame delta from the current TCP (e.g. 0 0.05 0 0 0 0 = +50mm Y)",
     )
+    mt.add_argument(
+        "--tcp",
+        type=float,
+        nargs=6,
+        metavar="T",
+        default=None,
+        help="override the active TCP for this move (set_tcp in the same program); 0 0 0 0 0 0 = flange",
+    )
     mt.add_argument("--velocity", type=float, default=None, help="linear speed in m/s")
     mt.add_argument("--acceleration", type=float, default=None, help="linear acceleration in m/s^2")
 
@@ -316,6 +324,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     fd = sub.add_parser("freedrive", help="enable/disable hand-guiding")
     fd.add_argument("state", choices=["on", "off"])
+    fd.add_argument(
+        "--hold",
+        type=float,
+        default=None,
+        help="seconds to hold freedrive before it releases itself (default 600)",
+    )
 
     pu = sub.add_parser("popup", help="show a popup on the teach pendant")
     pu.add_argument("text")
@@ -504,6 +518,8 @@ def main(argv: list[str] | None = None) -> int:
             kwargs["velocity"] = args.velocity
         if args.acceleration is not None:
             kwargs["acceleration"] = args.acceleration
+        if args.tcp is not None:
+            kwargs["tcp"] = args.tcp
         return _emit(robot.move_tcp(args.pose, **kwargs))
     if args.cmd == "move-home":
         kwargs = {}
@@ -513,7 +529,8 @@ def main(argv: list[str] | None = None) -> int:
             kwargs["acceleration"] = args.acceleration
         return _emit(robot.move_home(**kwargs))
     if args.cmd == "freedrive":
-        return _emit(robot.freedrive(args.state == "on"))
+        kwargs = {} if args.hold is None else {"hold_s": args.hold}
+        return _emit(robot.freedrive(args.state == "on", **kwargs))
     if args.cmd == "popup":
         return _emit(robot.popup(args.text))
     if args.cmd == "load":
