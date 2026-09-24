@@ -102,6 +102,31 @@ field log; append to it when something is verified or changes.
 12.5 Hz, live FK arm view) whose every button dispatches through the same tool
 registry (validated + safety-enveloped + audited). `docs/harness.md` §5.
 
+**Monocular scan (`perception scan` / `locate` / `touch` / `latency-fit`, see
+`docs/mono-scan.md`):** the post-RealSense path — a 2D camera on the flange plus
+the robot's own poses. One relative `movel` (≤ 150 mm) runs while the colour
+stream and an RTDE pose recorder (`perception/posestream.py`, `RtdeClient.stream()`)
+record; each frame gets the flange pose at `host_t − latency` (`perception/sweep.py`).
+The locator (`perception/locate2d.py`) segments bright parts on a darker surface,
+back-projects outlines onto the taught table plane (`perception/tableplane.py`,
+`perception touch`), seeds the height from parallax, then **fits the part's box
+model by silhouette IoU across all frames** (`perception/boxfit.py`) — the raw
+outline centroid is biased low in height because the visible side faces move with
+the camera, so never report the seed. Parts come from STL (`perception/partlib.py`,
+`parts/`). No print or purchase is needed to run it: the table plane comes from
+one depth frame (`perception table-from-depth`), the latency from the parts
+themselves (`perception latency-fit --objects`), and every located object is
+graded against the RealSense depth (`depth_check`). The cockpit has a **Scan
+(mono)** panel (`--fake-scan` for the synthetic scene) and the MCP server the
+`cam_scan*` / `cell_table_from_depth` tools. Everything is verified on the
+synthetic rig and cockpit (`tests/test_monoscan.py`), **not yet on hardware**;
+the project is parked (`TODO.md` → "Monocular scan — backburner"). Traps: the
+D435's colour imager is rolling shutter (`--stream ir` binds the global-shutter
+left imager, unverified on the camera); an unmodelled camera latency splits each
+moving object into two clusters along the sweep (40 ms at 150 mm/s is 6 mm), so
+fit it before trusting a fast sweep; a frame's stamp is its arrival time unless
+the source puts an `exposure_t` in `RgbdFrame.extra`.
+
 ## Assistant skills (procedural how-tos)
 
 Task-triggered skills live in `.claude/skills/` and encode the *procedures* that
@@ -652,6 +677,10 @@ bumps auto-merge once CI is green (`dependabot-auto-merge.yml` — needs
 and per PR. Tagging `v<version>` (matching `urctl.__version__`) builds, tests,
 creates a GitHub Release, and publishes to PyPI via trusted publishing (the
 `pypi` environment; skipped until the PyPI publisher is configured).
+
+Unit tests assume a clean shell: with `UR_CELL` (or `PERCEPTION_*`) exported,
+the handeye/webapp/cockpit tests pick up the cell's defaults and fail — run them
+with `env -u UR_CELL uv run pytest …` or in a fresh shell.
 
 ```bash
 make sim-up          # start URSim

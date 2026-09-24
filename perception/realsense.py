@@ -56,7 +56,7 @@ from .rgbd import DISTORTION_MODELS, DepthImage, Intrinsics, RgbdFrame, syntheti
 # ----- enum ordinals (librealsense2/h/rs_sensor.h, rs_types.h @ 2.58.4) ---------
 
 STREAM_ANY, STREAM_DEPTH, STREAM_COLOR, STREAM_INFRARED = 0, 1, 2, 3
-FORMAT_ANY, FORMAT_Z16, FORMAT_RGB8, FORMAT_BGR8 = 0, 1, 5, 6
+FORMAT_ANY, FORMAT_Z16, FORMAT_RGB8, FORMAT_BGR8, FORMAT_Y8 = 0, 1, 5, 6, 9
 INFO_NAME, INFO_SERIAL, INFO_FIRMWARE, INFO_PHYSICAL_PORT, INFO_PRODUCT_ID = 0, 1, 2, 4, 7
 INFO_USB_TYPE, INFO_PRODUCT_LINE = 9, 10
 EXTENSION_DEPTH_SENSOR = 7
@@ -474,9 +474,12 @@ class Api:
         serial: str | None,
         depth_width: int | None = None,
         depth_height: int | None = None,
+        infrared: bool = False,
     ):
         """Start color RGB8 (``width x height``) + depth Z16 (``depth_width x
-        depth_height``, defaulting to the colour size); returns ``(pipeline, profile)``."""
+        depth_height``, defaulting to the colour size) and, with ``infrared``,
+        the **left** IR imager (index 1, Y8, the depth frame's own optics —
+        global shutter on a D435); returns ``(pipeline, profile)``."""
         dw, dh = depth_width or width, depth_height or height
         cfg = self._call("rs2_create_config")
         try:
@@ -484,6 +487,8 @@ class Api:
                 self._call("rs2_config_enable_device", cfg, serial.encode())
             self._call("rs2_config_enable_stream", cfg, STREAM_DEPTH, -1, dw, dh, FORMAT_Z16, fps)
             self._call("rs2_config_enable_stream", cfg, STREAM_COLOR, -1, width, height, FORMAT_RGB8, fps)
+            if infrared:
+                self._call("rs2_config_enable_stream", cfg, STREAM_INFRARED, 1, dw, dh, FORMAT_Y8, fps)
             pipe = self._call("rs2_create_pipeline", ctx)
             try:
                 profile = self._call("rs2_pipeline_start_with_config", pipe, cfg)
@@ -855,6 +860,7 @@ class RealSenseCamera:
     depth_height: int = DEFAULT_DEPTH_HEIGHT
     filters: DepthFilters | None = DEFAULT_DEPTH_FILTERS
     tuning: DepthTuning | None = DEFAULT_DEPTH_TUNING
+    infrared: bool = False  # also stream the left IR imager (RgbdFrame.extra["ir"]) — unverified on hardware
     timeout_ms: int = 5000
     log_severity: str = "error"
     library: str | None = None
@@ -885,6 +891,9 @@ class RealSenseCamera:
         self._ctx = api.context()
         try:
             self.effective_fps = self._choose_fps(api)
+            start_kwargs: dict = {}
+            if self.infrared:
+                start_kwargs["infrared"] = True
             self._pipe, self._profile = api.start_pipeline(
                 self._ctx,
                 width=self.width,
@@ -893,6 +902,7 @@ class RealSenseCamera:
                 serial=self.serial,
                 depth_width=self.depth_width,
                 depth_height=self.depth_height,
+                **start_kwargs,
             )
             dev = api.profile_device(self._profile)
             try:
@@ -906,7 +916,9 @@ class RealSenseCamera:
             self._tuning_pending = self.tuning is not None
             self.intrinsics = {}
             for sp in api.profile_streams(self._profile):
-                key = {STREAM_DEPTH: "depth", STREAM_COLOR: "color"}.get(sp["stream"])
+                key = {STREAM_DEPTH: "depth", STREAM_COLOR: "color", STREAM_INFRARED: "infrared"}.get(
+                    sp["stream"]
+                )
                 if key and sp["intrinsics"] is not None:
                     self.intrinsics[key] = sp["intrinsics"]
             try:
@@ -1022,12 +1034,14 @@ class RealSenseCamera:
                 frames = api.split_frameset(frameset)
             finally:
                 api.release_frame(frameset)
-        color = depth = None
+        color = depth = ir = None
         for f in frames:
             if f["stream"] == STREAM_COLOR and f["format"] == FORMAT_RGB8:
                 color = f
             elif f["stream"] == STREAM_DEPTH and f["format"] == FORMAT_Z16:
                 depth = f
+            elif f["stream"] == STREAM_INFRARED and f["format"] == FORMAT_Y8:
+                ir = f
         if color is None or depth is None:
             have = [f["stream"] for f in frames]
             raise RealSenseError(f"frameset lacks color+depth (streams present: {have})")
@@ -1040,6 +1054,13 @@ class RealSenseCamera:
         )
         if intr is None:
             raise RealSenseError("no intrinsics for the depth image")
+        extra: dict = {"serial": self.info.get("serial")}
+        if ir is not None:
+            extra["ir"] = Frame(width=ir["width"], height=ir["height"], data=_unstride(ir, 1), channels=1)
+            extra["ir_intrinsics"] = (
+                ir["intrinsics"] or self.intrinsics.get("infrared") or self.intrinsics.get("depth")
+            )
+            extra["ir_timestamp_ms"] = ir["timestamp_ms"]
         return RgbdFrame(
             color=cf,
             depth=df,
@@ -1047,7 +1068,7 @@ class RealSenseCamera:
             timestamp_ms=depth["timestamp_ms"],
             frame_number=depth["number"],
             aligned=self.align,
-            extra={"serial": self.info.get("serial")},
+            extra=extra,
         )
 
     def frames(self) -> Iterator[RgbdFrame]:
@@ -1090,6 +1111,7 @@ class RealSenseCamera:
                 "tuning_applied": self.tuning_applied,
             },
             "depth_scale_m": self.depth_scale,
+            "infrared": self.infrared,
             "intrinsics": {k: v.as_dict() for k, v in self.intrinsics.items()},
             "extrinsics_depth_to_color": self.extrinsics_depth_to_color,
             "sdk": {

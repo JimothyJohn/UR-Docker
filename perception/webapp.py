@@ -40,6 +40,10 @@ API:
   * ``GET  /api/events?after=N``      the cockpit's event log (robot actions,
                                       segments, captures, camera errors) — what an
                                       agent or a human reads to see what just happened.
+  * ``GET  /api/scan`` / ``POST /api/scan`` ``{delta?, velocity?, latency_s?}`` /
+    ``POST /api/scan/approach`` ``{index}`` / ``POST /api/table/from_depth`` —
+    the monocular scan (docs/mono-scan.md): one sweep move with frames + RTDE
+    poses, parts located on the table plane, graded against the depth.
   * ``POST /api/snapshot`` ``{dir?, name?}`` write the latest frame as
                                       ``<name>_color.png`` + ``<name>_depth.png`` (colourised)
                                       to a directory and return the paths — the
@@ -185,6 +189,14 @@ class ViewerApp:
         self._fps_window: list[float] = []
         self.events = EventLog()
         self._last_logged_error: str | None = None
+        # monocular scan (perception.sweep / locate2d): the newest frame's host stamp,
+        # a tap that collects frames during a sweep, the last result, the table plane
+        self._latest_t: float = 0.0
+        self._tap: list | None = None
+        self.last_scan: dict | None = None
+        self.table_plane = None
+        self.parts: list[str] | None = None
+        self._scan_lock = threading.Lock()
 
     # -- lifecycle -------------------------------------------------------------
 
@@ -244,8 +256,14 @@ class ViewerApp:
                     self._cond.wait(reopen_delay(failures))
                 continue
             now = time.monotonic()
+            # a camera that knows its exposure instant (the synthetic sweep camera; a
+            # triggered camera later) reports it — otherwise the arrival time stands in
+            exposure = frame.extra.get("exposure_t") if isinstance(frame.extra, dict) else None
             with self._cond:
                 self._latest = frame
+                self._latest_t = float(exposure) if exposure is not None else now
+                if self._tap is not None:
+                    self._tap.append((frame, now))
                 self._seq += 1
                 self.frames_read += 1
                 self._fps_window.append(now)
@@ -272,6 +290,17 @@ class ViewerApp:
                     break
                 self._cond.wait(remaining)
             return self._seq, self._latest
+
+    def wait_frame_stamped(self, after: int, timeout_s: float) -> tuple[int, RgbdFrame | None, float]:
+        """:meth:`wait_frame` plus the frame's host stamp, read under the same lock."""
+        deadline = time.monotonic() + timeout_s
+        with self._cond:
+            while self._running and self._seq <= after:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._cond.wait(remaining)
+            return self._seq, self._latest, self._latest_t
 
     def packed_frame(self, after: int | None, timeout_s: float) -> bytes | None:
         seq, frame = self.wait_frame(after, timeout_s) if after is not None else self.latest()
@@ -531,6 +560,244 @@ class ViewerApp:
         self.events.add("snapshot", f"snapshot → {color_path}", ok=True)
         return out
 
+    # -- monocular scan (docs/mono-scan.md) -------------------------------------------
+
+    def _table(self):
+        """The table plane: set in this session (table_from_depth), else env/file."""
+        if self.table_plane is not None:
+            return self.table_plane
+        from .tableplane import Plane
+
+        plane = Plane.from_env()
+        if plane is None:
+            from .touch import TouchSet, default_touch_path
+
+            path = default_touch_path()
+            if Path(path).is_file():
+                plane = TouchSet.load(path).table_plane()
+        return plane
+
+    def _library(self):
+        import glob
+
+        from .partlib import PartLibrary
+
+        paths = self.parts if self.parts is not None else sorted(glob.glob("parts/*.stl"))
+        return PartLibrary.from_paths(paths) if paths else None
+
+    def table_from_depth(self, save: bool = True) -> dict:
+        """The table plane from the latest RGB-D frame + the live flange pose."""
+        from urctl.pose import Transform
+
+        from .tableplane import default_table_path, plane_from_depth
+
+        link = self._link()
+        seq, frame = self.latest()
+        if frame is None:
+            raise RuntimeError("no frame yet" + (f" ({self.last_error})" if self.last_error else ""))
+        fp = link.flange_pose()
+        if not fp.get("ok") or not fp.get("flange"):
+            return {"ok": False, "error": fp.get("error") or "could not read the flange pose", "robot": fp}
+        leg = link.handeye.flange_to_color if frame.aligned else link.handeye.flange_to_depth
+        plane, stats = plane_from_depth(frame, Transform.from_pose(fp["flange"]).compose(leg))
+        self.table_plane = plane
+        out = {"ok": True, "seq": seq, "plane": plane.as_dict(), "stats": stats, "flange": fp["flange"]}
+        if stats["tilt_from_base_z_deg"] > 10.0:
+            out["warning"] = f"surface is {stats['tilt_from_base_z_deg']:.1f} deg off the base Z axis"
+        if save:
+            path = default_table_path()
+            plane.save(path)
+            out["saved"] = path
+        self.events.add(
+            "scan",
+            f"table plane from depth: z {plane.point[2]:.4f} m, "
+            f"tilt {stats['tilt_from_base_z_deg']:.1f} deg, "
+            f"{stats['inliers']}/{stats['samples']} inliers, rms {stats['rms_m'] * 1000:.1f} mm",
+            ok=stats["tilt_from_base_z_deg"] <= 10.0,
+        )
+        return out
+
+    def scan(
+        self,
+        delta: Sequence[float] | None = None,
+        velocity: float | None = None,
+        acceleration: float | None = None,
+        latency_s: float | None = None,
+        save: bool = True,
+    ) -> dict:
+        """One sweep move with this cockpit's frames + an RTDE pose recorder,
+        then locate the parts on the table plane and grade them against the
+        depth of the frame at the end of the sweep. Refused while another scan runs."""
+        from urctl.pose import Transform
+
+        from .depthcheck import check_objects
+        from .locate2d import locate_objects
+        from .monocam import MonoFrame
+        from .posestream import PoseRecorder
+        from .sweep import (
+            DEFAULT_DELTA_M,
+            DEFAULT_SWEEP_ACCELERATION,
+            DEFAULT_SWEEP_ROOT,
+            DEFAULT_SWEEP_VELOCITY,
+            latency_from_env,
+            run_sweep,
+        )
+
+        link = self._link()
+        plane = self._table()
+        if plane is None:
+            raise ValueError("no table plane: run table_from_depth first (or set PERCEPTION_TABLE_Z)")
+        _seq, frame = self.latest()
+        if frame is None:
+            raise RuntimeError("no frame yet" + (f" ({self.last_error})" if self.last_error else ""))
+        if not self._scan_lock.acquire(blocking=False):
+            raise ValueError("a scan is already running")
+        try:
+            d = list(delta) if delta is not None else list(DEFAULT_DELTA_M)
+            lat = latency_from_env() if latency_s is None else float(latency_s)
+            offset = link.tcp_offset() or [0.0] * 6
+            recorder = (
+                link.recorder() if hasattr(link, "recorder") else PoseRecorder(link.config, tcp_offset=offset)
+            )
+            app = self
+
+            class _Source:  # frames straight from the pump, stamped on arrival
+                def __init__(self):
+                    self.after = app.latest()[0]
+                    self.seq = 0
+                    self.last = None  # (RgbdFrame, host_t) of the newest frame handed out
+
+                def read(self):
+                    import numpy as np
+
+                    seq, f, t = app.wait_frame_stamped(self.after, 2.0)
+                    if f is None or seq <= self.after:
+                        raise RuntimeError("camera stalled during the sweep")
+                    self.after = seq
+                    self.last = (f, t)
+                    rgb = f.color.to_numpy()
+                    gray = (0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]).astype(np.uint8)
+                    self.seq += 1
+                    return MonoFrame(gray, t, self.seq, f.timestamp_ms)
+
+                def describe(self):
+                    return app.camera.describe()
+
+            self.events.add("scan", f"sweep {[round(v * 1000) for v in d]} mm starting", ok=None)
+            src = _Source()
+            sweep = self._robot_action(
+                "scan",
+                lambda: {
+                    "ok": True,
+                    "sweep": run_sweep(
+                        src,
+                        recorder,
+                        link,
+                        intrinsics=frame.intrinsics,
+                        flange_to_color=link.handeye.flange_to_color,
+                        delta=d,
+                        velocity=DEFAULT_SWEEP_VELOCITY if velocity is None else float(velocity),
+                        acceleration=DEFAULT_SWEEP_ACCELERATION
+                        if acceleration is None
+                        else float(acceleration),
+                        latency_s=lat,
+                        plane=plane,
+                    ),
+                },
+                summary=lambda r: (
+                    f"sweep done: {len(r['sweep'].frames)} frames, "
+                    f"baseline {r['sweep'].baseline_m() * 1000:.0f} mm"
+                ),
+            )["sweep"]
+            sweep.meta["handeye"] = link.handeye.as_dict()
+            library = self._library()
+            objs = locate_objects(sweep.frame_pairs(), sweep.intrinsics, plane, library=library)
+            result = {
+                "ok": True,
+                "sweep": sweep.summary(),
+                "latency_s": lat,
+                "plane": plane.as_dict(),
+                "parts": [p.name for p in library.parts] if library else [],
+                "objects": [o.as_dict() for o in objs],
+            }
+            # grade against the depth of the last frame of the sweep (its pose from the trajectory)
+            last, t_last = src.last if src.last is not None else (None, 0.0)
+            pose = sweep.flange_at(t_last - lat) if last is not None else None
+            if last is not None and pose is not None and objs:
+                t_base_cam = Transform.from_pose(pose).compose(link.handeye.flange_to_color)
+                for o, c in zip(result["objects"], check_objects(objs, last, t_base_cam, plane), strict=True):
+                    o["depth_check"] = c
+            if save:
+                from .scan_cli import _next_dir
+
+                out_dir = _next_dir(DEFAULT_SWEEP_ROOT, "cockpit")
+                sweep.save(out_dir)
+                result["sweep_dir"] = str(out_dir)
+            self.last_scan = result
+            self.events.add(
+                "scan",
+                f"located {len(objs)} object(s)"
+                + (
+                    ": "
+                    + "; ".join(
+                        f"#{o['index']} {[round(v, 3) for v in o['center_base_m']]} "
+                        f"h {o['height_m'] * 1000:.0f} mm"
+                        + (f" {o['match']['part']}" if o.get("match") else "")
+                        + (
+                            f" (depth Δ {o['depth_check']['diff_mm']:+.1f} mm)"
+                            if o.get("depth_check") and o["depth_check"].get("diff_mm") is not None
+                            else ""
+                        )
+                        for o in result["objects"]
+                    )
+                    if objs
+                    else ""
+                ),
+                ok=bool(objs),
+            )
+            return result
+        finally:
+            self._scan_lock.release()
+
+    def scan_status(self) -> dict:
+        plane = self._table()
+        lib = self._library()
+        return {
+            "ok": True,
+            "plane": None if plane is None else plane.as_dict(),
+            "parts": [p.name for p in lib.parts] if lib else [],
+            "last": self.last_scan,
+            "running": self._scan_lock.locked(),
+        }
+
+    def scan_approach(
+        self, index: int, standoff_m: float | None = None, reference: str | None = None
+    ) -> dict:
+        """Approach pose above scanned object ``index`` (along the table normal)."""
+        link = self._link()
+        if not self.last_scan or not self.last_scan.get("objects"):
+            raise ValueError("no scan result yet")
+        objs = self.last_scan["objects"]
+        if not (0 <= index < len(objs)):
+            raise ValueError(f"no object {index} (have {len(objs)})")
+        o = objs[index]
+        normal = (self.last_scan.get("plane") or {}).get("normal") or [0.0, 0.0, 1.0]
+        kwargs: dict = {"along": normal}
+        if standoff_m is not None:
+            kwargs["standoff_m"] = float(standoff_m)
+        if reference is not None:
+            kwargs["reference"] = reference
+        res = self._robot_action(
+            "scan_approach",
+            lambda: link.approach_point_base(o["center_base_m"], **kwargs),
+            summary=lambda r: (
+                f"approach for object #{index} → {[round(v, 3) for v in r.get('approach_pose', [])[:3]]}"
+                + (" — OUT OF REACH" if r.get("reachable") is False else "")
+            ),
+        )
+        res["object"] = o
+        return res
+
     # -- robot -------------------------------------------------------------------------
 
     def _link(self) -> RobotLink:
@@ -751,6 +1018,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self.app.point_at(x, y))
         elif route == "/api/cal":
             self._guarded(self.app.cal_status)
+        elif route == "/api/scan":
+            self._guarded(self.app.scan_status)
         elif route == "/api/robot":
             self._guarded(
                 lambda: {"ok": True, "robot": self.app.robot.describe() if self.app.robot else None}
@@ -852,6 +1121,26 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._guarded(self.app.cal_reset)
         elif route == "/api/cal/remove":
             self._guarded(lambda: self.app.cal_remove(_int(payload, "index")))
+        elif route == "/api/scan":
+            self._guarded(
+                lambda: self.app.scan(
+                    _vector(payload, "delta", 3) if "delta" in payload else None,
+                    _number(payload, "velocity") if "velocity" in payload else None,
+                    _number(payload, "acceleration") if "acceleration" in payload else None,
+                    _number(payload, "latency_s") if "latency_s" in payload else None,
+                    bool(payload.get("save", True)),
+                )
+            )
+        elif route == "/api/scan/approach":
+            self._guarded(
+                lambda: self.app.scan_approach(
+                    _int(payload, "index"),
+                    _number(payload, "standoff_m") if "standoff_m" in payload else None,
+                    payload.get("reference"),
+                )
+            )
+        elif route == "/api/table/from_depth":
+            self._guarded(lambda: self.app.table_from_depth(bool(payload.get("save", True))))
         elif route == "/api/snapshot":
             self._guarded(
                 lambda: self.app.snapshot(
@@ -1011,6 +1300,12 @@ def add_camera_args(ap) -> None:
         help="synthetic RGB-D scene instead of a RealSense (or PERCEPTION_FAKE=1)",
     )
     ap.add_argument(
+        "--fake-scan",
+        action="store_true",
+        help="synthetic blocks-on-a-table scene that follows a simulated sweep "
+        "(the mono-scan demo; implies a fake robot)",
+    )
+    ap.add_argument(
         "--serial", default=None, help="RealSense serial (default: $PERCEPTION_RS_SERIAL or first)"
     )
     ap.add_argument(
@@ -1062,10 +1357,32 @@ def robot_from_args(args) -> RobotLink | None:
         return None
     from urctl.config import RobotConfig
 
-    return RobotLink(
+    link = RobotLink(
         RobotConfig.from_env(host=getattr(args, "robot_host", None)),
-        dry_run=bool(getattr(args, "robot_dry_run", False)),
+        dry_run=bool(getattr(args, "robot_dry_run", False)) or bool(getattr(args, "fake_scan", False)),
     )
+    if getattr(args, "fake_scan", False):
+        return _fake_scan_link(link)
+    return link
+
+
+_FAKE_SCAN_RIG = None
+
+
+def _fake_scan_link(link: RobotLink):
+    """``--fake-scan``: the camera and the robot link share one rig."""
+    from .sweep import FakeRigLink
+
+    return FakeRigLink(_fake_scan_rig(), link)
+
+
+def _fake_scan_rig():
+    global _FAKE_SCAN_RIG
+    if _FAKE_SCAN_RIG is None:
+        from .sweep import FakeRig
+
+        _FAKE_SCAN_RIG = FakeRig()
+    return _FAKE_SCAN_RIG
 
 
 def _env_flag(name: str) -> bool:
@@ -1124,6 +1441,10 @@ def camera_from_args(args, config: PerceptionConfig) -> RgbdCamera:
         getattr(args, "rs_preset", None) or config.rs_preset,
         getattr(args, "laser_power", None) or config.rs_laser_power,
     )
+    if getattr(args, "fake_scan", False):
+        from .sweep import SweepRgbdCamera
+
+        return SweepRgbdCamera(_fake_scan_rig())
     return open_camera(
         fake=bool(getattr(args, "fake", False)) or _env_flag("PERCEPTION_FAKE"),
         width=color_w,

@@ -202,6 +202,19 @@
           <ul id="calViews" class="views"></ul>
           <div id="calResult" hidden><table id="calTable"><tbody></tbody></table><pre class="env" id="calEnv"></pre></div>
         </details>
+        <details class="cal" id="scanSec">
+          <summary>Scan (mono) <span id="scanMeta" style="font-weight:400;letter-spacing:0;text-transform:none">–</span></summary>
+          <div class="hint">One sweep move; the parts are located from the 2D frames + the robot's poses on the taught table plane, then graded against the depth. 1. Point the camera at a clear patch of the table → <b>Table from depth</b>. 2. <b>Scan</b>. 3. <b>Approach</b> an object.</div>
+          <div class="row">
+            <button id="tableBtn">Table from depth</button>
+            <label>sweep <input id="scanDx" type="number" value="150" step="10" min="-300" max="300" style="width:4.5em"> mm X</label>
+            <label><input id="scanDy" type="number" value="0" step="10" min="-300" max="300" style="width:4.5em"> mm Y</label>
+            <label>v <input id="scanV" type="number" value="0.15" step="0.05" min="0.01" max="1" style="width:4.5em"> m/s</label>
+            <button id="scanBtn" class="primary">Scan</button>
+          </div>
+          <div id="scanPlane" class="hint mono">table –</div>
+          <table id="scanTable"><tbody><tr><td colspan="2" class="hint">No scan yet.</td></tr></tbody></table>
+        </details>
       </div>
       <div class="head" style="padding:7px 0 0;border:0"><h2>Capture</h2></div>
       <div class="row">
@@ -594,6 +607,41 @@
   };
   $('calResetBtn').onclick = async () => { await pilot('/api/cal/reset', {}, 'reset'); cal(); };
   $('calSec').addEventListener('toggle', () => { if ($('calSec').open) cal(); });
+  // ---- monocular scan ------------------------------------------------------------------
+  function renderScan(d) {
+    const pl = d.plane;
+    $('scanPlane').textContent = pl ? `table z ${fmt(pl.point[2], 4)} m · normal ${vec(pl.normal, 2)} · ${pl.source}` : 'table – (Table from depth first)';
+    $('scanMeta').textContent = `${d.running ? 'running · ' : ''}${d.parts.length ? d.parts.join(', ') : 'no parts/*.stl'}${d.last ? ` · ${d.last.objects.length} object(s)` : ''}`;
+    const tb = $('scanTable').tBodies[0];
+    if (!d.last) { tb.innerHTML = '<tr><td colspan="2" class="hint">No scan yet.</td></tr>'; return; }
+    const s = d.last.sweep;
+    const rows = [`<tr><td colspan="2" class="hint">${s.frames} frames · baseline ${(s.baseline_m * 1000).toFixed(0)} mm · latency ${(d.last.latency_s * 1000).toFixed(0)} ms${d.last.sweep_dir ? ` · ${d.last.sweep_dir}` : ''}</td></tr>`];
+    for (const o of d.last.objects) {
+      const dc = o.depth_check; const dct = dc ? (dc.diff_mm == null ? (dc.error || '?') : `depth Δ ${dc.diff_mm.toFixed(1)} mm${dc.ok ? '' : ' ⚠'}`) : '';
+      rows.push(`<tr><td>#${o.index}</td><td>${vec(o.center_base_m, 3)} m · h ${(o.height_m * 1000).toFixed(1)} mm · yaw ${o.yaw_base_deg.toFixed(0)}° · ${(o.footprint_m[0] * 1000).toFixed(0)}×${(o.footprint_m[1] * 1000).toFixed(0)} mm${o.match ? ` · <b>${o.match.part}</b> (${o.match.pose.label.split(':')[1]})` : ' · no part match'} · IoU ${o.iou != null ? o.iou.toFixed(2) : '–'} · ${o.views} views${dct ? ' · ' + dct : ''} <button class="x" data-i="${o.index}" title="approach this object">Approach</button></td></tr>`);
+    }
+    tb.innerHTML = rows.join('');
+    tb.querySelectorAll('button.x').forEach(b => b.onclick = () => scanApproach(+b.dataset.i));
+  }
+  async function scanStatus() { try { renderScan(await (await fetch('/api/scan')).json()); } catch (e) {} }
+  $('tableBtn').onclick = async () => { if (!confirm('Is the camera looking at a clear patch of the table right now?')) return; const j = await pilot('/api/table/from_depth', { save: true }, 'table from depth'); if (j && j.warning) toast(j.warning, 6000); scanStatus(); };
+  $('scanBtn').onclick = async () => {
+    const dx = (parseFloat($('scanDx').value) || 0) / 1000, dy = (parseFloat($('scanDy').value) || 0) / 1000, v = parseFloat($('scanV').value) || 0.15;
+    const host = robotInfo ? robotInfo.host : 'robot', dry = robotInfo && robotInfo.dry_run ? ' (dry-run)' : '';
+    if (!confirm(`Sweep the arm ${(dx * 1000).toFixed(0)} mm X / ${(dy * 1000).toFixed(0)} mm Y at ${v} m/s on ${host}${dry} and scan?`)) return;
+    $('scanBtn').disabled = true; $('scanMeta').textContent = 'scanning…';
+    try { await pilot('/api/scan', { delta: [dx, dy, 0], velocity: v }, 'scan'); } finally { $('scanBtn').disabled = false; scanStatus(); }
+  };
+  async function scanApproach(i) {
+    try {
+      const j = await post('/api/scan/approach', { index: i, standoff_m: parseFloat($('standoff').value) || 0, reference: $('reference').value });
+      if (j.reachable === false) { toast('out of reach — move the part closer to the base', 5000); return; }
+      approachPose = j.approach_pose; $('moveBtn').disabled = false;
+      renderRobot(j);
+      toast(`approach for #${i} ready — press "Move TCP to approach"`, 5000);
+    } catch (e) { toast(`approach: ${e.message}`, 6000); }
+  }
+  $('scanSec').addEventListener('toggle', () => { if ($('scanSec').open) scanStatus(); });
 
   $('bringUpBtn').onclick = () => pilot('/api/robot/bring_up', {}, 'bring up');
   $('stopBtn').onclick = () => pilot('/api/robot/stop', {}, 'stop');

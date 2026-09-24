@@ -1,0 +1,105 @@
+{
+  "params": {
+    "SQUARES": 7,
+    "SQUARE_MM": 20.0,
+    "MARKER_MM": 15.0,
+    "DICT": "DICT_4X4_50",
+    "PLATE_T": 6.0,
+    "MARGIN": 20.0,
+    "RECESS_CLEAR": 0.5,
+    "RECESS_DEPTH": 0.6,
+    "NOTCH_R": 5.0,
+    "DIMPLE_OFF": 10.0,
+    "DIMPLE_D": 5.0,
+    "MAGNET_D": 10.4,
+    "MAGNET_T": 2.2,
+    "CHAMFER": 1.0,
+    "PROBE_SPIGOT_OD": 31.6,
+    "PROBE_SPIGOT_H": 0.0,
+    "PROBE_COLLAR_OD": 63.0,
+    "PROBE_COLLAR_T": 6.0,
+    "PROBE_TIP_FROM_FACE": 44.0,
+    "BRACKET_T": 6.0
+  },
+  "pattern": {
+    "squares": [
+      7,
+      7
+    ],
+    "square_m": 0.02,
+    "marker_m": 0.015,
+    "dictionary": "DICT_4X4_50",
+    "side_mm": 140.0,
+    "sheet_mm": [
+      155.99833333333333,
+      155.99833333333333
+    ],
+    "cut_to_mm": 140.0
+  },
+  "plate_frame": "origin = dimple A, +X toward B, +Y toward C, +Z out of the printed face (== a UR Plane feature taught A, B, C)",
+  "dimples_plate_mm": {
+    "A": [
+      0.0,
+      0.0
+    ],
+    "B": [
+      160.0,
+      0.0
+    ],
+    "C": [
+      0.0,
+      160.0
+    ]
+  },
+  "dimple_cone_depth_mm": 2.5,
+  "plate_size_mm": [
+    180.0,
+    180.0,
+    6.0
+  ],
+  "T_plate_pattern": {
+    "t_mm": [
+      10.0,
+      150.0,
+      0.0
+    ],
+    "R": [
+      [
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        -1,
+        0
+      ],
+      [
+        0,
+        0,
+        -1
+      ]
+    ],
+    "note": "180 deg about X: pattern y (down the page) = plate -Y, pattern z (into board) = plate -Z"
+  },
+  "probe": {
+    "tip_below_seating_face_mm": 44.0,
+    "tcp_on_bracket_m": [
+      0,
+      0,
+      0.05,
+      0,
+      0,
+      0
+    ],
+    "tcp_on_bare_flange_m": [
+      0,
+      0,
+      0.044,
+      0,
+      0,
+      0
+    ],
+    "note": "flat seating face; locate with the 4x O6.6 on the ISO-50 pattern (the tool bolts) against the bracket's tool face or the bare flange"
+  }
+}

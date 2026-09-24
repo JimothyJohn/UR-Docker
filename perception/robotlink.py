@@ -170,6 +170,106 @@ class RobotLink:
             params["tcp"] = t
         return self._tool("ur_move_tcp", params)
 
+    def move_relative(
+        self,
+        delta: Sequence[float],
+        *,
+        velocity: float = DEFAULT_APPROACH_VELOCITY,
+        acceleration: float = DEFAULT_APPROACH_ACCELERATION,
+    ) -> dict:
+        """One relative base-frame ``movel`` (``[dx, dy, dz, drx, dry, drz]``) —
+        the scan's sweep. Bigger than a jog, still capped by the envelope's
+        relative-step limit; blocks until the move confirms."""
+        vals = [float(v) for v in delta]
+        if len(vals) != 6 or not all(math.isfinite(v) for v in vals):
+            raise ValueError("delta must be 6 finite numbers [dx, dy, dz, drx, dry, drz]")
+        if not (0.0 < velocity <= 1.0) or not (0.0 < acceleration <= 5.0):
+            raise ValueError("velocity must be within (0, 1] m/s and acceleration within (0, 5] m/s^2")
+        return self._tool(
+            "ur_move_tcp",
+            {
+                "pose": vals,
+                "relative": True,
+                "velocity": float(velocity),
+                "acceleration": float(acceleration),
+            },
+        )
+
+    def approach_point_base(
+        self,
+        point_base: Sequence[float],
+        *,
+        along: Sequence[float] = (0.0, 0.0, 1.0),
+        standoff_m: float | None = None,
+        reference: str | None = None,
+    ) -> dict:
+        """An approach pose ``standoff_m`` from a **base-frame** point along
+        ``along`` (the table normal for a scanned object), tool orientation
+        unchanged — the same output shape as :meth:`locate` (``approach_pose``,
+        ``flange_target_pose``, ``reachable``) so Move/Approach can reuse it.
+        Reads the flange pose; moves nothing."""
+        from urctl.pose import pose_inv, pose_trans
+
+        pt = [float(v) for v in point_base]
+        if len(pt) != 3 or not all(math.isfinite(v) for v in pt):
+            raise ValueError("point_base must be [x, y, z]")
+        n = [float(v) for v in along]
+        norm = math.sqrt(sum(v * v for v in n))
+        if len(n) != 3 or norm < 1e-9:
+            raise ValueError("along must be a non-zero direction")
+        n = [v / norm for v in n]
+        so = self.standoff_m if standoff_m is None else float(standoff_m)
+        if not (0.0 <= so <= 1.0):
+            raise ValueError("standoff_m must be within 0..1 m")
+        ref = (reference or self.approach_reference).lower()
+        if ref not in APPROACH_REFERENCES:
+            raise ValueError(f"reference must be one of {APPROACH_REFERENCES}")
+        fp = self.flange_pose()
+        if not fp.get("ok") or not fp.get("flange") or not fp.get("tcp"):
+            return {"ok": False, "error": fp.get("error") or "could not read the flange pose", "robot": fp}
+        offset = fp.get("tcp_offset")
+        if ref == "flange" and not offset:
+            return {"ok": False, "error": "reference='flange' needs the active tcp_offset"}
+        short = [pt[i] + so * n[i] for i in range(3)]
+        flange_now, tcp_now = [float(v) for v in fp["flange"]], [float(v) for v in fp["tcp"]]
+        if ref == "flange":
+            flange_target = [*short, *flange_now[3:]]
+            target = pose_trans(flange_target, offset)
+        else:
+            target = [*short, *tcp_now[3:]]
+            flange_target = pose_trans(target, pose_inv(offset)) if offset else None
+        commanded = flange_target if ref == "flange" else target
+        dist = math.sqrt(sum(v * v for v in commanded[:3]))
+        max_reach = self.robot.max_reach()
+        return {
+            "ok": True,
+            "point_base_m": pt,
+            "along": n,
+            "standoff_m": so,
+            "reference": ref,
+            "approach_pose": target,
+            "flange_target_pose": flange_target,
+            "tcp": list(FLANGE_TCP) if ref == "flange" else None,
+            "commanded_distance_m": dist,
+            "max_reach_m": max_reach,
+            "reachable": None if max_reach is None else bool(dist <= max_reach),
+            "model": self.robot.safety.model or None,
+            "flange_pose": flange_now,
+            "tcp_pose": tcp_now,
+            "tcp_offset": offset,
+            "robot": {"tcp_offset": offset, "dry_run": fp.get("dry_run")},
+            "handeye": self.handeye.as_dict(),
+            "point_cam_m": None,
+            "point_flange_m": None,
+            "view_ray_base": None,
+        }
+
+    def tcp_offset(self) -> list[float] | None:
+        """The active flange→TCP offset (UR pose) from one ``ur_flange_pose`` read."""
+        fp = self.flange_pose()
+        off = fp.get("tcp_offset") if fp.get("ok") else None
+        return [float(v) for v in off] if off else None
+
     def approach_cycle(
         self,
         point_cam: Sequence[float],

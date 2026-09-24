@@ -220,6 +220,55 @@ COCKPIT_TOOLS: list[CockpitTool] = [
         lambda c, p: c.post("/api/cal/reset"),
     ),
     CockpitTool(
+        "cam_scan",
+        "Monocular scan (docs/mono-scan.md): one relative base-frame sweep move (delta metres, default "
+        "[0.15, 0, 0]) while frames and RTDE poses are recorded, then every part on the table plane is "
+        "located (centre, height, yaw, part + resting pose from the STL library) and graded against the "
+        "depth camera (depth_check per object). Needs a table plane (cell_table_from_depth) and the robot "
+        "RUNNING in Remote. Blocks for the sweep (~2-5 s).",
+        _schema(
+            {
+                "delta": _POINT,
+                "velocity": {"type": "number"},
+                "latency_s": {"type": "number", "description": "camera latency (default: fitted/env/0)"},
+            }
+        ),
+        lambda c, p: c.post(
+            "/api/scan",
+            {k: p[k] for k in ("delta", "velocity", "latency_s") if k in p},
+        ),
+    ),
+    CockpitTool(
+        "cam_scan_result",
+        "The last scan's objects (base-frame top centres, heights, parts, depth checks), the table plane "
+        "and the part library in use.",
+        _schema({}),
+        lambda c, p: c.get("/api/scan"),
+    ),
+    CockpitTool(
+        "cam_scan_approach",
+        "Approach pose above scanned object `index` along the table normal (standoff_m, reference as in "
+        "cam_locate). Reads the robot; moves nothing — pass approach_pose (and tcp) to cam_move_to_approach.",
+        _schema(
+            {
+                "index": {"type": "integer"},
+                "standoff_m": {"type": "number"},
+                "reference": {"type": "string", "enum": ["tcp", "flange"]},
+            },
+            required=["index"],
+        ),
+        lambda c, p: c.post(
+            "/api/scan/approach", {k: p[k] for k in ("index", "standoff_m", "reference") if k in p}
+        ),
+    ),
+    CockpitTool(
+        "cell_table_from_depth",
+        "Teach the table plane from the cockpit's current depth frame + the live flange pose (RANSAC; "
+        "point the camera at a clear patch of the surface). Saved for the cell; needed before cam_scan.",
+        _schema({"save": {"type": "boolean"}}),
+        lambda c, p: c.post("/api/table/from_depth", {"save": p.get("save", True)}),
+    ),
+    CockpitTool(
         "cell_jog",
         "One relative base-frame nudge of the TCP: delta [dx, dy, dz, drx, dry, drz] (metres, radians), "
         "at most 0.05 m / 0.35 rad per axis, safety-enveloped, logged in the cockpit's events. "

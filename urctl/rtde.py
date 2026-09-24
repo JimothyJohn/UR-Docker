@@ -355,6 +355,24 @@ class RtdeClient:
             out[name] = list(vals) if n > 1 else vals[0]
         return out
 
+    def stream(self):
+        """Yield every output sample as it arrives (the recipe's ``frequency``),
+        until :meth:`close` or :meth:`pause_stream`. Unlike :meth:`read_outputs`
+        this keeps the controller streaming — the consumer must keep up (a
+        125 Hz recipe is ~15 kB/s), which is what a pose recorder wants."""
+        if not self.connected:
+            self.connect()
+        self._start()
+        try:
+            while self.connected:
+                yield self.receive()
+        finally:
+            if self.connected:
+                try:
+                    self._pause()
+                except OSError:
+                    pass
+
     def read_outputs(self) -> dict:
         """Connect if needed and return one *fresh* output sample.
 

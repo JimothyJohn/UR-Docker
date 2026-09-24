@@ -16,3 +16,28 @@
 - 2026-09-12 — D435 USB-C is on an **end face** of Nick's unit (not the back as in Intel's mesh); bracket clears it, spec §6 A1 updated.
 - 2026-09-12 — SAM backend stays "wired, unverified" until a GPU box exists; the demo uses the stub segmenter.
 - 2026-09-12 — Dependabot ignores `universalrobots/ursim_polyscopex` bumps (pinned 10.13.0; re-test new tags by hand).
+
+## Monocular scan — backburner (2026-09-24, `docs/mono-scan.md`)
+
+Built and verified on the synthetic rig; parked until there is time at the UR3e. Everything below needs hardware, a print, or a purchase — the software side is done up to the point marked.
+
+**Needs the 3D prints (`hardware/charuco-board/`):**
+- Print the ChArUco plate + the touch probe (flat seating face, no pilot); print the pattern PDF at 100 %, cut on the line, A corner at the notch.
+- `perception --cell ur3 touch --set plate --label A|B|C` with the probe (TCP `[0,0,0.050]` on the bracket) → `T_base_plate`.
+- `perception latency-fit <sweep over the plate> --save` — the ChArUco path (PnP per frame). Until then the print-free `--objects` path (fit the latency by silhouette IoU over the blocks) is the way.
+- ChArUco hand-eye command (`perception/charuco.py` has the closed-form per-view solve + averaging; no CLI yet): needed for any camera that is *not* the RealSense — the current hand-eye came from the depth-based touch-and-click routine.
+- Camera-intrinsics command for a non-RealSense camera (ChArUco calibration; the RealSense reports its own).
+
+**Needs the UR3e (no print):**
+- `perception --cell ur3 table-from-depth` (one RGB-D frame of the empty surface → table plane) — or three flange-centre touches with `touch --probe-tcp 0 0 0 0 0 0`.
+- First sweep at 0.05 m/s (rolling-shutter colour): `perception --cell ur3 scan --parts parts/block_50x30x30.stl`; read `depth_check` per object (the RealSense depth grades the mono result).
+- `perception latency-fit <that sweep> --objects --save`, then raise the sweep speed.
+- Try `--stream ir` (left IR imager = global shutter, emitter off): built blind against the SDK's C API, **unverified on the camera**; verify the IR frame arrives and the hand-eye (depth frame) applies without extrinsics.
+- Cockpit **Scan** panel + `cam_scan*` MCP tools on the real cell (verified on the synthetic cockpit only).
+
+**Later / purchases:**
+- Global-shutter camera with a trigger input (Arducam OV9281/OV9782 USB, or IMX296 CSI on the Thor) + a 24 V→3.3 V level shifter: the T2 trigger (UR tool DO → camera, edges read from RTDE's `actual_digital_output_bits`; `PoseRecorder.edges()` already extracts them).
+- Line laser (650 nm module + bandpass filter) on the bracket for textureless/reflective parts; laser-plane calibration over the plate.
+- Model-based edge matching for non-box parts (the box fit uses the OBB corners; use the CAD hull's silhouette).
+- Stable-pose analysis from the convex hull (resting poses are OBB-based now: exact for boxes only).
+- NVIDIA Thor: CUDA SGBM / SAM; `Dockerfile.perception` retarget.
