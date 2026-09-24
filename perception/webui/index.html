@@ -95,6 +95,24 @@
   ul.views li { display: flex; gap: 6px; padding: 2px 0; border-bottom: 1px solid var(--line-soft); align-items: center; }
   ul.views li .x { margin-left: auto; padding: 0 6px; font-size: 11px; }
   pre.env { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-all; background: var(--inset); border: 1px solid var(--line-soft); border-radius: 4px; padding: 6px; }
+  /* ---- demo mode: one picture, four big buttons, one light (body.demo; ?demo=1 or the header toggle) ---- */
+  #demoBar { display: none; }
+  body.demo header .chips .chip, body.demo #cam, body.demo #pauseBtn { display: none; }
+  body.demo header h1 { font-size: 22px; }
+  body.demo #demoBar { display: flex; gap: 14px; align-items: center; padding: 12px 16px; background: var(--panel);
+                       border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  body.demo #demoBar button { font-size: 22px; padding: 16px 28px; border-radius: 10px; min-width: 170px; font-weight: 700; }
+  body.demo #demoBar button:disabled { opacity: .35; }
+  body.demo #demoBar .light { font-size: 20px; font-weight: 700; padding: 12px 22px; border-radius: 999px; margin-left: auto;
+                              border: 2px solid var(--line); color: var(--muted); }
+  body.demo #demoBar .light.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+  body.demo #demoBar .light.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  body.demo #demoBar .light.crit { color: var(--crit); border-color: var(--crit); background: var(--crit-soft); }
+  body.demo #demoStep { flex-basis: 100%; font-size: 18px; color: var(--text); }
+  body.demo main { grid-template-columns: 1fr; grid-template-areas: "color"; grid-template-rows: 1fr; }
+  body.demo #depthPanel, body.demo #side, body.demo .hint, body.demo #colorPanel .head { display: none; }
+  body.demo .readout { font-size: 16px; }
+  body.demo #toast { font-size: 18px; padding: 14px 22px; max-width: 720px; left: 50%; right: auto; transform: translateX(-50%); bottom: 28px; }
 </style>
 </head>
 <body>
@@ -109,9 +127,18 @@
     <span id="chipSeg" class="chip">seg ?</span>
     <span id="chipRobot" class="chip" title="robot_mode · safety_mode · control_mode">robot ?</span>
     <button id="pauseBtn" title="space">Pause</button>
+    <button id="demoToggle" title="one picture, four buttons">Demo</button>
   </div>
 </header>
 <div id="banner" class="banner crit"><span id="bannerText"></span></div>
+<div id="demoBar">
+  <button id="dStart" class="primary" title="power on + brake release">1 · Start robot</button>
+  <button id="dFind" title="pick out the nearest object in the picture">2 · Find object</button>
+  <button id="dPick" class="primary" disabled title="go over the object, down to it, and back">3 · Pick</button>
+  <button id="dStop" class="crit" title="stop all motion now">STOP</button>
+  <span id="demoLight" class="light">robot ?</span>
+  <div id="demoStep">Press <b>Start robot</b>, then click the object in the picture (or press <b>Find object</b>), then <b>Pick</b>.</div>
+</div>
 
 <main>
   <section id="colorPanel" class="panel">
@@ -512,6 +539,10 @@
   function renderFeatures() {
     resetRobot(features && features.point_m ? 'Approach runs the cycle; Locate just shows the maths.' : 'Segment an object with depth, then Approach.');
     $('cycleBtn').disabled = !(features && features.point_m && robotInfo);
+    $('dPick').disabled = $('cycleBtn').disabled;
+    demoStep(features && features.point_m ? 'Object found — press <b>Pick</b>. Click another object to change your mind.'
+      : (features ? 'No depth on that object — click nearer its middle, or press <b>Find object</b>.'
+        : 'Press <b>Start robot</b>, then click the object in the picture (or press <b>Find object</b>), then <b>Pick</b>.'));
     const tb = $('features').tBodies[0];
     if (!features) { tb.innerHTML = '<tr><td colspan="2" class="hint">No segment yet.</td></tr>'; return; }
     const f = features, d = f.depth, g = f.grasp;
@@ -544,10 +575,32 @@
       chip('stControl', cm, cm === 'REMOTE' ? 'ok' : 'warn');
       chip('stProgram', ps, ps.includes('PLAYING') ? 'ok' : '');
       chip('chipRobot', `${rm.replace('Robotmode: ', '')} · ${sm} · ${cm}`, rm.includes('RUNNING') && cm === 'REMOTE' && (sm.includes('NORMAL') || sm.includes('REDUCED')) ? 'ok' : 'warn');
+      const safe = sm.includes('NORMAL') || sm.includes('REDUCED');
+      if (!safe && sm !== '?') light('STOPPED — press Start robot', 'crit');
+      else if (!rm.includes('RUNNING')) light('Press Start robot', 'warn');
+      else if (cm !== 'REMOTE' && cm !== '?') light('Switch the pendant to REMOTE', 'warn');
+      else light('READY', 'ok');
       $('tcpLine').textContent = j.tcp ? `tcp ${vec(j.tcp)}` : (j.joints ? `joints ${vec(j.joints, 2)}` : 'tcp – (no telemetry)');
-    } catch (e) { chip('chipRobot', /unreachable|refused|timed out/i.test(e.message) ? 'robot unreachable' : `robot: ${e.message.slice(0, 40)}`, 'crit'); $('chipRobot').title = e.message; }
+    } catch (e) { chip('chipRobot', /unreachable|refused|timed out/i.test(e.message) ? 'robot unreachable' : `robot: ${e.message.slice(0, 40)}`, 'crit'); $('chipRobot').title = e.message; light('Robot not reachable', 'crit'); }
     finally { stateBusy = false; }
   }
+  // ---- demo mode ----------------------------------------------------------------------
+  function light(text, klass) { const l = $('demoLight'); l.textContent = text; l.className = 'light ' + (klass || ''); }
+  function demoStep(html) { $('demoStep').innerHTML = html; }
+  const demoParam = new URLSearchParams(location.search).get('demo');
+  let demo = demoParam === null ? localStorage.getItem('demo') === '1' : demoParam !== '0';
+  function setDemo(on) {
+    demo = on; document.body.classList.toggle('demo', on); try { localStorage.setItem('demo', on ? '1' : '0'); } catch (e) {}
+    $('demoToggle').textContent = on ? 'Developer view' : 'Demo';
+    if (on) { $('livePoll').checked = true; running = true; $('pauseBtn').textContent = 'Pause'; }
+    window.dispatchEvent(new Event('resize'));
+  }
+  $('demoToggle').onclick = () => setDemo(!demo);
+  $('dStart').onclick = async () => { $('dStart').disabled = true; try { await pilot('/api/robot/bring_up', {}, 'start robot'); } finally { $('dStart').disabled = false; } };
+  $('dFind').onclick = async () => { $('dFind').disabled = true; try { await nearest(); } finally { $('dFind').disabled = false; } };
+  $('dPick').onclick = async () => { $('dPick').textContent = 'Picking…'; try { await approachCycle(); } finally { $('dPick').textContent = '3 · Pick'; } };
+  $('dStop').onclick = () => pilot('/api/robot/stop', {}, 'stop');
+  setDemo(demo);
   async function pilot(url, body, label) {
     try { const j = await post(url, body || {}); toast(j.ok === false ? `${label}: ${j.error || j.reply || JSON.stringify(j.safety && j.safety.violations || '') || 'refused'}` : `${label} ok`, 4000); events(); robotState(); return j; }
     catch (e) { toast(`${label}: ${e.message}`, 6000); events(); }

@@ -159,6 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
     gu.add_argument("--bind", default="127.0.0.1", help="interface to bind (default: loopback only)")
     gu.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port (default {DEFAULT_PORT})")
     gu.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+    gu.add_argument("--demo", action="store_true", help="open the demo view: one picture, four big buttons")
 
     add_scan_commands(sub, add_camera_args=add_camera_args, add_robot_args=add_robot_args)
     return ap
@@ -223,6 +224,7 @@ def _realsense_command(args) -> int:
             port=args.port,
             open_browser=not args.no_browser,
             robot=robot_from_args(args),
+            demo=args.demo,
         )
         return 0
 

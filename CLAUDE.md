@@ -102,6 +102,12 @@ field log; append to it when something is verified or changes.
 12.5 Hz, live FK arm view) whose every button dispatches through the same tool
 registry (validated + safety-enveloped + audited). `docs/harness.md` §5.
 
+**Demo view (`perception gui --demo`, `/?demo=1`, header **Demo** button):** the
+RGB-D cockpit reduced to the picture, four big buttons (Start robot → Find
+object → Pick, STOP), one status light and one instruction line; **Developer
+view** toggles back. Same page, same API — `body.demo` CSS hides the rest, the
+buttons call the existing bring-up / nearest / approach-cycle / stop actions.
+
 **Monocular scan (`perception scan` / `locate` / `touch` / `latency-fit`, see
 `docs/mono-scan.md`):** the post-RealSense path — a 2D camera on the flange plus
 the robot's own poses. One relative `movel` (≤ 150 mm) runs while the colour

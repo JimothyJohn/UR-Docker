@@ -1261,14 +1261,17 @@ def serve(
     port: int = DEFAULT_PORT,
     open_browser: bool = True,
     robot: RobotLink | None = None,
+    demo: bool = False,
 ) -> None:
-    """Run the cockpit until interrupted (the ``perception gui`` entry point)."""
+    """Run the cockpit until interrupted (the ``perception gui`` entry point).
+    ``demo`` opens the browser on the demo view (``/?demo=1``: one picture,
+    four buttons, one light; the header's *Developer view* toggles back)."""
     app = ViewerApp(camera, config=config, store=CaptureStore(Path(capture_root)), robot=robot)
     server = ThreadingHTTPServer((bind, port), ViewerHandler)
     server.daemon_threads = True
     server.app = app  # type: ignore[attr-defined]
     host = "127.0.0.1" if bind in ("0.0.0.0", "") else bind
-    url = f"http://{host}:{server.server_address[1]}/"
+    url = f"http://{host}:{server.server_address[1]}/" + ("?demo=1" if demo else "")
     kind = camera.describe()["kind"]
     robot_desc = (
         f"robot: {robot.config.host}{' (dry-run)' if robot.dry_run else ''}"
@@ -1488,6 +1491,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--bind", default="127.0.0.1", help="interface to bind (default: loopback only)")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port (default {DEFAULT_PORT})")
     ap.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+    ap.add_argument("--demo", action="store_true", help="open the demo view: one picture, four big buttons")
     ap.add_argument(
         "--cell", default=None, help="cell profile (sim|ur3|ur20 or a .env path; default: $UR_CELL)"
     )
@@ -1517,6 +1521,7 @@ def main(argv: list[str] | None = None) -> int:
         port=args.port,
         open_browser=not args.no_browser,
         robot=robot_from_args(args),
+        demo=bool(getattr(args, "demo", False)),
     )
     return 0
 
