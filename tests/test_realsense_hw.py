@@ -39,15 +39,26 @@ def _mean_brightness(frame) -> float:
     return sum(sample) / len(sample)
 
 
+def _usb2(devices) -> bool:
+    return str(devices[0].get("usb_type") or "").startswith("2")
+
+
 def test_stream_aligned_frames_and_measure(devices):
-    cam = RealSenseCamera(fps=30)  # defaults: 848x480 colour *and* depth
+    cam = RealSenseCamera()  # defaults: 848x480 colour *and* depth, fps auto (30 / 15 on USB 2)
     with cam:
         assert cam.depth_scale and 0.0001 <= cam.depth_scale <= 0.01
         assert set(cam.intrinsics) == {"color", "depth"}
         frames = [cam.read() for _ in range(15)]  # let auto-exposure settle
     f = frames[-1]
-    assert f.aligned and (f.color.width, f.color.height) == (848, 480)
-    assert (f.depth.width, f.depth.height) == (848, 480)
+    # Whatever the link, colour and depth come out the *same* size (mixed sizes → black colour).
+    assert f.aligned and (f.color.width, f.color.height) == (f.depth.width, f.depth.height)
+    if _usb2(devices):
+        # USB 2 (D435 fw 5.12.7.100, 2026-09-24): no 848x480 colour on offer at all, so the
+        # camera must negotiate the shared 640x480 @ 15 on its own — no flags, no env.
+        assert (f.color.width, f.color.height, cam.effective_fps) == (640, 480, 15)
+        assert cam.negotiated and "848x480" in cam.negotiated
+    else:
+        assert (f.color.width, f.color.height, cam.effective_fps) == (848, 480, 30) and cam.negotiated is None
     # Regression (2026-09-04): 848x480 depth next to 640x480 colour gave all-black colour
     # frames on this D435. A lit scene must register on the RGB sensor.
     assert _mean_brightness(f) > 8.0, "colour frame is (near) black — lens covered, dark room, or mixed sizes"
@@ -90,6 +101,8 @@ def test_filtered_depth_is_steadier_than_raw(devices):
     cut frame-to-frame jitter on a static scene, and the chain must still hand
     back Z16 depth aligned to the colour grid (i.e. the disparity round-trip
     and the filter→align order are wired right)."""
+    if _usb2(devices):
+        pytest.skip("mixed 848x480 depth + 640x480 colour @ 30 is a USB 3 configuration")
     raw = RealSenseCamera(
         width=640, height=480, fps=30, depth_width=640, depth_height=480, filters=None, tuning=None
     )

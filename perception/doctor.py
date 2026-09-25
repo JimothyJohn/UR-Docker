@@ -206,7 +206,11 @@ def check_devices(report: Report, library: str | None = None) -> list[dict]:
                 "camera",
                 not slow,
                 f"{d.get('name')} sn {d.get('serial')} fw {fw} usb {usb}",
-                fix="USB 2 link: move to a direct USB 3 port (blue) or the stream caps at 15 fps",
+                fix=(
+                    "USB 2 link: the stream negotiates the fastest mode both sensors share "
+                    "(640×480 @ 15 on a D435 — no 848×480 colour there); a direct USB 3 port (blue), "
+                    "short cable, no hub gives 848×480 @ 30"
+                ),
                 severity="warn",
                 data=dict(d),
             )

@@ -239,6 +239,8 @@ class Api:
             "rs2_delete_pipeline_profile": (None, [P]),
             "rs2_get_stream_profiles_count": (I, [P, PP]),
             "rs2_get_stream_profile": (P, [P, I, PP]),
+            "rs2_get_stream_profiles": (P, [P, PP]),  # every profile a *sensor* offers
+            "rs2_get_video_stream_resolution": (None, [P, ctypes.POINTER(I), ctypes.POINTER(I), PP]),
             "rs2_delete_stream_profiles_list": (None, [P]),
             "rs2_get_stream_profile_data": (
                 None,
@@ -350,6 +352,75 @@ class Api:
                     self.lib.rs2_delete_device(dev)
         finally:
             self.lib.rs2_delete_device_list(dev_list)
+        return out
+
+    def stream_modes(self, ctx, serial: str | None = None) -> list[dict]:
+        """Every video stream profile the device offers, as
+        ``[{stream, index, format, width, height, fps}]`` — what
+        ``rs-enumerate-devices`` prints. On a USB 2 link this list is *shorter*
+        than the datasheet (the D435 drops 848x480 colour entirely), so it is
+        the only truthful input for choosing a mode. ``serial`` picks a device
+        (``None`` = the first); ``[]`` when no device matches."""
+        dev_list = self._call("rs2_query_devices", ctx)
+        out: list[dict] = []
+        try:
+            for i in range(self._call("rs2_get_device_count", dev_list)):
+                dev = self._call("rs2_create_device", dev_list, i)
+                try:
+                    if serial and self.device_info(dev).get("serial") != serial:
+                        continue
+                    out = self._device_stream_modes(dev)
+                    break
+                finally:
+                    self.lib.rs2_delete_device(dev)
+        finally:
+            self.lib.rs2_delete_device_list(dev_list)
+        return out
+
+    def _device_stream_modes(self, dev) -> list[dict]:
+        out: list[dict] = []
+        sensors = self._call("rs2_query_sensors", dev)
+        try:
+            for i in range(self._call("rs2_get_sensors_count", sensors)):
+                sensor = self._call("rs2_create_sensor", sensors, i)
+                try:
+                    lst = self._call("rs2_get_stream_profiles", sensor)
+                    try:
+                        for j in range(self._call("rs2_get_stream_profiles_count", lst)):
+                            sp = self._call("rs2_get_stream_profile", lst, j)
+                            stream, fmt, index, uid, fps = (ctypes.c_int() for _ in range(5))
+                            self._call(
+                                "rs2_get_stream_profile_data",
+                                sp,
+                                ctypes.byref(stream),
+                                ctypes.byref(fmt),
+                                ctypes.byref(index),
+                                ctypes.byref(uid),
+                                ctypes.byref(fps),
+                            )
+                            w, h = ctypes.c_int(), ctypes.c_int()
+                            try:
+                                self._call(
+                                    "rs2_get_video_stream_resolution", sp, ctypes.byref(w), ctypes.byref(h)
+                                )
+                            except RealSenseError:
+                                continue  # motion / pose profile
+                            out.append(
+                                {
+                                    "stream": stream.value,
+                                    "index": index.value,
+                                    "format": fmt.value,
+                                    "width": w.value,
+                                    "height": h.value,
+                                    "fps": fps.value,
+                                }
+                            )
+                    finally:
+                        self.lib.rs2_delete_stream_profiles_list(lst)
+                finally:
+                    self.lib.rs2_delete_sensor(sensor)
+        finally:
+            self.lib.rs2_delete_sensor_list(sensors)
         return out
 
     def sensor_options(self, dev) -> list[dict]:
@@ -726,6 +797,103 @@ DEFAULT_DEPTH_WIDTH, DEFAULT_DEPTH_HEIGHT = 848, 480
 LASER_MAX = -1.0  # DepthTuning.laser_power sentinel: whatever the sensor's range allows
 
 
+def _usb_type(api, ctx, serial: str | None) -> str | None:
+    """The ``usb_type`` descriptor ("2.1", "3.2") of the selected device, or None."""
+    try:
+        for d in api.list_devices(ctx):
+            if not serial or d.get("serial") == serial:
+                return d.get("usb_type")
+    except RealSenseError:
+        pass
+    return None
+
+
+def negotiate_mode(
+    modes: list[dict],
+    *,
+    width: int,
+    height: int,
+    depth_width: int,
+    depth_height: int,
+    fps: int,
+) -> dict:
+    """Pick a colour + depth mode the camera *actually offers*.
+
+    ``modes`` is :meth:`Api.stream_modes` (what ``rs-enumerate-devices``
+    lists). The request is kept verbatim when both ``RGB8 width x height @
+    fps`` and ``Z16 depth_width x depth_height @ fps`` are in it. Otherwise
+    the two streams are put at the **same** size (mixed sizes give black
+    colour frames, see :data:`DEFAULT_DEPTH_WIDTH`) at the highest common
+    rate not above ``fps``: the requested depth size when both sensors offer
+    it, else the size with the fastest shared rate (largest of those) — rate
+    before pixels, a 1280x720 @ 6 Hz cockpit is not a live view. An empty ``modes`` (enumeration
+    unsupported or failed) keeps the request untouched, as does a list with
+    no common size at all: the SDK's own error then says what is wrong.
+
+    Ground truth this encodes (D435 fw 5.12.7.100 on a **USB 2.1** link,
+    2026-09-24): colour is offered at 424x240 / 640x480 / 1280x720 only —
+    no 848x480 — and depth 848x480 only at 10 / 6 Hz, so the USB 3 default
+    (848x480 @ 15) is unresolvable and the pipeline refuses to start
+    (``Couldn't resolve requests``). The pair both sensors share at 15 Hz is
+    640x480, which is what this returns.
+
+    Returns ``{width, height, depth_width, depth_height, fps, changed, reason}``.
+    """
+    want = {
+        "width": width,
+        "height": height,
+        "depth_width": depth_width,
+        "depth_height": depth_height,
+        "fps": fps,
+        "changed": False,
+        "reason": None,
+    }
+    if not modes:
+        return want
+    color = {
+        (m["width"], m["height"], m["fps"])
+        for m in modes
+        if m["stream"] == STREAM_COLOR and m["format"] == FORMAT_RGB8
+    }
+    depth = {
+        (m["width"], m["height"], m["fps"])
+        for m in modes
+        if m["stream"] == STREAM_DEPTH and m["format"] == FORMAT_Z16
+    }
+    if not color or not depth:
+        return want  # a sensor is missing from the list — let the SDK report it
+    if (width, height, fps) in color and (depth_width, depth_height, fps) in depth:
+        return want
+    # Same-size pairs with a common rate <= the requested one.
+    common: dict[tuple[int, int], int] = {}
+    for w, h, f in depth:
+        if f <= fps and (w, h, f) in color:
+            common[(w, h)] = max(common.get((w, h), 0), f)
+    if not common:
+        return want
+    if (depth_width, depth_height) in common:
+        size = (depth_width, depth_height)
+    else:  # the fastest shared pair, the biggest of those (a live view needs rate before pixels)
+        size = max(common, key=lambda s: (common[s], s[0] * s[1]))
+    rate = common[size]
+    missing = []
+    if (width, height, fps) not in color:
+        missing.append(f"colour {width}x{height}@{fps}")
+    if (depth_width, depth_height, fps) not in depth:
+        missing.append(f"depth {depth_width}x{depth_height}@{fps}")
+    return {
+        "width": size[0],
+        "height": size[1],
+        "depth_width": size[0],
+        "depth_height": size[1],
+        "fps": rate,
+        "changed": True,
+        "reason": (
+            f"camera does not offer {' / '.join(missing)}; streaming both at {size[0]}x{size[1]}@{rate}"
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class DepthFilters:
     """librealsense's post-processing chain, applied to the depth frame *before*
@@ -870,6 +1038,7 @@ class RealSenseCamera:
     intrinsics: dict = field(default_factory=dict, init=False)
     depth_scale: float | None = field(default=None, init=False)
     effective_fps: int | None = field(default=None, init=False)
+    negotiated: str | None = field(default=None, init=False)  # why open() changed the requested mode
     tuning_applied: dict = field(default_factory=dict, init=False)  # filled on the first read()
     extrinsics_depth_to_color: dict | None = field(default=None, init=False)
     _tuning_pending: bool = field(default=False, init=False, repr=False)
@@ -891,6 +1060,7 @@ class RealSenseCamera:
         self._ctx = api.context()
         try:
             self.effective_fps = self._choose_fps(api)
+            self._negotiate(api)
             start_kwargs: dict = {}
             if self.infrared:
                 start_kwargs["infrared"] = True
@@ -977,20 +1147,43 @@ class RealSenseCamera:
             api.delete_sensor(sensor)
         return applied
 
+    def _negotiate(self, api) -> None:
+        """Replace the requested mode with one the camera offers (see
+        :func:`negotiate_mode`). Enumeration failures are not fatal — the
+        request stands and the SDK's start error speaks for itself."""
+        self.negotiated = None
+        try:
+            modes = api.stream_modes(self._ctx, self.serial)
+        except RealSenseError as exc:
+            print(
+                f"realsense: could not enumerate stream modes ({exc}); requesting the configured mode",
+                file=sys.stderr,
+            )
+            return
+        pick = negotiate_mode(
+            modes,
+            width=self.width,
+            height=self.height,
+            depth_width=self.depth_width,
+            depth_height=self.depth_height,
+            fps=int(self.effective_fps or 30),
+        )
+        if not pick["changed"]:
+            return
+        self.width, self.height = pick["width"], pick["height"]
+        self.depth_width, self.depth_height = pick["depth_width"], pick["depth_height"]
+        self.effective_fps = pick["fps"]
+        self.negotiated = pick["reason"]
+        usb = self.info.get("usb_type") or _usb_type(api, self._ctx, self.serial) or "?"
+        print(f"realsense: USB {usb} link — {pick['reason']}", file=sys.stderr)
+
     def _choose_fps(self, api) -> int:
         """Explicit ``fps`` wins; otherwise 30, or 15 when the camera reports a
         USB 2 link (depth + colour at 640x480@30 exceeds USB 2's budget and
         the SDK then simply never delivers a full frameset)."""
         if self.fps:
             return int(self.fps)
-        usb = None
-        try:
-            for d in api.list_devices(self._ctx):
-                if not self.serial or d.get("serial") == self.serial:
-                    usb = d.get("usb_type")
-                    break
-        except RealSenseError:
-            pass
+        usb = _usb_type(api, self._ctx, self.serial)
         if usb and str(usb).startswith("2"):
             print(
                 f"realsense: USB {usb} link — capping the stream at 15 fps (pass fps=30 to force)",
@@ -1110,6 +1303,7 @@ class RealSenseCamera:
                 "tuning": self.tuning.as_dict() if self.tuning is not None else None,
                 "tuning_applied": self.tuning_applied,
             },
+            "negotiated": self.negotiated,
             "depth_scale_m": self.depth_scale,
             "infrared": self.infrared,
             "intrinsics": {k: v.as_dict() for k, v in self.intrinsics.items()},

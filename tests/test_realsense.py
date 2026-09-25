@@ -34,6 +34,7 @@ from perception.realsense import (
     SyntheticRgbdCamera,
     _unstride,
     find_library_path,
+    negotiate_mode,
     open_camera,
     platform_hint,
 )
@@ -64,6 +65,8 @@ class FakeApi:
         unsupported: frozenset[int] = frozenset(),
         refuse: frozenset[int] = frozenset(),
         no_depth_sensor: bool = False,
+        modes: list[dict] | None = None,
+        fail_modes: str | None = None,
     ):
         self.path = "/fake/librealsense2.so"
         self.version = 25804
@@ -79,6 +82,8 @@ class FakeApi:
         self.unsupported = unsupported  # sensor options rs2_supports_option says no to
         self.refuse = refuse  # sensor options whose set raises
         self.no_depth_sensor = no_depth_sensor
+        self.modes = modes  # None = "enumeration says nothing" (the request stands)
+        self.fail_modes = fail_modes
         self.options: dict[str, dict[int, float]] = {}  # handle -> {option: value}
 
     def _take(self, kind):
@@ -107,6 +112,13 @@ class FakeApi:
     def list_devices(self, ctx):
         assert ctx == self._ctx, "enumeration must use the shared context"
         return [self.device_info(None)]
+
+    def stream_modes(self, ctx, serial=None):
+        assert ctx == self._ctx, "enumeration must use the shared context"
+        self.log.append(f"modes:{serial}")
+        if self.fail_modes:
+            raise RealSenseError(self.fail_modes)
+        return list(self.modes or [])
 
     def start_pipeline(self, ctx, *, width, height, fps, serial, depth_width=None, depth_height=None):
         self.log.append(f"start:{width}x{height}@{fps}:{serial}")
@@ -403,6 +415,136 @@ def test_usb2_link_caps_fps_unless_forced(capsys):
     api = FakeApi(usb_type="2.1")
     with RealSenseCamera(width=64, height=48, fps=30, api=api) as cam:
         assert cam.effective_fps == 30
+
+
+# ``sudo rs-enumerate-devices`` on the D435 (fw 5.12.7.100) over a USB 2.1 link,
+# Mac Studio, 2026-09-24 — the modes the camera *actually* offers there. No
+# 848x480 colour at all; 848x480 depth only at 10/6 Hz.
+def _modes(spec: str) -> list[dict]:
+    out = []
+    for line in spec.strip().splitlines():
+        stream, fmt, size, rates = line.split()
+        w, h = (int(v) for v in size.split("x"))
+        for r in rates.split("/"):
+            out.append(
+                {
+                    "stream": {"depth": STREAM_DEPTH, "color": STREAM_COLOR, "ir": 3}[stream],
+                    "index": 1 if stream == "ir" else 0,
+                    "format": {"Z16": FORMAT_Z16, "RGB8": FORMAT_RGB8, "Y8": 9, "YUYV": 3}[fmt],
+                    "width": w,
+                    "height": h,
+                    "fps": int(r),
+                }
+            )
+    return out
+
+
+USB2_MODES = _modes(
+    """
+depth Z16 1280x720 6
+depth Z16 256x144 90
+depth Z16 480x270 60/30/15/6
+depth Z16 640x360 30
+depth Z16 640x480 30/15/6
+depth Z16 848x480 10/6
+ir Y8 640x480 30/15/6
+ir Y8 848x480 10/6
+color RGB8 1280x720 15/10/6
+color RGB8 424x240 60/30/15/6
+color RGB8 640x480 30/15/6
+color YUYV 848x480 30/15/6
+"""
+)
+# The same camera on USB 3 (datasheet modes that matter here).
+USB3_MODES = _modes(
+    """
+depth Z16 848x480 90/60/30/15/6
+depth Z16 640x480 90/60/30/15/6
+depth Z16 1280x720 30/15/6
+color RGB8 848x480 60/30/15/6
+color RGB8 640x480 60/30/15/6
+color RGB8 1280x720 30/15/6
+"""
+)
+REQUEST = dict(width=848, height=480, depth_width=848, depth_height=480)
+
+
+def test_negotiate_keeps_a_mode_the_camera_offers():
+    pick = negotiate_mode(USB3_MODES, fps=30, **REQUEST)
+    assert not pick["changed"] and pick["reason"] is None
+    assert (pick["width"], pick["depth_width"], pick["fps"]) == (848, 848, 30)
+
+
+def test_negotiate_usb2_falls_to_the_shared_640x480_at_15():
+    pick = negotiate_mode(USB2_MODES, fps=15, **REQUEST)
+    assert pick["changed"]
+    assert (pick["width"], pick["height"], pick["depth_width"], pick["depth_height"], pick["fps"]) == (
+        640,
+        480,
+        640,
+        480,
+        15,
+    )
+    # both missing streams are named so the operator learns why 848 went away
+    assert "colour 848x480@15" in pick["reason"] and "depth 848x480@15" in pick["reason"]
+    # YUYV 848x480 colour must not count — the pipeline requests RGB8
+    assert "848" not in pick["reason"].split("streaming")[1]
+
+
+def test_negotiate_never_mixes_sizes_and_prefers_the_requested_depth_size():
+    # 640x480 requested on USB 2 at 15: offered by both, kept as-is
+    pick = negotiate_mode(USB2_MODES, width=640, height=480, depth_width=640, depth_height=480, fps=15)
+    assert not pick["changed"]
+    # colour 424x240 next to 640x480 depth is a *deliberate* mixed request (the hardware
+    # tests do this); both are offered, so it stands — mixing is the operator's call
+    pick = negotiate_mode(USB2_MODES, width=424, height=240, depth_width=640, depth_height=480, fps=15)
+    assert not pick["changed"]
+    # a forced fps above what the requested size allows drops the rate, not the size, when it can
+    pick = negotiate_mode(USB2_MODES, fps=30, **REQUEST)
+    assert (pick["width"], pick["fps"]) == (
+        640,
+        30,
+    )  # 640x480@30 exists on both; the SDK budget is the caller's problem
+    pick = negotiate_mode(USB2_MODES, width=1280, height=720, depth_width=1280, depth_height=720, fps=15)
+    assert pick["changed"] and (pick["width"], pick["fps"]) == (1280, 6)  # the pair exists, only at 6 Hz
+
+
+def test_negotiate_leaves_the_request_alone_when_it_cannot_help():
+    assert not negotiate_mode([], fps=15, **REQUEST)["changed"]
+    depth_only = [m for m in USB2_MODES if m["stream"] == STREAM_DEPTH]
+    assert not negotiate_mode(depth_only, fps=15, **REQUEST)["changed"]
+    # nothing shared at or below the requested rate → untouched, the SDK error will say so
+    assert not negotiate_mode(USB2_MODES, fps=5, **REQUEST)["changed"]
+
+
+def test_open_negotiates_the_usb2_mode_and_reports_it(capsys):
+    api = FakeApi(usb_type="2.1", modes=USB2_MODES)
+    with RealSenseCamera(api=api) as cam:  # the defaults: 848x480 both, fps auto
+        d = cam.describe()
+        assert (cam.width, cam.height, cam.depth_width, cam.depth_height, cam.effective_fps) == (
+            640,
+            480,
+            640,
+            480,
+            15,
+        )
+        assert d["stream"]["fps"] == 15 and d["depth"]["width"] == 640 and "640x480@15" in d["negotiated"]
+    assert "start:640x480@15:None" in api.log and "depth:640x480" in api.log
+    assert "modes:None" in api.log
+    err = capsys.readouterr().err
+    assert "USB 2.1" in err and "does not offer colour 848x480@15" in err
+    assert balanced(api), api.live
+
+
+def test_open_keeps_the_request_when_enumeration_fails_or_is_empty(capsys):
+    api = FakeApi(usb_type="3.2", fail_modes="rs2_query_sensors(): boom")
+    with RealSenseCamera(width=64, height=48, api=api) as cam:
+        assert (cam.width, cam.depth_width, cam.effective_fps, cam.negotiated) == (64, 848, 30, None)
+    assert "could not enumerate stream modes" in capsys.readouterr().err
+    api = FakeApi(usb_type="3.2", modes=USB3_MODES)
+    with RealSenseCamera(api=api) as cam:
+        assert (cam.width, cam.depth_width, cam.effective_fps, cam.negotiated) == (848, 848, 30, None)
+    assert "start:848x480@30:None" in api.log
 
 
 def test_first_frame_timeout_gets_a_hint():
