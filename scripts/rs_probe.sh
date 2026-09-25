@@ -47,6 +47,7 @@ else
   PERCEPTION=(uv run --project "$ROOT" perception)
 fi
 URL="http://127.0.0.1:$PORT/api/info"
+LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rs_probe.XXXXXX")"  # per run: a root-owned /tmp file from a sudo run blocks the next plain run
 GUI_PID=""
 
 cleanup() {
@@ -77,7 +78,7 @@ run_phase() {  # $1 = label ; sets RESULT_<label> to "streamed"|"stalled"|"faile
   echo
   echo "== phase $label: starting cockpit on :$PORT"
   if ! port_free; then echo "   port $PORT already in use — stop that process first" >&2; exit 1; fi
-  "${PERCEPTION[@]}" "${GUI_ARGS[@]}" >"/tmp/rs_probe_$label.log" 2>&1 &
+  "${PERCEPTION[@]}" "${GUI_ARGS[@]}" >"$LOG_DIR/$label.log" 2>&1 &
   GUI_PID=$!
   local up=0
   for _ in $(seq 1 40); do
@@ -86,8 +87,8 @@ run_phase() {  # $1 = label ; sets RESULT_<label> to "streamed"|"stalled"|"faile
     sleep 0.5
   done
   if [ "$up" -ne 1 ]; then
-    echo "   cockpit never answered on :$PORT (log: /tmp/rs_probe_$label.log)"
-    tail -20 "/tmp/rs_probe_$label.log" | sed 's/^/   | /'
+    echo "   cockpit never answered on :$PORT (log: $LOG_DIR/$label.log)"
+    tail -20 "$LOG_DIR/$label.log" | sed 's/^/   | /'
     cleanup; eval "RESULT_$label=failed"; return
   fi
   printf '   %-6s %-8s %-6s %s\n' "t(s)" "frames" "fps" "last_error"
@@ -107,13 +108,14 @@ run_phase() {  # $1 = label ; sets RESULT_<label> to "streamed"|"stalled"|"faile
     verdict=failed
   fi
   echo "   -> $verdict"
-  echo "   SDK/log tail (/tmp/rs_probe_$label.log):"
-  { grep -v '^$' "/tmp/rs_probe_$label.log" || true; } | tail -6 | sed 's/^/   | /'
+  echo "   SDK/log tail ($LOG_DIR/$label.log):"
+  { grep -v '^$' "$LOG_DIR/$label.log" || true; } | tail -6 | sed 's/^/   | /'
   cleanup
   eval "RESULT_$label=$verdict"
 }
 
-echo "rs_probe: $(date '+%H:%M:%S') on $(hostname -s), cockpit = ${PERCEPTION[*]}"
+PROBE_START="$(date '+%Y-%m-%d %H:%M:%S')"
+echo "rs_probe: $(date '+%H:%M:%S') on $(hostname -s), cockpit = ${PERCEPTION[*]}, logs in $LOG_DIR"
 run_phase first
 if [ "$SINGLE" = 1 ]; then exit 0; fi
 echo; echo "   waiting 5 s, then re-opening without touching the cable"
@@ -130,9 +132,16 @@ case "${RESULT_first}/${RESULT_reopen}" in
   *)                 echo "   even the first open after a plug did not stream — first-open-wins is dead; see the log tails above" ;;
 esac
 if [ "$(uname)" = "Darwin" ]; then
-  echo "   who won each USB interface (last 5 min):"
-  /usr/bin/log show --last 5m --predicate 'eventMessage CONTAINS "RealSense" AND eventMessage CONTAINS "exclusive access by pid"' --style compact 2>/dev/null \
+  # Every exclusive-open loss the kernel logged since the probe started, both
+  # directions. Read all of it: python's own losses are the ones that matter,
+  # and a tail of the last few lines hid them once (2026-09-25).
+  CLAIMS="$(/usr/bin/log show --start "$PROBE_START" --predicate 'eventMessage CONTAINS "RealSense" AND eventMessage CONTAINS "exclusive access by pid"' --style compact 2>/dev/null \
     | grep -v '^Timestamp\|^Filtering\|com.apple.log' \
-    | sed -E 's/^[0-9-]+ ([0-9:]+)\.[0-9]+ .*(python3[0-9.]*|UVCAssistant)@.*Camera 435( with RGB Module)? ?([A-Za-z]*)@([0-9]).*by pid ([0-9]+), ([A-Za-z0-9.]+).*/   \1 lost=\2 iface=\4@\5 winner=\7/' \
-    | tail -15
+    | sed -E 's/^[0-9-]+ ([0-9:]+)\.[0-9]+ .*(python3[0-9.]*|UVCAssistant|[A-Za-z0-9._-]+)@.*Camera 435( with RGB Module)? *([A-Za-z]+)@([0-9]).*by pid ([0-9]+), ([A-Za-z0-9._-]+).*/   \1 lost=\2 iface=\4@\5 winner=\7/' || true)"
+  RESETS="$(/usr/bin/log show --start "$PROBE_START" --predicate 'eventMessage CONTAINS "RealSense" AND eventMessage CONTAINS "reset API call"' --style compact 2>/dev/null | grep -c terminateDevice || true)"
+  echo "   USB interface claims lost this run (OS log since $PROBE_START):"
+  echo "     python lost $(printf '%s\n' "$CLAIMS" | grep -c 'lost=python' || true), UVCAssistant lost $(printf '%s\n' "$CLAIMS" | grep -c 'lost=UVCAssistant' || true), other $(printf '%s\n' "$CLAIMS" | grep -v 'lost=python\|lost=UVCAssistant' | grep -c 'lost=' || true)"
+  printf '%s\n' "$CLAIMS" | grep -v 'lost=UVCAssistant' | grep . || echo "     (python lost none)"
+  echo "   camera USB resets this run (libusb re-enumerates with capture on every handle open): ${RESETS:-0}"
+  echo "   every reset re-runs the race with UVCAssistant and kills a stream already running"
 fi

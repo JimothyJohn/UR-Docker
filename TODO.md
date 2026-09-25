@@ -6,6 +6,8 @@
 - 2026-09-12 — Controller IPs for the `ur3` (UR3e, PolyScope 5) and `ur20` (PolyScope X) cells — `perception/cells/*.env` ship with `UR_HOST` empty.
 - 2026-09-12 — The Windows path (`scripts/setup-windows.ps1`, `scripts/cockpit.ps1`, `REALSENSE_LIB` at the SDK's default `bin\x64\realsense2.dll`) is written against the librealsense repo's own references but has NOT been run on a Windows box yet. First run on the work laptop is the verification; paste the doctor output (`uv run perception --cell ur20 doctor --stream --json`) if anything fails.
 
+- 2026-09-25 — The Mac Studio lost the D435 claim race with nothing else on the bus (43 libusb capture-resets in 40 s, `docs/realsense.md` §Troubleshooting). Drop the Mac as a camera host (laptop/WSL2 + Jetson only), or spend one more flagged experiment on it: fewer handle opens per start — skip the stream-mode enumeration on darwin, `tuning=None` (no preset/laser HWM writes), `RS2_OPTION_GLOBAL_TIME_ENABLED` (53) off on both sensors before `pipeline_start` — then `sudo scripts/rs_probe.sh` after a re-plug. Needs your hands (re-plug + sudo); ~30 lines behind an env flag if you say go.
+
 ## Decisions (so they don't get re-asked)
 
 - 2026-09-04 — Perception / send-to-robot work targets PolyScope X; the e-Series sim on the Mac Studio is abandoned (Xvfb dies under Rosetta, URControl under QEMU). URSim e-Series stays CI-only.
