@@ -206,7 +206,7 @@ Tail the controller's own log — it's far more specific than Dashboard's
 "unknown failure":
 
 ```bash
-sudo docker exec ur-docker-ursim-1 tail -f /ursim/polyscope.log
+sudo docker exec perceptronics-ursim-1 tail -f /ursim/polyscope.log
 ```
 
 The CLAUDE.md **Common gotchas** table maps symptom → cause → fix for the

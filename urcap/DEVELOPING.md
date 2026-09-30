@@ -1,8 +1,8 @@
-# RealSense Pilot — developer notes
+# Perceptronic — developer notes
 
 *Installing it on a robot? See [README.md](README.md). This page is for working on the URCap.*
 
-`urcap/realsense-pilot/` is a **URCap X** (PolyScope 10) Application Node: the
+`urcap/perceptronic/` is a **URCap X** (PolyScope 10) Application Node: the
 RealSense colour feed inside PolyScope's own UI, hover-to-measure, and a click
 that becomes a base-frame point and an approach pose through the cockpit's
 hand-eye — then a move, either through PolyScope's auto-move screen (operator
@@ -17,15 +17,20 @@ urcap/
   README.md                                install + use (for whoever downloads it)
   DEVELOPING.md                            this page
   urcapx.py                                package | install | list | delete (stdlib only)
-  dist/realsense-pilot-<ver>.urcapx        the downloadable package (committed; see below)
-  realsense-pilot/
-    manifest.yaml                          vendorID olympus-controls, urcapID realsense-pilot
-    realsense-pilot-frontend/
-      contribution.json                    one applicationNode: tag olympus-realsense-pilot
-      main.js                              the presenter (a custom element)
-      realsense-pilot-node.worker.js       the behavior worker (node factory / upgrade)
-      assets/i18n/en.json                  node title + supportive text
-      assets/icons/realsense-pilot.svg
+  dist/perceptronic-<ver>.urcapx        the downloadable package (committed; see below)
+  perceptronic/
+    manifest.yaml                          vendorID nickarmenta, urcapID perceptronic
+    perceptronic-frontend/
+      contribution.json                    the applicationNode (tag nickarmenta-perceptronic) + two programNodes
+      main.js                              the application node's presenter (a custom element): feed, click → locate, pick areas, reach
+      perceptronic-node.worker.js       its behavior worker (node factory / upgrade)
+      pickscript.js                        the Pick node's settings + URScript + pose math + the drawings as SVG (worker, page and tests share it)
+      pick.js                              the program nodes' presenters: the Pick row + its dialog, the After picture row
+      pick-node.worker.js                  the Pick node's behaviors (label, validator, code before/after children)
+      after-node.worker.js                 the After picture N node's behaviors
+      assets/i18n/en.json                  node titles + supportive text (program.tree.nodes.<tag> for program nodes)
+      assets/icons/perceptronic.svg      the P mark — a copy of ../perceptronic.svg (a test holds them equal)
+      assets/icons/perceptronic-*.svg    the program nodes' toolbox icons
 ```
 
 **`dist/` is committed and must match the source.** `urcapx.py package` is
@@ -33,7 +38,7 @@ reproducible (fixed owners/modes, one mtime derived from the contents so an
 update never reuses the old Last-Modified/ETag), and
 `tests/test_urcap.py::test_the_downloadable_package_is_the_current_source` fails
 until the committed file equals a fresh build. After editing anything under
-`realsense-pilot/`: `make urcap-package` and commit `urcap/dist/`. Bumping
+`perceptronic/`: `make urcap-package` and commit `urcap/dist/`. Bumping
 `version` in `manifest.yaml` renames the file — delete the old one (the test
 refuses leftovers) and update the link in README.md.
 
@@ -72,13 +77,62 @@ targets 10.14):
 - **The page is same-origin with PolyScope** (nginx serves web archives from
   `/var/urcaps`; no CSP on the 10.13 sim), so `fetch` to another host works
   the way any page's does: the **cockpit must send CORS headers** for
-  PolyScope's origin — `perception gui --cors http://<pendant-or-sim-host>:<port>`
-  (`PERCEPTION_CORS`). The docs allow direct REST from a frontend on a real
+  PolyScope's origin — `perceptronics gui --cors http://<pendant-or-sim-host>:<port>`
+  (`PERCEPTRONICS_CORS`). The docs allow direct REST from a frontend on a real
   robot; the sim itself cannot reach external devices, but the *browser* can.
 - **No frontend API runs URScript.** `ApplicationPresenterAPI` offers
   `robotPositionService.getInverseKinematics(pose, qNear)` and
   `robotMoveService.autoMove(joints)` (UR's hold-to-move screen), and there is
   no script endpoint in the Robot-API either. Hence the two Move buttons.
+
+Facts the **program nodes** (`pick.js`, the two `*-node.worker.js`) are built on — read
+out of PolyScope 10.13's own bundles (`web-app/main.js`, `web-program-nodes/*`),
+2026-09-29:
+
+- **A program node's presenter renders inside its tree row** (`ur-inline-presenter` in a
+  48 px `virtual-tree-item`): the Pick row is one line; the real screen is a
+  **custom dialog** — `presenterAPI.dialogService.openCustomDialog(tag, inputData,
+  {title, dialogSize: "XL", confirmText, raiseForKeyboard})`. PolyScope creates the tag's
+  element, sets `inputData`, `presenterApi` (a `WebComponentDialogAPI`) and `afterOpen` on
+  it, listens for `outputDataChange` / `canSave` / `closeDialog` DOM events, and closes it
+  from its own footer. `inputData` is passed by reference (UR's own nodes hand their
+  `presenterAPI` through it), so the dialog saves through the row's
+  `programNodeService.updateNode` as it goes.
+- **Behaviors:** `registerProgramBehavior` is `expose` like the application one; the
+  worker answers `factory`, `programNodeLabel` (`[{type: "primary"|"secondary", value}]`
+  — PolyScope prefixes the row with the i18n title itself), `validator` (`{isValid,
+  errorMessageKey}`), `generateCodeBeforeChildren` / `generateCodeAfterChildren`,
+  `allowsChild`, `upgradeNode`, `onLifeCycleHook`.
+- **A ScriptBuilder crosses the worker boundary as `{type: "$$ScriptBuilder", script,
+  currentIndent}`** (PolyScope rebuilds `new ScriptBuilder(script, currentIndent)` and
+  `append`s it: the lines at the parent's indent, then the children `currentIndent`
+  levels deeper — so the before-children builder ends with the open block and
+  `currentIndent = depth`, the after-children one carries `-depth`). Lines keep their own
+  leading spaces; empty lines are dropped.
+- **The application context arrives serialized:** `{type: "$$ApplicationContext",
+  contributions: {contributionList: [...]}, frames: {framesList}}` — our application node
+  is the entry whose `type` / `parentType` is `nickarmenta-perceptronic` (cockpit URL,
+  areas, tip, reach margins, robot model).
+- **Program variables** are declared from the presenter with
+  `variableService.createVariable(name, "boolean" | "integer")`; the declaration
+  (`{id, name, valueType, _IDENTIFIER}`) is stored in the node, the script writes
+  `global <name> = …` (what UR's Assignment node emits for a declaration).
+- **The drawings are the PolyScope 5 node's** (`Diagrams.java`: the order tiles, the part
+  in isometric with the jaws, the approach from the side, the reach map) as SVG strings
+  from `pickscript.js` — pure functions, so the tests hold `orderGrid` to the Python
+  detector's numbering and every drawing to well-formed, escaped SVG.
+- **Older PolyScope X (the release matrix, 2026-09-30; the floor is 10.8):** `robotPositionService.convertJointPositionsToTcpPose`
+  is 10.10+ (without it Move (PolyScope) / Check approach take the flange target as the
+  TCP and say so); `variableService` is 10.12+ (before it, `symbolService.generateVariable`
+  declares the program variables — a URVariable with the same `name`). The row declares
+  them *before* opening the dialog: the dialog edits the node object it is handed, and a
+  declaration landing on the row's copy afterwards was saved over (seen on 10.10, where
+  the older service answers slower).
+- **The URScript the node writes is the PolyScope 5 node's** (`PickScript.java`) —
+  `pickscript.js` is its port, `tests/test_urcapx_pick.py` holds it to the Python pick
+  server's parser the way `tests/test_urcap5_pick.py` holds the Java. PolyScope X's script
+  editor lists every function it uses (`get_inverse_kin_has_solution`,
+  `socket_read_ascii_float`, …); verified by playing it in the 10.13 sim.
 
 ## Running the mock-up (sim on this Mac)
 
@@ -99,7 +153,7 @@ the Move buttons need a cockpit with a robot link (below).
 For the real camera: restart your cockpit with CORS, e.g.
 
 ```bash
-sudo .venv/bin/perception --cell ur3 gui --rs-lean --cors http://localhost:8000
+sudo .venv/bin/perceptronics --cell ur3 gui --rs-lean --cors http://localhost:8000
 ```
 
 (same port as the fake one, so the node's URL doesn't change; stop `make
@@ -138,6 +192,7 @@ with the versions its JavaScript template uses (`contribution-api`, `urcap-utils
 | `python3 urcap/track.py check` (`make urcap-track`) | exit 1 with the reasons when UR has moved on (new minor or patch, a moved simulator tag, an SDK component bump) |
 | `python3 urcap/track.py update` | re-resolve and rewrite `target.json` + the `urcap-target` lines in README.md and this page |
 | `python3 urcap/track.py compat` (`make urcap-compat`) | every PolyScope member the node calls or implements (`track.API_SURFACE`, held to `main.js` + the worker by a test) is still in the pinned `contribution-api` typings (UR's npm feed); `manifest.yaml` validates against the SDK's manifest spec; the template still uses the `threads` the worker's hand-written protocol was verified against; the SDK's simulator is the notes' robot image by digest |
+| `python3 urcap/psx_matrix.py run --version all --rmi` (`make urcapx-matrix`) | the same e2e against the newest PolyScope X releases on Docker Hub from the URCap's floor, 10.8 (`RELEASES` / `FLOOR`; `check-tags` flags a newer one), one summary; `.github/workflows/urcapx-matrix.yml` runs it per release on changes to the URCap and weekly (not a required check) |
 | `uv run --with playwright==1.63.0 python urcap/e2e.py` (`make urcap-e2e`) | boots the pinned simulator, installs a fresh build over urservice, checks nginx serves the packaged bytes, then headlessly: node renders, goes live on a `--fake` cockpit, hover depth, click → `/api/segment`, PolyScope's `getKinematicInfo` / `getJointPositions` / FK → IK round trip, the saved cockpit URL survives a reload. About 2 min on the Mac (arm64 image); `--keep` leaves the sim up |
 
 Nothing needs a login: the notes, the SDK (`UniversalRobots/PolyScopeX_URCap_SDK`),
@@ -184,4 +239,4 @@ URCap, CORS for the pendant's origin. The alternative the SDK offers is a
 `devices: [{type: video}]` hot-plug hooks and `services: [urcontrol-primary]`),
 which would put the cockpit inside PolyScope's Docker and reach the controller
 on `urcontrol-primary:30001`; that is a packaging step on top of
-`Dockerfile.perception`, not a rewrite.
+`Dockerfile.perceptronics`, not a rewrite.

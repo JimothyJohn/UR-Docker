@@ -1,10 +1,19 @@
 # CLAUDE.md
 
-Working notes for AI assistants (and humans) on this repo. This is a
-sandbox + tooling repo for **Universal Robots e-Series** control. Most of
-what's interesting here lives in the network protocols and file formats UR
-ships — not in the code itself — so this file captures the things that took
-me real time to discover.
+Working notes for AI assistants (and humans) on **perceptronics**: the
+distribution, the `perceptronics` package and CLI, the `PERCEPTRONICS_*`
+variables (renamed from `perception` / `PERCEPTION_*` on 2026-09-28; the
+tools warn about a stale `PERCEPTION_*`), the compose project, the docs and
+the cockpit. `urctl`, the `UR_*` variables and the URCap bundle IDs keep
+their names. There is no PyPI package. It started as a sandbox + tooling
+repo for **Universal Robots e-Series** control. Most of what's interesting
+here lives in the network protocols and file formats UR ships — not in the
+code itself — so this file captures the things that took me real time to
+discover.
+
+**Hardware, addresses, what is connected today: `SETUP.md`.** The cells, the
+computers, the simulators that run on this Mac, the USB stick — dated, with the
+field-log entries that matter. Update it when the cell changes.
 
 ## What this repo is
 
@@ -55,56 +64,56 @@ checked with clear errors: `ssh` (real robot; ships with all three OSes) and
 `docker` (URSim). CLI entry points reconfigure stdout with errors="replace" so
 legacy Windows codepages never crash on unicode.
 
-**RealSense RGB-D (`perception rs-info` / `gui`, see
-`docs/realsense.md`):** `perception/realsense.py` binds librealsense's C API
+**RealSense RGB-D (`perceptronics rs-info` / `gui`, see
+`docs/realsense.md`):** `perceptronics/realsense.py` binds librealsense's C API
 with ctypes (no `pyrealsense2`; zero deps kept), streams colour + depth aligned
 to colour (both sensors at the D435's native 848×480 — **mismatched sizes give
 black colour frames** — through the SDK's spatial + temporal filter chain,
 sensor on the High Accuracy preset at full laser; `docs/realsense.md` §Depth
-quality; `--no-depth-filters` / `--rs-preset none` for raw), and the cockpit (`perception/webapp.py` + `perception/webui/`) does
-hover-to-measure, click-to-segment (`perception/segment.py`: colour+depth
+quality; `--no-depth-filters` / `--rs-preset none` for raw), and the cockpit (`perceptronics/webapp.py` + `perceptronics/webui/`) does
+hover-to-measure, click-to-segment (`perceptronics/segment.py`: colour+depth
 region growing, or SAM via the `sam` extra), snapshots (`POST /api/snapshot`), and a **Robot** panel that sends the segment's point to
 the arm: `ur_flange_pose` (new tool) + the bracket-nominal hand-eye seed
-(`perception/handeye.py`, override with `PERCEPTION_T_FLANGE_CAMERA`) give a
+(`perceptronics/handeye.py`, override with `PERCEPTRONICS_T_FLANGE_CAMERA`) give a
 base-frame point and an approach pose; **Move** is one `ur_move_tcp` through the
-same tool registry (`perception/robotlink.py`; `docs/realsense.md` §Sending a
+same tool registry (`perceptronics/robotlink.py`; `docs/realsense.md` §Sending a
 point to the robot). `urctl/pose.py` is the stdlib pose math (`pose_trans` /
-`pose_inv` semantics). **Extra viewpoints** (`--view DEVICE`, `PERCEPTION_VIEWS` in the
+`pose_inv` semantics). **Extra viewpoints** (`--view DEVICE`, `PERCEPTRONICS_VIEWS` in the
 cell): plain webcams under the colour/depth pair (2×2 grid) and in every snapshot,
-via ffmpeg (`perception/views.py`; macOS picks devices by AVFoundation name; launch
+via ffmpeg (`perceptronics/views.py`; macOS picks devices by AVFoundation name; launch
 from a local Terminal — SSH sessions are denied camera access by TCC). **macOS needs `sudo`** to open the camera (libusb
 must detach Apple's UVC driver — `failed to set power state` otherwise); Linux
 needs the udev rules. `--fake` runs everything on a synthetic scene. The
-target compute is a Jetson Orin next to the robot: `Dockerfile.perception` +
-`docker compose --profile perception`. The camera mounts on the tool flange via
+target compute is a Jetson Orin next to the robot: `Dockerfile.perceptronics` +
+`docker compose --profile perceptronics`. The camera mounts on the tool flange via
 `hardware/d435-tool-bracket/` (parametric CadQuery, STL/STEP, spec in its
 README; nominal `T_flange_camera` seed in §3).
 
 **The pilot's seat (cells, doctor, Pilot panel, MCP keys; `docs/realsense.md`
 §The pilot's seat, presentation in `docs/realsense-cell.html`):** a *cell*
-(`perception/cells/{sim,ur3,ur20}.env`, `--cell` / `UR_CELL`) is the one-word
-selector for robot host/platform/ports + bracket print (`PERCEPTION_BRACKET`
+(`perceptronics/cells/{sim,ur3,ur20}.env`, `--cell` / `UR_CELL`) is the one-word
+selector for robot host/platform/ports + bracket print (`PERCEPTRONICS_BRACKET`
 → `handeye.BRACKET_SEEDS`; the UR20 print is clocked 45°, so its seed differs).
-`perception doctor` is the pre-flight (SDK, camera, per-port reachability with
+`perceptronics doctor` is the pre-flight (SDK, camera, per-port reachability with
 platform-mismatch diagnosis, modes, TCP offset, hand-eye status; every failure
 carries its fix; also `GET /api/doctor` and the `cell_doctor` tool). The cockpit
 has a Pilot panel (bring-up/stop/freedrive, capped jog pad, events log) and
 `POST /api/snapshot` writes PNGs an agent can read. **Hand-eye calibration**
-is touch-and-click (`perception/calibrate.py`; cockpit "Calibrate hand-eye",
+is touch-and-click (`perceptronics/calibrate.py`; cockpit "Calibrate hand-eye",
 `cal_*` tools): record the mark with the tool tip, 4–6 clicked views from
 varied wrist poses, LM solve seeded from the bracket, Apply + save to
 `captures/calibration/handeye_<cell>.json` (env > file > seed). **Mark-less:**
-`perception calibrate` orbits the block under the camera (3 ranges × 13 views,
+`perceptronics calibrate` orbits the block under the camera (3 ranges × 13 views,
 found by identity, trimmed) and clicks every view into the cockpit's session;
-`--apply` saves it (`perception/orbitcal.py`, `docs/realsense.md` §Hand-eye
-without a mark; unverified on hardware as of 2026-09-26). `perception-mcp` (`.mcp.json`)
+`--apply` saves it (`perceptronics/orbitcal.py`, `docs/realsense.md` §Hand-eye
+without a mark; unverified on hardware as of 2026-09-26). `perceptronics-mcp` (`.mcp.json`)
 serves robot + `cam_*`/`cell_*` tools; the camera tools proxy the running
 cockpit because one process owns the USB camera. Windows bring-up:
 `scripts/setup-windows.ps1` + `scripts/cockpit.ps1`. **Keep
 `docs/realsense-cell.html` current** — it is the demo/explainer and has a dated
 field log; append to it when something is verified or changes.
 
-**Pick cycle (`perception pick-cycle`, `perception/pickcycle.py`):** the
+**Pick cycle (`perceptronics pick-cycle`, `perceptronics/pickcycle.py`):** the
 heuristic, model-free routine — survey white blocks from one or more overlook
 poses (`--survey-pose x y z rx ry rz`, repeatable, merged by position; the camera
 must be ≥ 0.25 m from the parts, the D435 has no depth closer than ~0.2 m), fit
@@ -126,7 +135,7 @@ the base) and the Hand-E adds 163 mm. `pick-cycle` grasps straight down
 (`grasp_rotation`), leans 12°/24° outward only when the controller's IK can't solve the
 vertical path, and skips a block no lean solves.
 
-**The live pose in every frame (`perception/posestream.py`, 2026-09-27).** The cockpit
+**The live pose in every frame (`perceptronics/posestream.py`, 2026-09-27).** The cockpit
 streams RTDE `actual_TCP_pose` + `tcp_offset` at 30 Hz; flange = tcp ∘ offset⁻¹ (identical
 to the `get_flange_pose` script on the UR3e, no Primary program, works in Local). Each
 `/api/rgbd` header carries `flange_pose`, `pose_age_s`, `flange_to_color_pose`; `GET
@@ -137,42 +146,43 @@ objects, the feed's target box re-projected through the live pose; `/classic` is
 old page (calibration lives there). Needs a cockpit restart to pick up server changes;
 the page itself is read from disk per request.
 
-**Pick from the cockpit (`POST /api/robot/pick`, `perception/pickplan.py`, 2026-09-27).**
+**Pick from the cockpit (`POST /api/robot/pick`, `perceptronics/pickplan.py`, 2026-09-27).**
 Nick's spec: the gripper comes in straight down the base Z axis, wrist 3 across the
-object's short side, fingers pre-opened to 1.2x its width, fingertips 25 mm over its top.
-Two programs: a blended sweep from the picture pose (`PERCEPTION_HOME_POSE`; FANCY adds a
+object's short side, the jaws pre-opened to their full 50 mm stroke (a 1.2x opening caught a
+block's edge), fingertips 25 mm over its top.
+Two programs: a blended sweep from the picture pose (`PERCEPTRONICS_HOME_POSE`; FANCY adds a
 swing and a wrist flourish) to a **close look** — the object on the colour camera's axis at
 0.24 m, just outside the D435's blind zone — then the object is re-found there and the
 final program (over → approach [→ grasp → lift with PICK]) is built from that measurement.
 Every pose goes to the controller's IK first. The look is **tilted 10°** (`LOOK_TILT_DEG`; the camera looks out at the part from the base side) and the re-find casts the detector's pixels onto the top plane, so the tilt doesn't bias it. A pick can name a stored object instead of the clicked mask (`target: {centre, theta, major_m, minor_m}` — the page sends it for a selected card), and `survey: true` stops after the close look and returns the fresh measurement; in the page, right-click a card or a part → APPROACH / PICK / SURVEY. The Robotiq pre-open rides the sweep program (`move_tcp_path(gripper_first=POS)`: set before the first `movel`, not waited for). The page's LEVEL lamp is the fitted floor's
 tilt in the base frame: the table is flat, so any tilt is calibration error. The arm's
-linkage comes from RTDE `actual_q` through `perception/armfk.py` (UR3e DH verified 0.84 mm
+linkage comes from RTDE `actual_q` through `perceptronics/armfk.py` (UR3e DH verified 0.84 mm
 against the controller's flange; other models guarded by the same check).
 
 **Hand-eye drift, 2026-09-27 evening:** the 09-25 solve placed blocks 2–5 cm off,
 view-dependently (the tilted survey and a vertical look disagreed by 26–28 mm; both
-grasps missed). Re-run `perception calibrate` before trusting a pick again.
+grasps missed). Re-run `perceptronics calibrate` before trusting a pick again.
 
 **Approach by the fingertips, always (Nick, 2026-09-27: "the tool offset is
 critical").** The cockpit's default approach reference is `fingertip`: the gripper's
-fingertips (`PERCEPTION_TIP_M` along flange +Z — 0.163 m = Hand-E 157 mm + 6 mm adapter,
-the same length pick-cycle uses) sit `PERCEPTION_STANDOFF_M` short of the object along the
+fingertips (`PERCEPTRONICS_TIP_M` along flange +Z — 0.163 m = Hand-E 157 mm + 6 mm adapter,
+the same length pick-cycle uses) sit `PERCEPTRONICS_STANDOFF_M` short of the object along the
 **tool axis**, and every cockpit move, approach cycle and controller-IK reach check runs
 with the TCP set to those fingertips (`RobotLink.reference_tcp`; `RobotLink.move` applies
 it when a client sends only a pose, an explicit `tcp` still wins). The controller's active
 TCP is never trusted for this — on the UR3e it is a 220 mm training offset the Hand-E
-doesn't match. `flange` / `tcp` references remain for a cell with no tool; `perception
+doesn't match. `flange` / `tcp` references remain for a cell with no tool; `perceptronics
 doctor`'s `approach` line names the tool length and whether the active TCP differs. A new
-cell with a different tool must set `PERCEPTION_TIP_M` (the `ur20.env` stub says so).
+cell with a different tool must set `PERCEPTRONICS_TIP_M` (the `ur20.env` stub says so).
 Cell files also note where the work surface is relative to the base (UR3e: parts ~0.27 m
 below it) — that height, not the datasheet radius, is what decides reach.
 
-**One GUI.** The RGB-D cockpit (`perception gui`) is the only web UI; the
+**One GUI.** The RGB-D cockpit (`perceptronics gui`) is the only web UI; the
 older robot-only `urctl gui` / `urctl-gui` panel was retired on 2026-09-26
 (it lives in git history before that commit). Its Pilot panel covers the
 same bring-up / jog / stop / freedrive buttons through the same tool registry.
 
-**Demo view (`perception gui --demo`, `/?demo=1`, header **Demo** button):** the
+**Demo view (`perceptronics gui --demo`, `/?demo=1`, header **Demo** button):** the
 RGB-D cockpit reduced to the picture, four big buttons (Start robot → Find
 object → Pick, STOP), one status light and one instruction line; **Developer
 view** toggles back. Same page, same API — `body.demo` CSS hides the rest, the
@@ -182,12 +192,27 @@ buttons call the existing bring-up / nearest / approach-cycle / stop actions.
 Application Node that embeds the cockpit's colour feed in PolyScope X and turns a
 click into a base-frame point + approach pose (`/api/segment` → `/api/robot/locate`)
 with two Move buttons — PolyScope's IK + auto-move screen, or the cockpit over
-Primary. Plain JavaScript, no npm: `urcap/urcapx.py package|install|list|delete`
+Primary — plus, since 0.3.0 (2026-09-29), the **pick areas + reach** on that node and
+the **Perceptronic Pick** / **After picture N** program nodes: the PolyScope 5 kit's
+node for PolyScope X (`pickscript.js` = `PickScript.java`'s port, same pick-server
+protocol 2, held to the Python parser by `tests/test_urcapx_pick.py`). PolyScope X draws
+a program node's presenter inside its 48 px tree row, so the Pick row is one line and
+the screen is a PolyScope custom dialog (`dialogService.openCustomDialog`); a code
+generator answers `{type: "$$ScriptBuilder", script, currentIndent}` (children indent by
+`currentIndent`; the after-children builder carries the negative). Verified in the 10.13
+sim: toolbox → row → dialog → picture point from PolyScope's joints → the script
+compiled and run by Play (NEXT → movej → FIND over the network to a cockpit).
+**`urcap/psx_matrix.py`** runs the e2e on the newest PolyScope X releases from the
+URCap's floor, 10.8 (`urcapx-matrix.yml`, weekly + on URCap changes, not required; all
+eight 10.8–10.14 pass 2026-09-30 with fallbacks for what 10.8–10.11 lack,
+`urcap/README.md` §Tested; 10.6/10.7 dropped — their sims don't start on the runners). A
+`urcapx-v<version>` tag publishes `dist/perceptronic-<version>.urcapx` as a GitHub
+Release (`release-urcapx.yml`, `urcapx.py release-check`). Plain JavaScript, no npm: `urcap/urcapx.py package|install|list|delete`
 (gzipped tar, manifest first; multipart to the Robot-API's `urcaps/v1/urcaps/`);
 `make urcap-package|urcap-install|urcap-cockpit`. **`urcap/dist/*.urcapx` is the
 committed download** and a test holds it byte-equal to a fresh (reproducible)
 build — after editing the URCap run `make urcap-package` and commit `dist/`. The cockpit must be started
-with `--cors <PolyScope origin>` (`PERCEPTION_CORS`) and serves `GET
+with `--cors <PolyScope origin>` (`PERCEPTRONICS_CORS`) and serves `GET
 /api/color.png` for it. The installer posts `urcapxFile` to the **urservice**
 endpoint System Manager itself uses (`/universal-robots/urservice/api/v1/urcaps`;
 201 / 409 / DELETE, no Remote mode needed) — the SDK's Robot-API path answers
@@ -212,13 +237,41 @@ answers an unsolvable pose (the node gives it 8 s). Cockpit field shorthand (`:7
 `host:port`) is completed to a URL; a bare `:7621` used to be fetched relative to
 PolyScope's own page and its 404 misread as an outdated cockpit.
 
-**PolyScope 5 (e-Series) URCap (`urcap/realsense-pilot-ps5/`, `README.md`):** the same node
+**The URCaps are "Perceptronic" (renamed from "RealSense Pilot" 2026-09-29, Nick: "not this
+weird RealSense Pilot thing"), owned by Nick personally:** PolyScope 5 bundle
+`com.nickarmenta.perceptronic` (Java package the same, `Bundle-Vendor: Nick Armenta`, jar
+`urcap/dist/perceptronic-ps5-<ver>.urcap`), PolyScope X `nickarmenta/perceptronic`
+(`urcap/perceptronic/`, element `nickarmenta-perceptronic`). A different bundle identity is a
+different URCap to PolyScope: the old one must be removed on a robot that had it, and its
+saved node data (cockpit address, pick areas) and programs' RealSense Pick nodes don't carry
+over. Node titles: **Perceptronic** (installation), **Perceptronic Pick** (program). The mark
+is `urcap/perceptronic.svg` — a P with a lens in its bowl; `Logo.java` draws the same glyph
+with Java2D (toolbar badge, screen headers, a 38 % watermark bottom-right of every live
+picture) and a test holds its `SVG` constant byte-equal to the file and to the PolyScope X
+icon copy. **The P button (0.6.0, `ToolbarService` / `ToolbarContribution`):** a
+`SwingToolbarService` — the Robotiq-style header button — that drops the live picture down
+over any screen (420 px tall, polls only while open, reads the Installation node's saved
+address through `ApplicationAPI.getInstallationNode`). The toolbar API has been in the URCap
+API since 1.7.0 (PolyScope 5.4; checked in the jars), so no compat guard; the matrix's Felix
+check requires the toolbar service registered (`ps5_matrix.NODE_SERVICES`). The feed loop
+is one class, `FeedPoller` (no UR API, tested against the real cockpit), shared by the
+Installation node and the popup. Not yet seen on a pendant: the button's icon size (30 px)
+and popup height are guesses to check on the UR3e.
+
+**PolyScope 5 (e-Series) URCap (`urcap/perceptronic-ps5/`, `README.md`):** the same node
 as a Java 8 Swing **Installation node**, same layout and buttons (Open cockpit dropped —
 no browser on the pendant); Move (PolyScope) hands `RobotMovement.requestUserToMoveRobot`
-the controller's `joint_target`. Built by `urcap/urcap5.py` (`make urcap5-sdk` copies the
-URCap API bundles out of the URSim e-Series image into `target/` — they are not on Maven
-Central and never committed; `make urcap5-package` → `urcap/dist/*.urcap`, reproducible,
-with a sources digest a test checks). PolyScope 5's loader needs `URCapCompatibility-CB3`
+the controller's `joint_target`. Built by `urcap/urcap5.py` (`make urcap5-sdk` reads the
+URCap API bundles of any `ursim_e-series` tag straight from Docker Hub's registry into
+`target/urcap5-sdk/<tag>/` — no Docker; not on Maven Central, never committed; `make
+urcap5-package` → `urcap/dist/*.urcap`, reproducible, with a sources digest a test checks).
+**Backwards compatible from PolyScope 5.4** (`bundle.properties` `compat.floor`): compiled
+against 5.4's API (`api-1.7.0.jar`, hence `urcap.api.version=1.7.0` — 5.10+ refuse a pom
+naming a newer API than their newest `PackageDependencyProvider`); newer API only in a
+`compat.since.<ver>` class loaded by name behind a check (`TeachPosition2`:
+`RobotPositionCallback2`, 5.8+; its package imported `resolution:=optional`). The script
+adapts to the PolyScope it runs on: no `get_inverse_kin_has_solution` before 5.9.4, and
+lists keep their first size up to 5.14 (never reassign a read to a different count). PolyScope 5's loader needs `URCapCompatibility-CB3`
 / `-eSeries` in the manifest and reads the API version from an embedded
 `META-INF/maven/**/pom.xml` (`com.ur.urcap:api` dependency). Its **installer** (Settings →
 URCaps → +) also demands `Bundle-Category: URCap` and the manifest among the first two zip
@@ -227,21 +280,58 @@ bundle dir and skips those checks, so a VM load does not prove the pendant will 
 (missed once, 2026-09-27). Check with PolyScope's own `URCapFileValidationHelper` from the
 image's `/ursim/GUI/bundle`. Installed and rendered on the UR3e pendant 2026-09-27 (0.2.0).
 
-**RealSense Pick program node (same bundle, 0.3.0; `PickScript.java`, `perception/picknode.py`):**
-Program tab → URCaps → RealSense Pick. Its URScript runs in the operator's program (Local mode,
+**Perceptronic Pick program node (same bundle, 0.4.0; `PickScript.java`, `perceptronics/picknode.py`):**
+Program tab → URCaps → Perceptronic Pick. Its URScript runs in the operator's program (Local mode,
 no Primary) and talks to a pick server over a plain socket (`:7622`; `FIND`/`LOOK`/`REFINE`, and
 `LOG` lines that are never answered — a stray reply would be read as the next answer). No survey
 position is needed: the first look is from where the arm is, the closer look from halfway toward
 the block with it centred (never nearer than 0.25 m). Every stage is a `textmsg` **and** a `LOG`
 line; a failed pick raises a blocking popup naming the reason. The cockpit serves the pick server
-itself; a cockpit already running older code gets it from **`perception pick-server`** — a sidecar
+itself; a cockpit already running older code gets it from **`perceptronics pick-server`** — a sidecar
 on `:7631` (point the node's cockpit URL there) that answers from the cockpit's frames, forwards
 every other route, and writes the whole trace to `captures/pick-server.log` or, when that's
-root-owned, `~/Library/Logs/perception/` (also `GET /api/pick/log`). **Kill the sidecar before
+root-owned, `~/Library/Logs/perceptronics/` (also `GET /api/pick/log`). **Kill the sidecar before
 relaunching the cockpit** (`pkill -f "pick-server --bind"`): both bind `:7622`, and the cockpit
 just warns and runs without its pick server. The 0.3.0 script has not yet run on a controller.
+**Part size (0.4.0, `perceptronics/partspec.py`):** the node's Length × Width [× Height] ± tolerance
+(as the part lies; default ±25 %, never under ±5 mm) rides on FIND/REFINE as `part=60x40x30 tol=25`
+and replaces `detect_blocks`' fixed foam-block gate (≤ 70 × 60 mm); height is measured against the
+non-white depth in a ring around the blob (unseen → not checked). Status −7 = white things in view,
+none that size; the teach screen draws the rejects grey with why. Still colour-segmented: the part
+must read white. Verified on synthetic scenes only.
 
-**Monocular scan** (`perception scan`, `docs/mono-scan.md`) was removed on
+**The pick kit, 0.5.0 (`docs/pick-kit.md`, 2026-09-28).** The product line for a PolyScope 5
+cell: `hardware/BOM.md` (sourced, dated prices), the bracket, `deploy/pi/` (a Pi-class arm64
+camera computer on minimal Debian: librealsense built pinned, the cockpit as the
+`perceptronics-cockpit` service on :7621/:7622, nftables; `scripts/deploy-pi.sh`, the
+`deploy-pick-pc` skill), and the URCap 0.5.0. **Detection is by volume**
+(`perceptronics/volume.py`, depth only, no colour): what stands the part's height above the
+surface with a top face its length × width; the surface is a taught pick area (three
+fingertip touches in the Installation node, nudged ≤ 15 mm to the live table) or the table
+found live; each part's min-area rectangle gives the axes, the fingers close across the short
+side. `order_parts` numbers parts in the **picture's** directions (front = bottom of the
+picture). Reach = base outer radius + 150 mm .. rated reach − 150 mm (`Reach.for_model`).
+**Pick server protocol 2** (`picknode.parse_options`): every request carries
+`part= tol= order= grip= stroke= [reach=] [plane= area=] node= loc= locs= proto=2`, answers
+are 16 numbers; `NEXT` serves the per-node queue (the next part already seen: no trip to the
+picture point), `FIND` refills it. The Java `PickScript.tokens` writes the same line, and
+`tests/test_urcap5_pick.py` reads the Java's tokens back with the Python parser — change
+one, the test tells you about the other. The node's screens (`PickScreen`, `LocationsScreen`,
+`LiveView`, `Diagrams`, `Ui`) are pure Swing: render them off-pendant with a harness (the
+README's `screens/` came from one). The teach screen asks `GET /api/pick/scene?opts=<tokens>`.
+**Every PolyScope 5 minor, 5.4-5.26** (the newest image of each; all 23 green, run
+36521908487) runs every URCap change in CI (`urcap5-matrix.yml`, versions from
+`ps5_matrix.py list`; `docker-compose.ps5-matrix.yml` is generated by `ps5_matrix.py
+compose`, ports 20000 + 100 × minor + the usual port's last two digits; `check-tags` only
+ever adds): `urcap5.py check` against the image's own API jars, Felix shell (port 6666 in
+the container) proves the bundle Active — polyscope.log never says so — then
+`urcap/pick5_e2e.py` runs the node's own script, two picks, the second from the queue, plus
+a compile probe (Robotiq + popup inside `if False:`) and a socket-timeout probe. A `build`
+job rebuilds the committed jar against 5.4's jars with JDK 21 and `urcap5.py compare`s it
+(entries, non-class bytes, class members — JDK-independent; the committed jar is JDK 25's).
+`check-tags` also compares each image's `VERSION` with `IMAGE_VERSIONS` (bare tags re-pushed).
+
+**Monocular scan** (`perceptronics scan`, `docs/mono-scan.md`) was removed on
 2026-09-25 (branch refactor/prune-2026-09-25); it lives in git history before
 that commit if the idea comes back.
 
@@ -638,7 +728,7 @@ checks `safetymode` when a move fails to confirm). The raw reason is in the
 container's URControl log, not `polyscope.log`:
 
 ```bash
-sudo docker exec ur-docker-ursim-1 grep -i 'protective\|C154' /ursim/URControl.log | tail
+sudo docker exec perceptronics-ursim-1 grep -i 'protective\|C154' /ursim/URControl.log | tail
 ```
 
 **`robot_mode` stays `RUNNING` through a protective stop** — only `safety_mode`
@@ -781,39 +871,44 @@ runs and one that pops "cannot reach the required pose" mid-cycle.
 | `make sim-up` fails with `port 5900 … address already in use` on a Mac | macOS **Screen Sharing** serves VNC on 5900 (`nc localhost 5900` answers `RFB …`) | Use noVNC on 6080 instead; publish the container's 5900 elsewhere (`15900:5900`) or turn Screen Sharing off. Compose < 2.24 has no `!override` for `ports:`, so edit the mapping or `docker run` the service |
 | URSim container is `Up` but 29999 refuses / resets and `docker logs` shows `Trace/breakpoint trap   Xvfb` | Docker Desktop is emulating amd64 with **Rosetta**; Xvfb crashes under it, PolyScope (which serves the Dashboard) never starts, and URControl stops listening within minutes. Seen 2026-09-04 on the Mac Studio; the `Exited (101)` containers from weeks earlier were the same | **Docker Desktop's emulators can't run the e-Series sim on the Mac Studio**: with Rosetta off (QEMU user-mode) Xvfb survives but URControl dies (TODO.md, 2026-09-04; re-confirmed 2026-09-27). The image is amd64-only (every tag). `scripts/ursim-e-vm.sh up` runs it in a full x86_64 QEMU VM instead: URControl, Dashboard, Primary/RTDE and the URCap loader work (8 min to Dashboard), but PolyScope's JVM crashes in JIT code there (SIGILL/SIGSEGV, `hs_err_pid*.log`) — fine for "does the URCap load", not for clicking through PolyScope. For that: an amd64 host, CI, or the real UR3e |
 | Every cockpit click on the UR3e cell reads **OUT OF REACH** although the arm reaches the parts | The reach check was the datasheet radius (0.5 m) from the base **origin**; the parts sit 0.27 m below the base | Fixed 2026-09-27: `locate` and every absolute move ask the controller's IK (`reach_check: controller_ik`); the sphere is only the no-answer fallback. If you still see `reach_check: sphere`, Primary isn't answering (PolyScope X in Local, Primary disabled) |
-| A cockpit Move with the Hand-E on drives the fingers into the part | The standoff was measured from the **flange** (`PERCEPTION_APPROACH_REFERENCE=flange`, 75 mm) — the fingertips are 163 mm past it | Fixed 2026-09-27: approach by the fingertips (the default); check `perception doctor`'s `approach` line shows the tool length you measured |
-| The RealSense Pick node (or any FIND) seems **hung**: nothing moves, the pick-server log shows `FIND: no fresh camera frame` (status −4) over and over | The D435 dropped out of the cockpit: its frames freeze at one `seq` while `fps` still reads ~30, and `/api/info`'s `last_error` says `Frame didn't arrive within 5000` (the macOS USB-claim race). Each FIND waits for a frame newer than the request, gets none, answers −4, and a looping program asks again | Re-plug the camera; the lean open re-opens it by itself. The sidecar's log now says `cockpit frames stalled at seq N` with the camera's error, and 0.3.0 pops up the reason instead of looping silently |
-| The cockpit runs the **old hand-eye** although `perception/cells/ur3.env` has the new solve (`/api/info` → `robot.handeye.flange_to_depth_pose` ≠ the cell file's value; seen 2026-09-27) | `apply_cell` only fills keys the environment doesn't already have, so a `PERCEPTION_T_FLANGE_CAMERA` already in the cockpit's environment wins. `handeye.source` reads `env:…` either way, so it can't tell you which one won | Launch with `sudo env -u PERCEPTION_T_FLANGE_CAMERA .venv/bin/perception --cell ur3 gui …`; after every launch compare `flange_to_depth_pose` in `/api/info` with the cell file |
+| A cockpit Move with the Hand-E on drives the fingers into the part | The standoff was measured from the **flange** (`PERCEPTRONICS_APPROACH_REFERENCE=flange`, 75 mm) — the fingertips are 163 mm past it | Fixed 2026-09-27: approach by the fingertips (the default); check `perceptronics doctor`'s `approach` line shows the tool length you measured |
+| The Perceptronic Pick node (or any FIND) seems **hung**: nothing moves, the pick-server log shows `FIND: no fresh camera frame` (status −4) over and over | The D435 dropped out of the cockpit: its frames freeze at one `seq` while `fps` still reads ~30, and `/api/info`'s `last_error` says `Frame didn't arrive within 5000` (the macOS USB-claim race). Each FIND waits for a frame newer than the request, gets none, answers −4, and a looping program asks again | Re-plug the camera; the lean open re-opens it by itself. The sidecar's log now says `cockpit frames stalled at seq N` with the camera's error, and 0.3.0 pops up the reason instead of looping silently |
+| The cockpit runs the **old hand-eye** although `perceptronics/cells/ur3.env` has the new solve (`/api/info` → `robot.handeye.flange_to_depth_pose` ≠ the cell file's value; seen 2026-09-27) | `apply_cell` only fills keys the environment doesn't already have, so a `PERCEPTRONICS_T_FLANGE_CAMERA` already in the cockpit's environment wins. `handeye.source` reads `env:…` either way, so it can't tell you which one won | Launch with `sudo env -u PERCEPTRONICS_T_FLANGE_CAMERA .venv/bin/perceptronics --cell ur3 gui …`; after every launch compare `flange_to_depth_pose` in `/api/info` with the cell file |
 | RealSense colour panel black, depth fine, RGB options at factory | depth and colour streaming at **different sizes** on the D435 | keep both at 848×480 (the default); `docs/realsense.md` §Depth quality |
 | Cockpit shows nothing on a **USB 2** link; log says `Couldn't resolve requests` then `RS2_USB_STATUS_ACCESS` on every retry | USB 2 lists **no 848×480 colour** (and 848×480 depth only at 10/6 Hz), so the default pair can't start; each failed open re-runs the macOS UVC race | Fixed: `open()` enumerates the camera's profiles (`Api.stream_modes`) and `negotiate_mode` picks the fastest same-size pair it offers (640×480 @ 15 on the D435) — no flags needed; re-plug once to clear the race. `docs/realsense.md` §Troubleshooting |
 | RealSense open fails on the Mac with `RS2_USB_STATUS_ACCESS` / `set_xu … timed out` / no frame, and the process **segfaults** after `usb device disconnected` | The Mac is a desktop now: libusb's claim re-enumerates the device and every camera-aware app (Spotify won it on 2026-09-24; browsers; Apple's UVCAssistant) races for it; a disconnect mid-open crashes librealsense 2.58.4 in libusb | Don't chase it. On this Mac every libusb handle open resets the camera (root-only kernel-driver detach = re-enumerate with capture) and Apple's `UVCAssistant` re-claims it each time: 43 resets in 40 s and a stream that dies after 2 frames, with nothing else on the bus (2026-09-25, webcams and Spotify gone). The Mac-as-desktop is not a D435 host; use the Windows laptop under WSL2 (verified 09-23) or the Jetson. the cockpit under `--rs-lean`. `docs/realsense.md` §Troubleshooting |
 | RealSense first open of a process never delivers a frame, re-opens work | sensor options written between pipeline start and the first frameset | write them on the first `read()` (`DepthTuning` does); never at open |
 | **On a real e-Series**, `move-tcp` / cockpit **Move** to a target the arm can't reach returns `ok:false`, `landed:null`, no violation — and the arm **stretches to a straight elbow** chasing it (UR3e, 2026-09-23: a 0.69 m target on a 0.5 m arm) | The envelope's reach cap used to be a hardcoded UR10 1.3 m, whatever the arm | Fixed: `SafetyEnvelope.for_model` sizes `max_reach` from `UR_ROBOT_MODEL` (the cell files) or the Dashboard's `get robot model` (probed once before the first absolute move); `MODEL_REACH_M` covers UR3/5/7e/10/12e/15/16e/20/30. `locate` now returns `reachable` and the cockpit's event says **OUT OF REACH** before you press Move. `UR_MAX_REACH_M` overrides (long TCP). Doctor line `robot.model` shows the cap and flags a cell/controller model mismatch. |
 | A multi-leg move (`ur_move_tcp_path`, the cockpit **Approach** cycle) stops part-way with `ok:false`, no protective stop, robot parked mid-path | **Any new URScript on 30001 replaces the running program.** A concurrent state poll whose RTDE read hiccuped (legacy `textmsg` fallback), a Locate (`get_flange_pose` is a script), or a second Move kills the cycle silently. Seen once on the UR3e 2026-09-23 (4-leg cycle died after leg 2) | Fixed inside one process: `PrimaryClient` holds a non-blocking in-flight lock — a concurrent submission raises `PrimaryBusyError`, and `get_state` reports `primary_busy` with no joints instead of sending. Across *processes* (a CLI `run-script` while the cockpit drives) nothing can protect you — don't. |
-| The cockpit's flange-referenced approach lands a constant ~35 mm off the object, even with the TCP forced to zero | The hand-measured `PERCEPTION_T_FLANGE_CAMERA` (to the camera housing) was 21 mm off in X, 36 mm in Z and had the tilt sign inverted — the depth origin is the **left IR imager**, not the housing centre | Run the touch-and-click hand-eye (mark = flange centre on the part with `set_tcp(p[0,…])`, 3 clicked views from varied wrist poses); 2026-09-23 on the UR3e: RMS 1.7 mm, located point 3 mm from the mark afterwards. The solved pose is in `perception/cells/ur3.env` + `captures/calibration/handeye_ur3.json`. |
+| The cockpit's flange-referenced approach lands a constant ~35 mm off the object, even with the TCP forced to zero | The hand-measured `PERCEPTRONICS_T_FLANGE_CAMERA` (to the camera housing) was 21 mm off in X, 36 mm in Z and had the tilt sign inverted — the depth origin is the **left IR imager**, not the housing centre | Run the touch-and-click hand-eye (mark = flange centre on the part with `set_tcp(p[0,…])`, 3 clicked views from varied wrist poses); 2026-09-23 on the UR3e: RMS 1.7 mm, located point 3 mm from the mark afterwards. The solved pose is in `perceptronics/cells/ur3.env` + `captures/calibration/handeye_ur3.json`. |
 | `ur_flange_pose` / Locate gives a flange pose that is wrong by tens of mm while `get_tcp_offset()` looks plausible | The controller reported an active-TCP offset (`0,-0.035,0.22,…`) that was **not** what its motion actually used; `pose_trans(tcp, inv(offset))` then puts the "flange" in the wrong place | Force the TCP yourself: `set_tcp(p[0,0,0,0,0,0])` (persists until the next `set_tcp`/installation load) — then TCP == flange and every read/move agrees. `move_tcp(..., tcp=[0]*6)` / `--tcp` puts it in the same program as the `movel`; the flange-referenced cycle does this on every leg. |
 | Robotiq gripper: port 63352 is closed from the network although the URCap is installed | the URCap daemon binds the controller's loopback only | `urctl gripper status\|open\|close\|move --position N` / `ur_gripper` / `POST /api/robot/gripper` — one Primary program opens the socket from inside the controller (UR3e + Hand-E, 2026-09-25) |
 | Cockpit **Freedrive** (or `urctl freedrive on`, `ur_freedrive`) reports ok but the real arm stays stiff; the reteach/inspect dialogs *do* hand-guide | Freedrive lives only while the program that called `freedrive_mode()` runs. A one-line script ends instantly → freedrive ends instantly (URSim is lenient, hardware isn't) | Fixed: `Robot.freedrive(True, hold_s=600)` sends a bounded `sleep` loop that keeps the program alive and confirms via `textmsg("urctl/freedrive=on")` (`ok:false` if the echo never comes); `off` sends `end_freedrive_mode()` as a new program, which also kills the hold; the hold releases itself when it expires (`--hold`, tool `hold_s`, max 1 h). |
 
 ## Working in this repo
 
+**Required checks on `dev`: `gate` and `URCap5 gate`** (2026-09-29). `URCap5 gate`
+(`urcap5-matrix.yml`) passes at once on a PR that doesn't touch the URCap's paths and only on a
+green `build` + every PolyScope version on one that does — so auto-merge can't land a red
+URCap and the matrix never blocks unrelated PRs. Before a new required job, make sure it runs
+(and answers) on every PR, or it blocks the ones it skips.
+
 **CI/CD** (`.github/`): every PR runs lint (ruff check + format, shellcheck),
 unit tests on Python 3.10/3.12/3.14, and a packaging job that builds the wheel,
-verifies it carries `perception/webui/` + the vendored `_urp_convert.py`, and
+verifies it carries `perceptronics/webui/` + the vendored `_urp_convert.py`, and
 smoke-installs it. Integration tests (URSim boot) run on pushes to main or on
 PRs labeled **`run-integration`**. Dependabot maintains uv deps, action pins,
 and simulator images (weekly/monthly, grouped); minor/patch non-simulator
 bumps auto-merge once CI is green (`dependabot-auto-merge.yml` — needs
 "Allow auto-merge" enabled in repo settings). CodeQL scans Python + JS weekly
 and per PR. Tagging `v<version>` (matching `urctl.__version__`) builds, tests,
-creates a GitHub Release, and publishes to PyPI via trusted publishing (the
-`pypi` environment; skipped until the PyPI publisher is configured). The PolyScope 5
+and attaches the sdist + wheel to a GitHub Release (no PyPI package). The PolyScope 5
 URCap has its own tag line: `urcap5-v<Bundle-Version>` attaches the committed
 `urcap/dist/*.urcap` + sha256 to a GitHub Release after `urcap5.py release-check`
 proves it is the tagged sources' build (`release-urcap5.yml`; CI never rebuilds it —
 the URCap API jars exist only in the URSim image).
 
-Unit tests assume a clean shell: with `UR_CELL` (or `PERCEPTION_*`) exported,
+Unit tests assume a clean shell: with `UR_CELL` (or `PERCEPTRONICS_*`) exported,
 the handeye/webapp/cockpit tests pick up the cell's defaults and fail — run them
 with `env -u UR_CELL uv run pytest …` or in a fresh shell.
 
@@ -827,10 +922,10 @@ make sim-down        # stop URSim
 ```
 
 Environment + deps are managed with **`uv`** (the repo's `pyproject.toml`
-declares the `urctl`/`perception` packages and a `dev` group). `uv sync` builds
-`.venv`; prefix commands with `uv run`. The core (`urctl` + perception core) is
+declares the `urctl`/`perceptronics` packages and a `dev` group). `uv sync` builds
+`.venv`; prefix commands with `uv run`. The core (`urctl` + perceptronics core) is
 pure stdlib — numpy/OpenCV/torch/the MCP SDK are optional extras
-(`uv sync --extra perception`).
+(`uv sync --extra vision`).
 
 ```bash
 uv sync                                   # create .venv with dev deps
@@ -884,7 +979,7 @@ For deeper development tasks:
   it spells out exactly what's wrong even when Dashboard returns "unknown
   failure":
   ```bash
-  sudo docker exec ur-docker-ursim-1 tail -f /ursim/polyscope.log
+  sudo docker exec perceptronics-ursim-1 tail -f /ursim/polyscope.log
   ```
 
 ## Things NOT to do

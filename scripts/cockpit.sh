@@ -10,11 +10,11 @@ cd "$(dirname "$0")/.."
 cell="${1:-sim}"; shift || true
 if [ "${1:-}" = "--doctor" ]; then
     shift
-    exec uv run perception --cell "$cell" doctor "$@"
+    exec uv run perceptronics --cell "$cell" doctor "$@"
 fi
-# A real camera on macOS needs root to claim the USB interface; the sim cell (PERCEPTION_FAKE) does not.
+# A real camera on macOS needs root to claim the USB interface; the sim cell (PERCEPTRONICS_FAKE) does not.
 if [ "$(uname)" = "Darwin" ] && [ "$cell" != "sim" ] && [ "$(id -u)" -ne 0 ]; then
     echo "macOS: the RealSense needs root — re-running under sudo" >&2
-    exec sudo -E uv run perception --cell "$cell" gui "$@"
+    exec sudo -E uv run perceptronics --cell "$cell" gui "$@"
 fi
-exec uv run perception --cell "$cell" gui "$@"
+exec uv run perceptronics --cell "$cell" gui "$@"

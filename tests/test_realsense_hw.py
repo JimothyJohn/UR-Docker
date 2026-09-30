@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from perception.realsense import RealSenseCamera, RealSenseError, list_devices
-from perception.segment import StubSegmenter, extract_features
+from perceptronics.realsense import RealSenseCamera, RealSenseError, list_devices
+from perceptronics.segment import StubSegmenter, extract_features
 
 pytestmark = pytest.mark.realsense
 

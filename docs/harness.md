@@ -184,7 +184,7 @@ other arms is `urctl/controller.py` (`Controller` / `Gripper` protocols).
 ## 5. GUI — the RGB-D cockpit
 
 The robot-only `urctl gui` / `urctl-gui` panel described here until 2026-09-26
-was retired in favour of the RGB-D cockpit (`perception gui`, `docs/realsense.md`
+was retired in favour of the RGB-D cockpit (`perceptronics gui`, `docs/realsense.md`
 §The pilot's seat); it lives in git history before that commit. The cockpit's
 Pilot panel dispatches the same tools (`ur_bring_up`, jog, stop, freedrive,
 gripper) through `urctl.tools.call_tool`, so every button is still

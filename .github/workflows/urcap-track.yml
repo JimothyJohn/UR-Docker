@@ -189,7 +189,7 @@ jobs:
             fi
             [ -f track-report.md ] && cat track-report.md
             echo
-            echo "Locally: \`python3 urcap/track.py update && python3 urcap/track.py compat && uv run --with playwright==1.63.0 python urcap/e2e.py\`; patch urcap/realsense-pilot/ until all three pass (\`make urcap-package\` + commit dist/ after a source change)."
+            echo "Locally: \`python3 urcap/track.py update && python3 urcap/track.py compat && uv run --with playwright==1.63.0 python urcap/e2e.py\`; patch urcap/perceptronic/ until all three pass (\`make urcap-package\` + commit dist/ after a source change)."
           } > issue-body.md
           existing=$(gh issue list --repo "$REPO" --label urcap-attention --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then

@@ -1,4 +1,4 @@
-# Common dev tasks for UR-Docker. Run `make help` for a list.
+# Common dev tasks for perceptronics. Run `make help` for a list.
 
 DOCKER ?= sudo docker
 COMPOSE ?= $(DOCKER) compose
@@ -8,8 +8,8 @@ PYTHON ?= $(UV) run python
 PYTEST ?= $(UV) run pytest
 RUFF ?= $(UV) run ruff
 
-CONTAINER := ur-docker-ursim-1
-PX_CONTAINER := ur-docker-ursim-px-1
+CONTAINER := perceptronics-ursim-1
+PX_CONTAINER := perceptronics-ursim-px-1
 
 # PolyScope X sim knobs (consumed by the `ursim-px` compose service).
 # ROBOT_TYPE: UR3 UR5 UR8L UR10 UR16 UR18 UR20 UR30. HOST_ARCH: amd64 | arm64.
@@ -25,9 +25,9 @@ export UR_HOST
 
 .PHONY: help sim-up sim-down sim-logs sim-shell sim-poweron \
         simx-up simx-down simx-logs simx-shell urcap-package urcap-install urcap-cockpit \
-        urcap-track urcap-compat urcap-e2e \
+        urcap-track urcap-compat urcap-e2e urcapx-matrix \
         urcap5-sdk urcap5-package urcap5-install \
-        rs-info rs-gui rs-gui-fake rs-test perception-build perception-up perception-down \
+        rs-info rs-gui rs-gui-fake rs-test perceptronics-build perceptronics-up perceptronics-down \
         doctor cockpit cockpit-dry mcp \
         test test-unit test-integration test-all \
         lint lint-py lint-sh fmt regen-urps install-dev
@@ -83,14 +83,14 @@ simx-bring-up:  ## Power on + brake release the PolyScope X robot (needs Remote 
 	$(PX_ENV) $(PYTHON) -m urctl bring-up
 
 # ---- PolyScope X URCap (urcap/: README.md to install, DEVELOPING.md to work on it) --
-urcap-package:  ## Rebuild the downloadable urcap/dist/realsense-pilot-<ver>.urcapx (no npm; commit it).
-	$(PYTHON) urcap/urcapx.py package urcap/realsense-pilot --out urcap/dist
+urcap-package:  ## Rebuild the downloadable urcap/dist/perceptronic-<ver>.urcapx (no npm; commit it).
+	$(PYTHON) urcap/urcapx.py package urcap/perceptronic --out urcap/dist
 
 urcap-install: urcap-package  ## Install (or replace) it in the PolyScope X sim on :8000; then refresh the page.
-	$(PYTHON) urcap/urcapx.py install urcap/dist/realsense-pilot-*.urcapx --port 8000 --replace
+	$(PYTHON) urcap/urcapx.py install urcap/dist/perceptronic-*.urcapx --port 8000 --replace
 
 urcap-cockpit:  ## A synthetic cockpit on :7621 (the normal port) the URCap page may call from the sim's origin.
-	$(PYTHON) -m perception gui --fake --no-browser --port 7621 --cors http://localhost:8000,http://127.0.0.1:8000
+	$(PYTHON) -m perceptronics gui --fake --no-browser --port 7621 --cors http://localhost:8000,http://127.0.0.1:8000
 
 urcap-track:  ## Is urcap/target.json still UR's newest PolyScope X release? (exit 1 + why when not)
 	$(PYTHON) urcap/track.py check
@@ -101,49 +101,65 @@ urcap-compat:  ## The URCap against the pinned SDK: contribution-api members, ma
 urcap-e2e:  ## Boot target.json's simulator, install a fresh build, load + click the node headlessly.
 	$(UV) run --with playwright==1.63.0 python urcap/e2e.py
 
-# ---- PolyScope 5 (e-Series) URCap (urcap/realsense-pilot-ps5, urcap/urcap5.py) --------
+urcapx-matrix:  ## The e2e on the ten newest PolyScope X releases (PSX_VERSION=10.14.0 / all; images removed after each run).
+	$(UV) run --with playwright==1.63.0 python urcap/psx_matrix.py run --version $(PSX_VERSION) --rmi --artifacts target/psx-matrix
+
+# ---- PolyScope 5 (e-Series) URCap (urcap/perceptronic-ps5, urcap/urcap5.py) --------
 URCAP5_CONTAINER ?= ur-utils-ursim-e-ur3e
-urcap5-sdk:  ## Copy the URCap API jars out of the e-Series URSim image into target/ (never committed).
+urcap5-sdk:  ## The URCap API jars of the oldest supported PolyScope (+ compat.since) into target/ (registry; never committed).
 	$(PYTHON) urcap/urcap5.py sdk
 
-urcap5-package:  ## Rebuild the downloadable urcap/dist/realsense-pilot-ps5-<ver>.urcap (JDK; commit it).
-	$(PYTHON) urcap/urcap5.py package urcap/realsense-pilot-ps5 --out urcap/dist
+urcap5-package:  ## Rebuild the downloadable urcap/dist/perceptronic-ps5-<ver>.urcap (JDK; commit it).
+	$(PYTHON) urcap/urcap5.py package urcap/perceptronic-ps5 --out urcap/dist
 
 urcap5-install: urcap5-package  ## Install it in the e-Series sim container $(URCAP5_CONTAINER) (restarts it).
-	$(PYTHON) urcap/urcap5.py install urcap/dist/realsense-pilot-ps5-*.urcap --container $(URCAP5_CONTAINER)
+	$(PYTHON) urcap/urcap5.py install urcap/dist/perceptronic-ps5-*.urcap --container $(URCAP5_CONTAINER)
+
+# The URCap on every PolyScope 5 minor from 5.4 (urcap/ps5_matrix.py MATRIX; amd64 host).
+PSX_VERSION ?= all
+PS5_VERSION ?= all
+.PHONY: urcap5-matrix urcap5-matrix-down urcap5-matrix-compose
+urcap5-matrix:  ## Per PS5 URSim: API check, boot, URCap starts, pick e2e, down -v (PS5_VERSION=5.4 / 5.26 / all).
+	DOCKER="$(DOCKER)" $(PYTHON) urcap/ps5_matrix.py run --version $(PS5_VERSION) --artifacts target/ps5-matrix/artifacts
+
+urcap5-matrix-down:  ## Tear the PS5 matrix sims down with their volumes.
+	DOCKER="$(DOCKER)" $(PYTHON) urcap/ps5_matrix.py down --version $(PS5_VERSION)
+
+urcap5-matrix-compose:  ## Regenerate docker-compose.ps5-matrix.yml from ps5_matrix.py's MATRIX (commit it).
+	$(PYTHON) urcap/ps5_matrix.py compose > docker-compose.ps5-matrix.yml
 
 # ---- RealSense perception (docs/realsense.md) ----------------------------------
 # On macOS librealsense needs root to claim the camera's USB interface, hence
 # the `sudo` on the hardware targets; `rs-gui-fake` needs no camera at all.
 
 rs-info:  ## List attached RealSense cameras + SDK version (macOS: needs sudo).
-	sudo $(PYTHON) -m perception rs-info
+	sudo $(PYTHON) -m perceptronics rs-info
 
 rs-gui:  ## RGB-D cockpit on the RealSense (browser, loopback).
-	sudo $(PYTHON) -m perception gui
+	sudo $(PYTHON) -m perceptronics gui
 
 rs-gui-fake:  ## RGB-D cockpit on a synthetic scene (no camera).
-	$(PYTHON) -m perception gui --fake
+	$(PYTHON) -m perceptronics gui --fake
 
 
 rs-test:  ## Hardware-in-the-loop RealSense tests (skips without a camera).
 	sudo $(PYTEST) -m realsense -q
 
-perception-build:  ## Build the perception service image (Jetson / Linux; compiles librealsense).
-	$(COMPOSE) --profile perception build
+perceptronics-build:  ## Build the perceptronics service image (Jetson / Linux; compiles librealsense).
+	$(COMPOSE) --profile perceptronics build
 
-perception-up:  ## Run the perception service (privileged, USB, cockpit on :7621).
-	$(COMPOSE) --profile perception up -d
+perceptronics-up:  ## Run the perceptronics service (privileged, USB, cockpit on :7621).
+	$(COMPOSE) --profile perceptronics up -d
 
-perception-down:  ## Stop the perception service.
-	$(COMPOSE) --profile perception down
+perceptronics-down:  ## Stop the perceptronics service.
+	$(COMPOSE) --profile perceptronics down
 
 # ---- The pilot's seat (docs/realsense-cell.html) ------------------------------------
-# One cell profile (sim | ur3 | ur20, perception/cells/*.env) selects robot host/ports + bracket.
+# One cell profile (sim | ur3 | ur20, perceptronics/cells/*.env) selects robot host/ports + bracket.
 CELL ?= sim
 
 doctor:  ## Pre-flight checklist for CELL (SDK, camera, robot reachability + state).
-	$(PYTHON) -m perception --cell $(CELL) doctor
+	$(PYTHON) -m perceptronics --cell $(CELL) doctor
 
 cockpit:  ## The RGB-D cockpit for CELL (sudo on macOS for a real camera; scripts/cockpit.sh does that).
 	./scripts/cockpit.sh $(CELL)
@@ -152,7 +168,7 @@ cockpit-dry:  ## Cockpit for CELL with robot actions validated + audited but not
 	./scripts/cockpit.sh $(CELL) --robot-dry-run
 
 mcp:  ## The combined robot + camera MCP server for CELL over stdio (what .mcp.json runs).
-	$(PYTHON) -m perception.mcp_server --cell $(CELL)
+	$(PYTHON) -m perceptronics.mcp_server --cell $(CELL)
 
 # ---- Tests ------------------------------------------------------------------
 
@@ -172,10 +188,10 @@ test-all:  ## Run every test.
 lint: lint-py lint-sh  ## Run all linters.
 
 lint-py:  ## Lint Python with ruff.
-	$(RUFF) check urctl perception scripts urcap tests
+	$(RUFF) check urctl perceptronics scripts urcap tests
 
 fmt:  ## Format Python with ruff.
-	$(RUFF) format urctl perception scripts urcap tests
+	$(RUFF) format urctl perceptronics scripts urcap tests
 
 lint-sh:  ## Lint shell scripts (skipped silently if shellcheck not installed).
 	@if command -v shellcheck >/dev/null; then \
@@ -204,4 +220,4 @@ regen-urps:  ## Rebuild every <name>.urp from its build.py (node tree) or siblin
 # ---- One-time setup ---------------------------------------------------------
 
 install-dev:  ## Create/refresh the uv venv with dev + optional extras.
-	$(UV) sync --extra perception
+	$(UV) sync --extra vision

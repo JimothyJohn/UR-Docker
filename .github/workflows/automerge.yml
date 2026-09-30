@@ -1,0 +1,36 @@
+# Baseline auto-merge — copy to .github/workflows/automerge.yml.
+# Enables auto-merge (merge commit) on non-draft PRs into `dev` from the repo
+# owner, so green required checks ARE the approval. Dependabot's PRs are left
+# to dependabot-auto-merge.yml, which holds majors and simulator images back. Drafts are
+# the deliberate opt-out for "needs my eyes". Never match `master` as base —
+# dev→master stays a manual merge.
+# Nothing here checks out or runs PR-authored code (just `gh` calls), so the
+# pull_request trigger is safe to grant write to. The same-repo head guard
+# keeps fork PRs out regardless.
+# Known trade-off, acceptable: merges enabled by GITHUB_TOKEN don't fire
+# push-event workflows on dev; the identical required checks just passed on
+# the PR, and deploys hang off master only.
+name: Auto-merge
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: >
+      github.event.pull_request.base.ref == 'dev' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == github.event.repository.owner.login
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge
+        run: gh pr merge --auto --merge "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

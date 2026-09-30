@@ -24,7 +24,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 URSIM_HOST = os.environ.get("UR_HOST", "localhost")
 URSIM_DASH_PORT = int(os.environ.get("UR_DASH_PORT", "29999"))
 URSIM_PRIMARY_PORT = int(os.environ.get("UR_PRIMARY_PORT", "30001"))
-URSIM_CONTAINER = os.environ.get("URSIM_CONTAINER", "ur-docker-ursim-1")
+URSIM_CONTAINER = os.environ.get("URSIM_CONTAINER", "perceptronics-ursim-1")
 DOCKER = os.environ.get("DOCKER", "sudo docker").split()
 
 

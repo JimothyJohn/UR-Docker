@@ -1,0 +1,12 @@
+RealSense Pilot (165) provides services:
+----------------------------------------
+objectClass = com.ur.urcap.api.contribution.installation.swing.SwingInstallationNodeService
+service.bundleid = 165
+service.id = 151
+service.scope = singleton
+----
+objectClass = com.ur.urcap.api.contribution.program.swing.SwingProgramNodeService
+service.bundleid = 165
+service.id = 152
+service.scope = singleton
+-> 

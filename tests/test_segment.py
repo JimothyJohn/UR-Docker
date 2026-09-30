@@ -6,9 +6,9 @@ import math
 
 import pytest
 
-from perception.frame import Frame
-from perception.rgbd import DepthImage, RgbdFrame, synthetic_disks, synthetic_intrinsics, synthetic_rgbd
-from perception.segment import Mask, Segmenter, StubSegmenter, extract_features, normalize_box
+from perceptronics.frame import Frame
+from perceptronics.rgbd import DepthImage, RgbdFrame, synthetic_disks, synthetic_intrinsics, synthetic_rgbd
+from perceptronics.segment import Mask, Segmenter, StubSegmenter, extract_features, normalize_box
 
 
 def _scene(width, height, rects, background=(20, 20, 24), wall=1.2):

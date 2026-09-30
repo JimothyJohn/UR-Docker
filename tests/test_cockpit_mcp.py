@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from perception.cockpitclient import CockpitClient, CockpitUnavailable
-from perception.config import PerceptionConfig
-from perception.mcp_server import COCKPIT_TOOLS, CockpitTools, build_server
-from perception.realsense import SyntheticRgbdCamera
-from perception.robotlink import RobotLink
-from perception.webapp import ViewerApp, ViewerHandler
+from perceptronics.cockpitclient import CockpitClient, CockpitUnavailable
+from perceptronics.config import PerceptionConfig
+from perceptronics.mcp_server import COCKPIT_TOOLS, CockpitTools, build_server
+from perceptronics.realsense import SyntheticRgbdCamera
+from perceptronics.robotlink import RobotLink
+from perceptronics.webapp import ViewerApp, ViewerHandler
 from urctl.config import RobotConfig
 from urctl.robot import Robot
 
@@ -114,7 +114,9 @@ def test_cockpit_down_is_an_in_band_error_and_robot_tools_still_serve():
     server = build_server(Robot(RobotConfig(), dry_run=True), cockpit_url="http://127.0.0.1:9")
     err, body = _call(server, "cam_info")
     assert (
-        err and "no cockpit at http://127.0.0.1:9" in body["error"] and "perception --cell" in body["error"]
+        err
+        and "no cockpit at http://127.0.0.1:9" in body["error"]
+        and "perceptronics --cell" in body["error"]
     )
     err, body = _call(server, "ur_move_tcp", {"pose": [0, 0, 0.01, 0, 0, 0], "relative": True})
     assert not err and body["ok"] and body["dry_run"]

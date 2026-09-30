@@ -28,7 +28,7 @@ def run(*args):
         ["uv", "run", "python", f"{S}/pick.py", *map(str, args)],
         capture_output=True,
         text=True,
-        cwd="/Users/nick/github/UR-utils",
+        cwd=_os.path.dirname(_os.path.dirname(HERE)),  # the checkout root
     )
     print(out.stdout.strip().splitlines()[-2:] if out.stdout else out.stderr[-300:], flush=True)
     return out.stdout

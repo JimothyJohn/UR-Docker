@@ -1,0 +1,46 @@
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/polyscope-value-objects-impl-1.13.21.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/polyscope-value-objects-urcap-api-1.13.21.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/polyscope-version-api-1.15.0.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/polyscope-version-impl-1.15.0.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/polyscope-visualizer-api-1.13.21.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/polyscope-visualizer-impl-1.13.21.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/reactive-streams-1.0.4.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/realsense-pilot-ps5.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/rxjava-2.2.21.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/sac-1.3.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/screwdriving-urcap-api-export-3.21.1.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/snakeyaml-1.30.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/stax2-api-4.2.1.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/swing-layout-1.0.3.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/swing-worker-1.1.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/swingx-1.6.1.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/urcap-api-export-7.22.0.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/urcap-api-export-robotmovement-13.28.2.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/urscript2pojo-3.10.0.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/validation-api-1.1.0.Final.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/vecmath-1.5.2-modified.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/ws-commons-util-1.0.2.0.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/xmlrpc-client-3.1.3.0.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/xmlrpc-common-3.1.3.0.jar
+Adding 'reference:' to bundle uri : file:/ursim/GUI/bundle/xstream-1.4.19.jar
+Identifying Split Packages
+Split package detected!
+  com.ur.urcap.api.domain.value; version=1.9.0
+  com.ur.polyscope.application.polyscope-value-objects-urcap-api [158] com.ur.polyscope.application.polyscope-value-objects-urcap-api
+  com.ur.polyscope.urcaps.polyscope-urcap-urcap-api [155] com.ur.polyscope.urcaps.polyscope-urcap-urcap-api
+[33m2026-09-29 04:03:25.645 WARN [m -  Default charset encoding is not UTF-8 it's US-ASCII [33m{thread: Thread-4 , loggerClass: gui.main.URGUI}[m
+[32m2026-09-29 04:03:25.646 INFO [m -  Starting Universal Robots GUI [32m{thread: Thread-4 , loggerClass: gui.main.URGUI}[m
+[32m2026-09-29 04:03:26.115 INFO [m -  Robot controller user = dummy [32m{thread: Thread-4 , loggerClass: com.ur.polyscope.system.impl.Settings}[m
+[32m2026-09-29 04:03:26.116 INFO [m -  Configuration and settings files path: /ursim/.urcontrol [32m{thread: Thread-4 , loggerClass: com.ur.polyscope.system.impl.Settings}[m
+[32m2026-09-29 04:03:27.855 INFO [m -  Loading URCapProvider %s [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.BundleServicesBinder}[m
+[32m2026-09-29 04:03:27.855 INFO [m -  Loading URCapProvider %s [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.BundleServicesBinder}[m
+[32m2026-09-29 04:03:27.855 INFO [m -  Loading URCapProvider %s [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.BundleServicesBinder}[m
+[32m2026-09-29 04:03:28.200 INFO [m -  Removing 'reference:' from bundle location : reference:file:/ursim/GUI/bundle/realsense-pilot-ps5.jar [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.infrastructure.helper.URCapHelper}[m
+[32m2026-09-29 04:03:28.200 INFO [m -  Removing 'file:' from bundle location : file:/ursim/GUI/bundle/realsense-pilot-ps5.jar [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.infrastructure.helper.URCapHelper}[m
+[32m2026-09-29 04:03:28.207 INFO [m -  Removing 'reference:' from bundle location : reference:file:/ursim/GUI/bundle/remotetcp/remotetcp-1.4.4-build1.jar [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.infrastructure.helper.URCapHelper}[m
+[32m2026-09-29 04:03:28.207 INFO [m -  Removing 'file:' from bundle location : file:/ursim/GUI/bundle/remotetcp/remotetcp-1.4.4-build1.jar [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.infrastructure.helper.URCapHelper}[m
+[32m2026-09-29 04:03:28.218 INFO [m -  Omitted licenced URCap: com.energid.urcap.remotetcp due to missing license. [32m{thread: Thread-4 , loggerClass: com.ur.polyscope.license.internal.urcap.LicensedURCapStartFilter}[m
+[32m2026-09-29 04:03:28.219 INFO [m -  Removing 'reference:' from bundle location : reference:file:/ursim/GUI/bundle/remotetcp/remotetcp-1.4.4-build1.jar [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.infrastructure.helper.URCapHelper}[m
+[32m2026-09-29 04:03:28.219 INFO [m -  Removing 'file:' from bundle location : file:/ursim/GUI/bundle/remotetcp/remotetcp-1.4.4-build1.jar [32m{thread: Thread-4 , loggerClass: com.ur.urcap.osgi.infrastructure.helper.URCapHelper}[m
+[1;31m2026-09-29 04:03:28.236 ERROR[m -  Failed to load installation: /ursim/programs/default.installation [1;31m{thread: Thread-4 , loggerClass: gui.installation.services.RobotInstallationLookupServiceImpl}[m
+[33m2026-09-29 04:03:28.252 WARN [m -  Method used before correct value has been received from controller, returning default = joint_max_speed [33m{thread: Thread-4 , loggerClass: com.ur.polyscope.robot.configuration.joint.JointConfigurationSettings}[m

@@ -21,8 +21,8 @@ building):
 * ``list`` / ``delete VENDOR URCAP`` — the same endpoint. Refresh the PolyScope
   page afterwards; the simulator in this repo listens on ``localhost:8000``.
 
-    python3 urcap/urcapx.py package urcap/realsense-pilot --out urcap/dist
-    python3 urcap/urcapx.py install urcap/dist/realsense-pilot-0.1.0.urcapx --port 8000 --replace
+    python3 urcap/urcapx.py package urcap/perceptronic --out urcap/dist
+    python3 urcap/urcapx.py install urcap/dist/perceptronic-0.2.0.urcapx --port 8000 --replace
 """
 
 from __future__ import annotations
@@ -246,6 +246,39 @@ def delete(host: str, port: int, vendor: str, urcap: str) -> dict:
     return _request(f"{_base(host, port)}/{vendor}/{urcap}", method="DELETE")
 
 
+# -- release --------------------------------------------------------------------------------------
+
+TAG_PREFIX = "urcapx-v"
+_SEMVER = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}")
+
+
+def release_check(tag: str, src: str | Path, dist_dir: str | Path) -> dict:
+    """What a ``urcapx-v<version>`` tag may publish: ``{version, path, sha256}``, or
+    UrcapError naming what is wrong. The committed ``dist/<urcapID>-<version>.urcapx`` must
+    be the tag's version and exactly what the tagged sources package to (the build is
+    reproducible: same tar bytes inside the gzip)."""
+    src, dist_dir = Path(src), Path(dist_dir)
+    if not tag.startswith(TAG_PREFIX) or not _SEMVER.fullmatch(tag[len(TAG_PREFIX) :]):
+        raise UrcapError(f"tag {tag!r} is not {TAG_PREFIX}<major>.<minor>.<patch>")
+    version = tag[len(TAG_PREFIX) :]
+    meta = read_manifest((src / MANIFEST).read_text(encoding="utf-8"))
+    if meta["version"] != version:
+        raise UrcapError(f"tag {tag} but {src / MANIFEST} says version {meta['version']}")
+    path = dist_dir / f"{meta['urcapID']}-{version}.urcapx"
+    if not path.is_file():
+        raise UrcapError(f"{path} is not committed — run `make urcap-package` and commit it")
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = package(src, tmp)
+        if gzip.decompress(fresh.read_bytes()) != gzip.decompress(path.read_bytes()):
+            raise UrcapError(f"{path} is not what the sources package to — run `make urcap-package`")
+    packed = manifest_from_urcapx(path)
+    if packed["version"] != version or packed["urcapID"] != meta["urcapID"]:
+        raise UrcapError(
+            f"{path} carries {packed['urcapID']} {packed['version']}, not {meta['urcapID']} {version}"
+        )
+    return {"version": version, "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
 # -- CLI ------------------------------------------------------------------------------------------
 
 
@@ -257,6 +290,10 @@ def main(argv: list[str] | None = None) -> int:
     pk = sub.add_parser("package", help="build SRC into a .urcapx")
     pk.add_argument("src")
     pk.add_argument("--out", default="target", help="output directory (default target/)")
+    rc = sub.add_parser("release-check", help="check a urcapx-v<version> tag against the committed package")
+    rc.add_argument("tag")
+    rc.add_argument("--src", default=str(REPO_ROOT / "urcap" / "perceptronic"))
+    rc.add_argument("--dist", default=str(REPO_ROOT / "urcap" / "dist"))
     for name in ("install", "list", "delete"):
         p = sub.add_parser(name)
         p.add_argument("--host", default="localhost")
@@ -272,6 +309,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "package":
             out = package(args.src, args.out)
             print(out)
+            return 0
+        if args.cmd == "release-check":
+            print(json.dumps(release_check(args.tag, args.src, args.dist)))
             return 0
         if args.cmd == "list":
             for it in list_urcaps(args.host, args.port):

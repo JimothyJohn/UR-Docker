@@ -20,8 +20,8 @@ The `.urp` + `.installation` are already a matched pair. Copy them into the
 controller's program directory, then Load + Play:
 
 ```bash
-docker cp ElegantDance.urp          ur-docker-ursim-1:/ursim/programs/
-docker cp ElegantDance.installation ur-docker-ursim-1:/ursim/programs/
+docker cp ElegantDance.urp          perceptronics-ursim-1:/ursim/programs/
+docker cp ElegantDance.installation perceptronics-ursim-1:/ursim/programs/
 # In PolyScope: Load Program -> ElegantDance.urp -> Play   (needs Remote mode for Dashboard 'play')
 ```
 

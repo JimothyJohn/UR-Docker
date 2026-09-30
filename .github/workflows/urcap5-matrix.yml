@@ -1,0 +1,192 @@
+# The PolyScope 5 (e-Series) URCap on every PolyScope 5 release UR publishes an image for:
+# the newest image of every minor from 5.4 on (urcap/ps5_matrix.py MATRIX — the job list
+# comes from `ps5_matrix.py list`, never from this file; docker-compose.ps5-matrix.yml is
+# generated from it too).
+#
+# build: the committed urcap/dist/perceptronic-ps5-*.urcap is rebuilt against the OLDEST
+#   supported PolyScope's URCap API jars (bundle.properties compat.floor; each
+#   compat.since group against its version's) with a different JDK from the one that built
+#   the committed jar, and must be the same jar (`urcap5.py compare`: entries, non-class
+#   bytes, the members the sources declare) — so the jar that ships uses nothing the oldest
+#   PolyScope lacks. The jars come straight from Docker Hub's registry (urcap5.py sdk).
+# matrix: per version, `urcap5.py check` against that image's own API jars (the sources it
+#   loads compile, every package the jar imports is exported), then boot URSim with the jar
+#   in /urcaps, check PolyScope started the bundle with no exception from its package, bring
+#   the arm up and run the Pick node's own URScript against a local pick server
+#   (urcap/pick5_e2e.py), plus a compile probe of the Robotiq + popup script. amd64 runners:
+#   the image is amd64-only and does not run under Docker Desktop's emulation on Apple silicon.
+#
+# gate ("URCap5 gate", a required check on dev): passes at once on a PR that touches none of
+#   the URCap's paths (Nick, 2026-09-28: the matrix must not block unrelated PRs), and on one
+#   that does only when build and every version pass — a red build can't auto-merge.
+#
+# Weekly, `ps5_matrix.py check-tags` fails when Docker Hub has a PolyScope 5 minor the
+# matrix lacks, or a newer image of one it has ("PolyScope 5.27 exists (...): add it").
+# The matrix only ever grows.
+
+name: URCap5 matrix
+
+on:
+  # every PR: `changes` decides whether the URCap's paths are touched, and `gate` answers for
+  # both cases, so the gate can be a required check without blocking unrelated PRs
+  pull_request:
+  push:
+    branches: ["feature/ps5-*"]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: urcap5-matrix-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tags:
+    # Docker Hub vs the matrix. Not on pull requests: a UR release must not block
+    # unrelated PRs; the schedule (and a push to a feature/ps5-* branch) reports it.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the matrix has every PolyScope 5 minor on Docker Hub, at its newest image
+        run: python3 urcap/ps5_matrix.py check-tags
+
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.diff.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: does this change touch the URCap's paths?
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          changed=$(git diff --name-only "origin/$BASE...HEAD")
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(urcap/|perceptronics/(picknode|volume|synthscene|partspec)\.py$|docker-compose\.ps5-matrix\.yml$|\.github/workflows/urcap5-matrix\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  setup:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.list.outputs.versions }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the versions (urcap/ps5_matrix.py MATRIX)
+        id: list
+        run: echo "versions=$(python3 urcap/ps5_matrix.py list)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    name: build against the oldest PolyScope's API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # javac --release 8 (Java 8 bytecode, what PolyScope 5's JRE 1.8.0_371 runs). Deliberately
+      # NOT the JDK the committed jar was built with (25): the rebuild is compared by entries,
+      # non-class bytes and class members (`urcap5.py compare`), so any JDK major must pass.
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: the URCap API jars of compat.floor and every compat.since version (registry)
+        run: python3 urcap/urcap5.py sdk
+
+      - name: rebuild the URCap against them; it must be the committed jar (JDK-independent)
+        run: |
+          python3 urcap/urcap5.py package urcap/perceptronic-ps5 --out target/rebuilt
+          for jar in target/rebuilt/*.urcap; do
+            python3 urcap/urcap5.py compare "$jar" "urcap/dist/$(basename "$jar")" || {
+              echo "::error::urcap/dist/$(basename "$jar") is not what the floor build makes — run \`make urcap5-package\` and commit it"
+              exit 1
+            }
+          done
+
+  matrix:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        polyscope: ${{ fromJSON(needs.setup.outputs.versions) }}
+    name: PolyScope ${{ matrix.polyscope }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+
+      # pick5_e2e compiles the node's PickScript and `urcap5.py check` the whole URCap with
+      # `javac --release 8`; any JDK 9+ does that.
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install (locked)
+        run: uv sync --locked
+
+      - name: API check, URCap + pick e2e on PolyScope ${{ matrix.polyscope }}
+        env:
+          POLYSCOPE: ${{ matrix.polyscope }}
+        run: uv run python urcap/ps5_matrix.py run --version "$POLYSCOPE" --artifacts ps5-artifacts --report "ps5-artifacts/report-$POLYSCOPE.json"
+
+      - name: tear down (always, with volumes)
+        if: always()
+        env:
+          POLYSCOPE: ${{ matrix.polyscope }}
+        run: uv run python urcap/ps5_matrix.py down --version "$POLYSCOPE"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: urcap5-matrix-${{ matrix.polyscope }}
+          path: ps5-artifacts/
+          if-no-files-found: ignore
+
+  gate:
+    name: URCap5 gate
+    if: always()
+    needs: [changes, build, matrix]
+    runs-on: ubuntu-latest
+    steps:
+      - name: the URCap's checks passed, or the change doesn't touch the URCap
+        env:
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+          CHANGES: ${{ needs.changes.result }}
+          BUILD: ${{ needs.build.result }}
+          MATRIX: ${{ needs.matrix.result }}
+        run: |
+          echo "changes=$CHANGES relevant=$RELEVANT build=$BUILD matrix=$MATRIX"
+          [ "$CHANGES" = success ] || { echo "::error::could not tell what changed"; exit 1; }
+          if [ "$RELEVANT" != true ]; then echo "no URCap paths touched"; exit 0; fi
+          [ "$BUILD" = success ] && [ "$MATRIX" = success ] || { echo "::error::build=$BUILD matrix=$MATRIX"; exit 1; }

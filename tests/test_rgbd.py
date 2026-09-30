@@ -9,9 +9,9 @@ import math
 
 import pytest
 
-from perception.frame import Frame
-from perception.pngio import encode_png, load_png, load_png16
-from perception.rgbd import (
+from perceptronics.frame import Frame
+from perceptronics.pngio import encode_png, load_png, load_png16
+from perceptronics.rgbd import (
     DepthImage,
     Intrinsics,
     RgbdFrame,
@@ -68,7 +68,7 @@ def test_fov_and_dict_roundtrip():
 
 def test_deproject_matches_librealsense_when_available():
     """Our Python undistort must agree with rs2_deproject_pixel_to_point."""
-    from perception.realsense import RealSenseLibraryNotFound, load_api
+    from perceptronics.realsense import RealSenseLibraryNotFound, load_api
 
     try:
         api = load_api()

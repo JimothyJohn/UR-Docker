@@ -393,7 +393,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gd.add_argument(
         "--live-container",
-        default="ur-docker-ursim-1",
+        default="perceptronics-ursim-1",
         help="docker container to publish the .urp into for --live (this repo's URSim)",
     )
     gd.add_argument(
@@ -436,7 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop after N points (default: until the operator answers No/Cancel)",
     )
     insp.add_argument("--live", action="store_true", help="reload the program after each capture")
-    insp.add_argument("--live-container", default="ur-docker-ursim-1", help="container for --live")
+    insp.add_argument("--live-container", default="perceptronics-ursim-1", help="container for --live")
     insp.add_argument("--live-program-dir", default=None, help="controller program dir for --live")
     insp.add_argument(
         "--live-scp",

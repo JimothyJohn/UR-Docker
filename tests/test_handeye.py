@@ -1,5 +1,5 @@
-"""Camera-on-flange geometry (perception.handeye) and the cockpit's robot bridge
-(perception.robotlink) — the latter driven through a real Robot against the
+"""Camera-on-flange geometry (perceptronics.handeye) and the cockpit's robot bridge
+(perceptronics.robotlink) — the latter driven through a real Robot against the
 fake controller from test_urctl."""
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ import math
 
 import pytest
 
-from perception.handeye import (
+from perceptronics.handeye import (
     BRACKET_NOMINAL,
     BRACKET_SEEDS,
     ENV_T_FLANGE_CAMERA,
@@ -17,7 +17,7 @@ from perception.handeye import (
     parse_pose_text,
     transform_from_extrinsics,
 )
-from perception.robotlink import RobotLink
+from perceptronics.robotlink import RobotLink
 from tests.test_urctl import FakeController
 from urctl.config import RobotConfig
 from urctl.pose import Transform, pose_inv, pose_trans
@@ -220,10 +220,12 @@ def test_bracket_seeds_match_the_bracket_build_info():
 def test_bracket_variant_selection():
     assert HandEye.for_bracket("ur20").source == "bracket-nominal:ur20"
     assert HandEye.for_bracket("UR20 ").flange_to_depth is BRACKET_SEEDS["ur20"]
-    assert HandEye.from_env({"PERCEPTION_BRACKET": "ur20"}).source == "bracket-nominal:ur20"
-    assert not HandEye.from_env({"PERCEPTION_BRACKET": "ur20"}).calibrated
+    assert HandEye.from_env({"PERCEPTRONICS_BRACKET": "ur20"}).source == "bracket-nominal:ur20"
+    assert not HandEye.from_env({"PERCEPTRONICS_BRACKET": "ur20"}).calibrated
     # an explicit calibration beats the bracket choice
-    he = HandEye.from_env({"PERCEPTION_BRACKET": "ur20", "PERCEPTION_T_FLANGE_CAMERA": "[0,0,0.1,0,0,0]"})
+    he = HandEye.from_env(
+        {"PERCEPTRONICS_BRACKET": "ur20", "PERCEPTRONICS_T_FLANGE_CAMERA": "[0,0,0.1,0,0,0]"}
+    )
     assert he.calibrated and he.source.startswith("env:")
     with pytest.raises(ValueError, match="unknown bracket"):
         HandEye.for_bracket("ur99")
@@ -232,24 +234,24 @@ def test_bracket_variant_selection():
 def test_from_env_precedence_env_then_file_then_seed(tmp_path):
     import json
 
-    from perception.handeye import default_handeye_path
+    from perceptronics.handeye import default_handeye_path
 
     f = tmp_path / "handeye_ur20.json"
     f.write_text(json.dumps({"flange_to_depth_pose": [0.01, 0.02, 0.03, 0, 0, 0.1]}))
-    env = {"UR_CELL": "ur20", "PERCEPTION_HANDEYE_FILE": str(f), "PERCEPTION_BRACKET": "ur20"}
+    env = {"UR_CELL": "ur20", "PERCEPTRONICS_HANDEYE_FILE": str(f), "PERCEPTRONICS_BRACKET": "ur20"}
     he = HandEye.from_env(env)
     assert (
         he.calibrated
         and he.source == f"file:{f}"
         and _close(he.flange_to_depth.translation, (0.01, 0.02, 0.03))
     )
-    env["PERCEPTION_T_FLANGE_CAMERA"] = "[0,0,0.5,0,0,0]"
+    env["PERCEPTRONICS_T_FLANGE_CAMERA"] = "[0,0,0.5,0,0,0]"
     assert HandEye.from_env(env).source.startswith("env:")
     # default path follows the cell name; missing file → seed
     assert default_handeye_path({"UR_CELL": "ur3"}).endswith("handeye_ur3.json")
     assert default_handeye_path({}).endswith("handeye.json")
     assert (
-        HandEye.from_env({"UR_CELL": "nope-no-file", "PERCEPTION_BRACKET": "ur20"}).source
+        HandEye.from_env({"UR_CELL": "nope-no-file", "PERCEPTRONICS_BRACKET": "ur20"}).source
         == "bracket-nominal:ur20"
     )
 
@@ -325,8 +327,8 @@ def test_robotlink_approach_defaults_come_from_the_cell_env(monkeypatch):
         "velocity": 0.1,
         "acceleration": 0.1,  # gentle since 2026-09-27 (was 0.3: the stops thudded)
     }
-    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "flange")
-    monkeypatch.setenv("PERCEPTION_STANDOFF_M", "0.075")
+    monkeypatch.setenv("PERCEPTRONICS_APPROACH_REFERENCE", "flange")
+    monkeypatch.setenv("PERCEPTRONICS_STANDOFF_M", "0.075")
     link = RobotLink(RobotConfig(host="fake"))
     assert (
         link.describe()["approach"]["standoff_m"] == 0.075
@@ -338,11 +340,11 @@ def test_robotlink_approach_defaults_come_from_the_cell_env(monkeypatch):
     # a per-call override wins
     loc = link.locate((0.0, 0.0, 0.3), standoff_m=0.2, reference="tcp")
     assert loc["reference"] == "tcp" and loc["standoff_m"] == 0.2
-    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "wrist")
+    monkeypatch.setenv("PERCEPTRONICS_APPROACH_REFERENCE", "wrist")
     with pytest.raises(ValueError):
         RobotLink(RobotConfig(host="fake"))
-    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "tcp")
-    monkeypatch.setenv("PERCEPTION_STANDOFF_M", "5")
+    monkeypatch.setenv("PERCEPTRONICS_APPROACH_REFERENCE", "tcp")
+    monkeypatch.setenv("PERCEPTRONICS_STANDOFF_M", "5")
     with pytest.raises(ValueError):
         RobotLink(RobotConfig(host="fake"))
 
@@ -358,8 +360,8 @@ def test_robotlink_move_passes_the_tcp_override(monkeypatch):
 
 def test_robotlink_approach_cycle_is_one_flange_program_that_returns_home(monkeypatch):
     fake = FakeController().install(monkeypatch)
-    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "flange")
-    monkeypatch.setenv("PERCEPTION_STANDOFF_M", "0.075")
+    monkeypatch.setenv("PERCEPTRONICS_APPROACH_REFERENCE", "flange")
+    monkeypatch.setenv("PERCEPTRONICS_STANDOFF_M", "0.075")
     link = RobotLink(RobotConfig(host="fake", robot_model="UR10e"))  # the fake's flange sits 0.5 m out
     res = link.approach_cycle((0.0, 0.0, 0.3), clearance_m=0.1, hold_s=1.0, velocity=0.15)
     assert res["ok"] and res["completed_legs"] == 4, res
@@ -478,18 +480,18 @@ def test_fingertip_approach_puts_the_tips_standoff_short_along_the_tool_axis():
 
 
 def test_tip_length_comes_from_the_cell():
-    from perception.handeye import DEFAULT_TIP_M, tip_m_from_env
+    from perceptronics.handeye import DEFAULT_TIP_M, tip_m_from_env
 
     assert tip_m_from_env({}) == DEFAULT_TIP_M == 0.163
-    assert tip_m_from_env({"PERCEPTION_TIP_M": "0.2"}) == 0.2
+    assert tip_m_from_env({"PERCEPTRONICS_TIP_M": "0.2"}) == 0.2
     for bad in ("-0.1", "0.7", "nan", "inf"):
         with pytest.raises(ValueError):
-            tip_m_from_env({"PERCEPTION_TIP_M": bad})
+            tip_m_from_env({"PERCEPTRONICS_TIP_M": bad})
 
 
 def test_robotlink_moves_and_checks_reach_with_the_fingertip_tcp(monkeypatch):
     fake = FakeController().install(monkeypatch)
-    monkeypatch.setenv("PERCEPTION_TIP_M", "0.2")
+    monkeypatch.setenv("PERCEPTRONICS_TIP_M", "0.2")
     link = RobotLink(RobotConfig(host="fake", robot_model="UR3e"))
     asked = []
     fake.ik = lambda pose, tcp: asked.append(tcp) or True
@@ -502,7 +504,7 @@ def test_robotlink_moves_and_checks_reach_with_the_fingertip_tcp(monkeypatch):
     assert "set_tcp(p[0.0, 0.0, 0.2, 0.0, 0.0, 0.0])" in movels[0]
     assert "set_tcp(p[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])" in movels[1]
     # the "tcp" reference alone moves the controller's active TCP
-    monkeypatch.setenv("PERCEPTION_APPROACH_REFERENCE", "tcp")
+    monkeypatch.setenv("PERCEPTRONICS_APPROACH_REFERENCE", "tcp")
     RobotLink(RobotConfig(host="fake", robot_model="UR3e")).move(loc["approach_pose"])
     assert "set_tcp(" not in [s for s in fake.primary_sends if "movel(" in s][-1]
 

@@ -1,7 +1,7 @@
 name: release-urcap5
 
 # CD for the PolyScope 5 (e-Series) URCap: pushing a `urcap5-v<version>` tag (for
-# example urcap5-v0.4.0) publishes the committed urcap/dist/realsense-pilot-ps5-<version>.urcap
+# example urcap5-v0.4.0) publishes the committed urcap/dist/perceptronic-ps5-<version>.urcap
 # as a GitHub Release asset with its sha256, for an operator to put on a USB stick.
 #
 # The jar is not rebuilt here: the URCap API jars it compiles against are UR's and live
@@ -61,16 +61,16 @@ jobs:
           echo "$SHA256  $name" > "$JAR.sha256"
           prev=$(git describe --tags --abbrev=0 --match 'urcap5-v*' "$TAG^" 2>/dev/null || true)
           {
-            echo "RealSense Pilot URCap for **PolyScope 5 (e-Series)**: the RealSense Pilot installation node and the RealSense Pick program node."
+            echo "Perceptronic URCap for **PolyScope 5 (e-Series)**: the Perceptronic installation node and the Perceptronic Pick program node."
             echo
             echo "**Install:** copy \`$name\` to a FAT32 USB stick (on a Mac: \`scripts/urcap5-usb.sh\`, which keeps macOS \`._\` files off it), then on the pendant ☰ → Settings → System → URCaps → **+** → the file → Open → **Restart**."
             echo
-            echo "**Needs** the RealSense cockpit (\`perception gui\`) or \`perception pick-server\` from this release's commit (\`${GITHUB_SHA::12}\`) or later on the computer the camera is plugged into — the node's requests follow the pick server's protocol at that commit."
+            echo "**Needs** the RealSense cockpit (\`perceptronics gui\`) or \`perceptronics pick-server\` from this release's commit (\`${GITHUB_SHA::12}\`) or later on the computer the camera is plugged into — the node's requests follow the pick server's protocol at that commit."
             echo
             echo "sha256 \`$SHA256\`"
             echo
             echo "### Changes to the URCap${prev:+ since $prev}"
-            git log --format='- %s (%h)' ${prev:+"$prev.."}"$TAG" -- urcap/realsense-pilot-ps5 perception/picknode.py perception/partspec.py
+            git log --format='- %s (%h)' ${prev:+"$prev.."}"$TAG" -- urcap/perceptronic-ps5 perceptronics/picknode.py perceptronics/partspec.py
           } > notes.md
           cat notes.md
       - name: create the GitHub release
@@ -81,4 +81,4 @@ jobs:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           gh release create "$TAG" "$JAR" "$JAR.sha256" --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "RealSense Pilot for PolyScope 5 — $VERSION" --notes-file notes.md
+            --title "Perceptronic for PolyScope 5 — $VERSION" --notes-file notes.md

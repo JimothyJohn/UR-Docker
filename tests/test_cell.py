@@ -1,15 +1,16 @@
 """Cell profiles: parsing, precedence (env wins), the shipped files, and the
-injection surface (only UR_/PERCEPTION_/REALSENSE_ keys, no expansion)."""
+injection surface (only UR_/PERCEPTRONICS_/REALSENSE_ keys, no expansion)."""
 
 from __future__ import annotations
 
 import pytest
 
-from perception.cell import (
+from perceptronics.cell import (
     ENV_CELL,
     apply_cell,
     cell_path,
     describe_cell,
+    legacy_variables,
     list_cells,
     load_cell,
     parse_env_text,
@@ -22,10 +23,10 @@ def test_shipped_cells_parse_and_cover_the_three_targets():
     for n in names:
         vals = load_cell(n)
         assert vals["UR_PLATFORM"] in ("polyscopex", "e-series")
-        assert vals["PERCEPTION_BRACKET"] in ("eseries", "ur20")
-    assert load_cell("sim")["PERCEPTION_FAKE"] == "1" and load_cell("sim")["UR_HOST"] == "localhost"
-    assert load_cell("ur20")["PERCEPTION_BRACKET"] == "ur20" and load_cell("ur20")["UR_HOST"] == ""
-    assert load_cell("ur3")["PERCEPTION_BRACKET"] == "eseries"
+        assert vals["PERCEPTRONICS_BRACKET"] in ("eseries", "ur20")
+    assert load_cell("sim")["PERCEPTRONICS_FAKE"] == "1" and load_cell("sim")["UR_HOST"] == "localhost"
+    assert load_cell("ur20")["PERCEPTRONICS_BRACKET"] == "ur20" and load_cell("ur20")["UR_HOST"] == ""
+    assert load_cell("ur3")["PERCEPTRONICS_BRACKET"] == "eseries"
 
 
 def test_parse_env_text_shapes():
@@ -33,14 +34,14 @@ def test_parse_env_text_shapes():
     # comment
     UR_HOST=10.0.0.5   # trailing comment
     export UR_PLATFORM="polyscopex"
-    PERCEPTION_T_FLANGE_CAMERA='[0, 0, 0.1, 0, 0, 0]'
+    PERCEPTRONICS_T_FLANGE_CAMERA='[0, 0, 0.1, 0, 0, 0]'
     UR_ROBOT_API_PORT=80
     """
     vals = parse_env_text(text)
     assert vals == {
         "UR_HOST": "10.0.0.5",
         "UR_PLATFORM": "polyscopex",
-        "PERCEPTION_T_FLANGE_CAMERA": "[0, 0, 0.1, 0, 0, 0]",
+        "PERCEPTRONICS_T_FLANGE_CAMERA": "[0, 0, 0.1, 0, 0, 0]",
         "UR_ROBOT_API_PORT": "80",
     }
 
@@ -67,12 +68,14 @@ def test_no_shell_expansion():
 
 def test_apply_cell_env_wins_and_empty_values_are_reported_missing(tmp_path):
     f = tmp_path / "lab.env"
-    f.write_text("UR_HOST=\nUR_PLATFORM=polyscopex\nPERCEPTION_BRACKET=ur20\n")
+    f.write_text("UR_HOST=\nUR_PLATFORM=polyscopex\nPERCEPTRONICS_BRACKET=ur20\n")
     env = {"UR_PLATFORM": "e-series"}
     out = apply_cell(str(f), env)
-    assert out["cell"] == "lab" and out["applied"] == {"PERCEPTION_BRACKET": "ur20"}
+    assert out["cell"] == "lab" and out["applied"] == {"PERCEPTRONICS_BRACKET": "ur20"}
     assert out["kept"] == {"UR_PLATFORM": "e-series"} and out["missing"] == ["UR_HOST"]
-    assert env["UR_PLATFORM"] == "e-series" and env["PERCEPTION_BRACKET"] == "ur20" and "UR_HOST" not in env
+    assert (
+        env["UR_PLATFORM"] == "e-series" and env["PERCEPTRONICS_BRACKET"] == "ur20" and "UR_HOST" not in env
+    )
     assert env[ENV_CELL] == "lab"
 
 
@@ -81,6 +84,25 @@ def test_apply_cell_from_env_var_and_none():
     out = apply_cell(None, env)
     assert out["cell"] == "sim" and env["UR_ROBOT_API_PORT"] == "8000" and env["UR_PRIMARY_PORT"] == "31001"
     assert apply_cell(None, {})["cell"] is None
+
+
+def test_legacy_perception_variables_are_named_not_silently_ignored(capsys):
+    # The PERCEPTION_* names were renamed PERCEPTRONICS_* (2026-09-28). A stale
+    # export must be called out, and one in a cell file refused with its new name.
+    env = {
+        "PERCEPTION_T_FLANGE_CAMERA": "0,0,0,0,0,0",
+        "PERCEPTION_TIP_M": "0.2",
+        "PERCEPTRONICS_TIP_M": "0.163",
+    }
+    assert legacy_variables(env) == ["PERCEPTION_TIP_M", "PERCEPTION_T_FLANGE_CAMERA"]
+    apply_cell(None, env)
+    err = capsys.readouterr().err
+    assert "PERCEPTION_TIP_M" in err and "PERCEPTION_T_FLANGE_CAMERA" in err and "PERCEPTRONICS_" in err
+    assert env["PERCEPTRONICS_TIP_M"] == "0.163"  # nothing is copied across
+    with pytest.raises(ValueError, match="PERCEPTRONICS_BRACKET"):
+        parse_env_text("PERCEPTION_BRACKET=ur20")
+    apply_cell(None, {"PERCEPTRONICS_TIP_M": "0.163"})
+    assert capsys.readouterr().err == ""
 
 
 def test_unknown_cell_and_bad_path():
@@ -93,13 +115,13 @@ def test_unknown_cell_and_bad_path():
 
 
 def test_describe_cell_is_a_safe_slice():
-    env = {"UR_HOST": "h", "UR_CELL": "ur3", "AWS_SECRET_ACCESS_KEY": "nope", "PERCEPTION_BRACKET": ""}
+    env = {"UR_HOST": "h", "UR_CELL": "ur3", "AWS_SECRET_ACCESS_KEY": "nope", "PERCEPTRONICS_BRACKET": ""}
     d = describe_cell(env)
     assert d == {"UR_CELL": "ur3", "UR_HOST": "h"}
 
 
 def test_cli_cells_export_is_shell_safe(capsys):
-    from perception.cli import main
+    from perceptronics.cli import main
 
     assert main(["cells", "--export", "sim"]) == 0
     out = capsys.readouterr().out.splitlines()

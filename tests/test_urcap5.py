@@ -1,9 +1,10 @@
-"""The PolyScope 5 (e-Series) RealSense Pilot URCap: the packager (``urcap/urcap5.py``),
+"""The PolyScope 5 (e-Series) Perceptronic URCap: the packager (``urcap/urcap5.py``),
 the committed ``dist/`` jar, and the Java client's contract — URL rules, JSON, the
-located-target text, and real HTTP against the cockpit (``perception.webapp``).
+located-target text, and real HTTP against the cockpit (``perceptronics.webapp``).
 
 The Java checks need only a JDK (the client classes import nothing from UR); the build
-checks need the URCap API jars too (``python3 urcap/urcap5.py sdk``) and skip without.
+checks need the URCap API jars too (``python3 urcap/urcap5.py sdk``: the floor's and every
+``compat.since`` version's) and skip without.
 """
 
 from __future__ import annotations
@@ -22,19 +23,33 @@ from pathlib import Path
 
 import pytest
 
-from perception.config import PerceptionConfig
-from perception.realsense import SyntheticRgbdCamera
-from perception.webapp import ViewerApp, ViewerHandler
+from perceptronics.config import PerceptionConfig
+from perceptronics.realsense import SyntheticRgbdCamera
+from perceptronics.webapp import ViewerApp, ViewerHandler
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "urcap"))
 import urcap5  # noqa: E402
 
-SRC = ROOT / "urcap" / "realsense-pilot-ps5"
-JAVA = SRC / "src" / "com" / "olympuscontrols" / "realsensepilot"
-DIST = ROOT / "urcap" / "dist" / "realsense-pilot-ps5-0.3.0.urcap"
+SRC = ROOT / "urcap" / "perceptronic-ps5"
+JAVA = SRC / "src" / "com" / "nickarmenta" / "perceptronic"
+DIST = ROOT / "urcap" / "dist" / "perceptronic-ps5-0.6.0.urcap"
 JAVAC = shutil.which("javac")
-HAS_SDK = all(any(urcap5.SDK_DIR.glob(p + "*.jar")) for p in urcap5.SDK_JARS)
+# the pure-Java classes the harness compiles (no UR API)
+PURE_JAVA = (
+    "Json.java",
+    "Cockpit.java",
+    "PickScript.java",
+    "PoseMath.java",
+    "Diagrams.java",
+    "Ui.java",
+    "Scene.java",
+    "Logo.java",
+    "FeedPoller.java",
+)
+SVG = ROOT / "urcap" / "perceptronic.svg"
+_PLAN = urcap5.compat_plan(urcap5.read_properties((SRC / "bundle.properties").read_text(encoding="utf-8")))
+HAS_SDK = all((urcap5.SDK_ROOT / v / urcap5.SDK_INFO).is_file() for v in (_PLAN["floor"], *_PLAN["since"]))
 
 
 # -- bundle.properties + manifest ----------------------------------------------------------
@@ -90,7 +105,7 @@ def test_embedded_pom_names_the_api_version_the_way_polyscope_reads_it():
     # artifactId api -> <version>. Parse it the same way.
     props = urcap5.read_properties((SRC / "bundle.properties").read_text(encoding="utf-8"))
     path, body = urcap5.pom_xml(props)
-    assert path == "META-INF/maven/com.olympuscontrols/realsensepilot/pom.xml"
+    assert path == "META-INF/maven/com.nickarmenta/perceptronic/pom.xml"
     ns = {"m": "http://maven.apache.org/POM/4.0.0"}
     deps = ET.fromstring(body).findall("m:dependencies/m:dependency", ns)
     versions = [
@@ -119,6 +134,11 @@ def test_the_downloadable_urcap_is_built_from_the_current_sources():
     imports = h["Import-Package"].split(",")
     assert not [p for p in imports if p.startswith("java.")]
     assert any(p.startswith("com.ur.urcap.api.domain.userinteraction.robot.movement;") for p in imports)
+    # the toolbar button (0.6.0): in the API since 1.7.0 (PolyScope 5.4), so a required import
+    assert any(p.startswith("com.ur.urcap.api.contribution.toolbar.swing;") for p in imports)
+    assert not any("toolbar" in p and "optional" in p for p in imports)
+    for cls in ("ToolbarService", "ToolbarContribution", "Logo", "FeedPoller"):
+        assert f"com/nickarmenta/perceptronic/{cls}.class" in bundle["names"], cls
     assert bundle["names"][:2] == ["META-INF/", "META-INF/MANIFEST.MF"]
     activator = props["Bundle-Activator"].replace(".", "/") + ".class"
     assert activator in bundle["names"]
@@ -150,16 +170,17 @@ def test_package_is_reproducible(tmp_path):
 
 def test_package_reports_a_missing_sdk_clearly(tmp_path):
     with pytest.raises(urcap5.Urcap5Error, match="urcap5.py sdk"):
-        urcap5.package(SRC, tmp_path, sdk_dir=tmp_path / "no-sdk")
+        urcap5.package(SRC, tmp_path, sdk_root=tmp_path / "no-sdk")
 
 
 # -- the Java client, under a JDK -----------------------------------------------------------
 
 HARNESS = r"""
-package com.olympuscontrols.realsensepilot;
+package com.nickarmenta.perceptronic;
 
 import java.util.*;
 
+@SuppressWarnings("unchecked")
 public class Harness {
     public static void main(String[] a) throws Exception {
         Object out;
@@ -182,16 +203,125 @@ public class Harness {
                 PickScript s = new PickScript();
                 if (o.containsKey("host")) s.host = (String) o.get("host");
                 if (o.containsKey("port")) s.port = ((Number) o.get("port")).intValue();
-                if (o.containsKey("q")) s.surveyJoints = Cockpit.six(o.get("q"));
-                if (o.containsKey("u")) s.tapU = ((Number) o.get("u")).intValue();
-                if (o.containsKey("v")) s.tapV = ((Number) o.get("v")).intValue();
-                if (o.containsKey("grip")) s.gripBelowTopMm = ((Number) o.get("grip")).doubleValue();
-                if (o.containsKey("lift")) s.liftMm = ((Number) o.get("lift")).doubleValue();
+                if (o.containsKey("node")) s.nodeId = (String) o.get("node");
+                if (o.containsKey("points")) {
+                    for (Object pt : (List<?>) o.get("points")) {
+                        Map<?, ?> m = (Map<?, ?>) pt;
+                        double[] plane = m.get("plane") == null ? null : Cockpit.six(m.get("plane"));
+                        List<?> area = (List<?>) m.get("area");
+                        s.points.add(new PickScript.Point(Cockpit.six(m.get("q")), plane,
+                                area == null ? 0 : ((Number) area.get(0)).doubleValue(),
+                                area == null ? 0 : ((Number) area.get(1)).doubleValue()));
+                    }
+                }
+                if (o.containsKey("values")) {
+                    for (Map.Entry<String, Object> e : ((Map<String, Object>) o.get("values")).entrySet()) {
+                        s.values.put(e.getKey(), ((Number) e.getValue()).doubleValue());
+                    }
+                }
+                if (o.containsKey("order")) {
+                    s.orderFirst = (String) ((List<?>) o.get("order")).get(0);
+                    s.orderRows = (String) ((List<?>) o.get("order")).get(1);
+                }
+                if (o.containsKey("gripper")) s.gripper = (String) o.get("gripper");
+                if (o.containsKey("reach")) {
+                    s.reachMinM = ((Number) ((List<?>) o.get("reach")).get(0)).doubleValue();
+                    s.reachMaxM = ((Number) ((List<?>) o.get("reach")).get(1)).doubleValue();
+                }
+                if (o.containsKey("popup")) s.popupOnFail = (Boolean) o.get("popup");
+                if (o.containsKey("polyscope")) {
+                    List<?> v = (List<?>) o.get("polyscope");
+                    s.polyscope = new int[v.size()];
+                    for (int i = 0; i < v.size(); i++) s.polyscope[i] = ((Number) v.get(i)).intValue();
+                }
                 if (o.containsKey("var")) s.foundVariable = (String) o.get("var");
                 Map<String, Object> m = new LinkedHashMap<String, Object>();
                 m.put("problem", s.problem());
                 m.put("script", s.problem() == null ? s.render((String) o.get("children")) : null);
+                List<Object> toks = new ArrayList<Object>();
+                for (int i = -1; i < s.points.size(); i++) toks.add(s.tokens(i));
+                m.put("tokens", toks);
                 out = m;
+                break;
+            }
+            case "set": {
+                PickScript s = new PickScript();
+                out = s.set(a[1], Double.parseDouble(a[2]));
+                break;
+            }
+            case "numbers": {
+                List<Object> r = new ArrayList<Object>();
+                for (PickScript.Num n : PickScript.NUMBERS) {
+                    Map<String, Object> m = new LinkedHashMap<String, Object>();
+                    m.put("key", n.key); m.put("def", n.def); m.put("min", n.min); m.put("max", n.max);
+                    m.put("section", n.section);
+                    r.add(m);
+                }
+                out = r;
+                break;
+            }
+            case "reasons": {
+                List<Object> r = new ArrayList<Object>();
+                for (String[] x : PickScript.REASONS) r.add(Integer.parseInt(x[0]));
+                out = r;
+                break;
+            }
+            case "grid": {
+                int[][] g = Diagrams.orderGrid(a[1], a[2], Integer.parseInt(a[3]), Integer.parseInt(a[4]));
+                List<Object> r = new ArrayList<Object>();
+                for (int[] row : g) {
+                    List<Object> rr = new ArrayList<Object>();
+                    for (int v : row) rr.add(v);
+                    r.add(rr);
+                }
+                out = r;
+                break;
+            }
+            case "plane": {
+                List<?> q = (List<?>) Json.parse(a[1]);
+                double[][] p = new double[3][];
+                for (int i = 0; i < 3; i++) {
+                    List<?> xyz = (List<?>) q.get(i);
+                    p[i] = new double[3];
+                    for (int k = 0; k < 3; k++) p[i][k] = ((Number) xyz.get(k)).doubleValue();
+                }
+                double[] r = PoseMath.plane(p[0], p[1], p[2]);
+                if (r == null) { out = null; break; }
+                List<Object> rr = new ArrayList<Object>();
+                for (double v : r) rr.add(v);
+                rr.add(PoseMath.tiltDeg(r));
+                out = rr;
+                break;
+            }
+            case "fingertip": {
+                double[] tcp = Cockpit.six(Json.parse(a[1]));
+                double[] off = Cockpit.six(Json.parse(a[2]));
+                double[] r = PoseMath.fingertip(tcp, off, Double.parseDouble(a[3]));
+                out = Arrays.asList(r[0], r[1], r[2]);
+                break;
+            }
+            case "trans": {
+                double[] r = PoseMath.trans(Cockpit.six(Json.parse(a[1])), Cockpit.six(Json.parse(a[2])));
+                List<Object> rr = new ArrayList<Object>();
+                for (double v : r) rr.add(v);
+                out = rr;
+                break;
+            }
+            case "scene": {
+                Scene sc = Scene.parse(Json.parseObject(a[1]));
+                Map<String, Object> m = new LinkedHashMap<String, Object>();
+                List<Object> orders = new ArrayList<Object>();
+                for (Scene.Part p : sc.parts) orders.add(p.order);
+                List<Object> whys = new ArrayList<Object>();
+                for (Scene.Part p : sc.rejected) whys.add(p.why);
+                m.put("orders", orders); m.put("whys", whys); m.put("surface", sc.surface);
+                m.put("width", sc.width); m.put("base", sc.baseFrame);
+                out = m;
+                break;
+            }
+            case "reach": {
+                double[] r = PickScript.modelReach(a[1]);
+                out = r == null ? null : Arrays.asList(r[0], r[1]);
                 break;
             }
             case "hostof": out = PickScript.hostOf(a[1]); break;
@@ -201,6 +331,78 @@ public class Harness {
                         : a[1].equals("timeout") ? new java.net.SocketTimeoutException("connect timed out")
                         : new java.net.MalformedURLException("no protocol");
                 out = Cockpit.explain(e, a[2]);
+                break;
+            }
+            case "svg": out = Logo.SVG; break;
+            case "logo": {
+                // the mark at the toolbar's size: badge pixels, white glyph pixels, clear corners
+                java.awt.image.BufferedImage img =
+                        Logo.image(Integer.parseInt(a[1]), java.awt.Color.WHITE, Ui.ACCENT);
+                int white = 0, badge = 0, clear = 0;
+                for (int y = 0; y < img.getHeight(); y++) {
+                    for (int x = 0; x < img.getWidth(); x++) {
+                        int p = img.getRGB(x, y);
+                        if ((p >>> 24) < 16) clear++;
+                        else if ((p & 0xffffff) == 0xffffff) white++;
+                        else badge++;
+                    }
+                }
+                Map<String, Object> m = new LinkedHashMap<String, Object>();
+                m.put("white", white); m.put("badge", badge); m.put("clear", clear);
+                m.put("corner_clear", (img.getRGB(0, 0) >>> 24) < 16);
+                m.put("size", img.getWidth());
+                // a plain glyph on nothing: only its ink is opaque
+                java.awt.image.BufferedImage glyph = Logo.image(64, java.awt.Color.BLACK, null);
+                int ink = 0;
+                for (int y = 0; y < 64; y++) {
+                    for (int x = 0; x < 64; x++) if ((glyph.getRGB(x, y) >>> 24) > 200) ink++;
+                }
+                m.put("glyph_ink", ink);
+                m.put("lens", (glyph.getRGB(36, 24) >>> 24) > 200);      // the dot in the bowl
+                m.put("bowl_hole", (glyph.getRGB(36, 16) >>> 24) < 16);   // between dot and bowl
+                m.put("stem", (glyph.getRGB(22, 46) >>> 24) > 200);
+                out = m;
+                break;
+            }
+            case "poll": {
+                // FeedPoller against a cockpit: until `want` frames or 6 s; every callback in order
+                final List<Object> events = new ArrayList<Object>();
+                final int want = Integer.parseInt(a[2]);
+                final Object lock = new Object();
+                FeedPoller p = new FeedPoller(new Cockpit(a[1]), new FeedPoller.Listener() {
+                    public void frame(java.awt.image.BufferedImage image, String fps) {
+                        synchronized (lock) {
+                            events.add("frame " + image.getWidth() + "x" + image.getHeight() + " fps=" + fps);
+                            lock.notifyAll();
+                        }
+                    }
+                    public void live(String base) { synchronized (lock) { events.add("live " + base); } }
+                    public void waiting(String why) {
+                        synchronized (lock) { events.add("waiting"); lock.notifyAll(); }
+                    }
+                    public void failed(String why) {
+                        synchronized (lock) { events.add("failed " + why.split("\\n")[0]); lock.notifyAll(); }
+                    }
+                });
+                p.start("poll-test");
+                long until = System.currentTimeMillis() + 6000;
+                synchronized (lock) {
+                    while (System.currentTimeMillis() < until) {
+                        int frames = 0;
+                        for (Object e : events) if (e.toString().startsWith("frame")) frames++;
+                        if (want > 0 && frames >= want) break;   // want 0: the first event of any kind
+                        if (want == 0 && !events.isEmpty()) break;
+                        lock.wait(200);
+                    }
+                }
+                boolean wasRunning = p.running();
+                p.stop();
+                Thread.sleep(300);
+                Map<String, Object> m = new LinkedHashMap<String, Object>();
+                synchronized (lock) { m.put("events", new ArrayList<Object>(events)); }
+                m.put("was_running", wasRunning);
+                m.put("stopped", !p.running());
+                out = m;
                 break;
             }
             case "color": {
@@ -235,10 +437,10 @@ def java_client(tmp_path_factory):
     if not JAVAC:
         pytest.skip("javac is not installed")
     root = tmp_path_factory.mktemp("java")
-    pkg = root / "src" / "com" / "olympuscontrols" / "realsensepilot"
+    pkg = root / "src" / "com" / "nickarmenta" / "perceptronic"
     pkg.mkdir(parents=True)
     (pkg / "Harness.java").write_text(HARNESS, encoding="utf-8")
-    for name in ("Json.java", "Cockpit.java", "PickScript.java"):
+    for name in PURE_JAVA:
         shutil.copy(JAVA / name, pkg / name)
     classes = root / "classes"
     subprocess.run(
@@ -260,7 +462,7 @@ def java_client(tmp_path_factory):
 
     def run(*args: str):
         proc = subprocess.run(
-            ["java", "-cp", str(classes), "com.olympuscontrols.realsensepilot.Harness", *args],
+            ["java", "-cp", str(classes), "com.nickarmenta.perceptronic.Harness", *args],
             capture_output=True,
             timeout=60,
         )
@@ -397,132 +599,6 @@ def test_segment_and_errors_round_trip_as_json(java_client, cockpit):
     assert "ok" in point
 
 
-# -- the RealSense Pick node's URScript (PickScript), under a JDK ---------------------------
-
-PICK = {"host": "192.168.3.10", "q": [-1.37, -0.49, 1.61, -2.69, -1.57, 0.61], "u": 412, "v": 233}
-
-
-def _pick(java_client, **kw):
-    return java_client("pick", json.dumps({**PICK, **kw}))
-
-
-def test_pick_script_is_ascii_balanced_and_calls_the_children_at_the_grip(java_client):
-    out = _pick(java_client, children="  CHILDREN_HERE()")
-    assert out["problem"] is None
-    text = out["script"]
-    assert text.isascii()  # the controller's parser, a USB stick's codepage: ASCII only
-    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
-    opens = sum(1 for line in lines if line.endswith(":") and line.split()[0] in ("if", "while"))
-    assert opens == sum(1 for line in lines if line == "end")
-    # the order the program runs in: survey, FIND, look, REFINE ladder, hover, grip, children, lift
-    order = [
-        "set_tcp(p[0, 0, 0, 0, 0, 0])",
-        "movej([-1.370000, -0.490000, 1.610000, -2.690000, -1.570000, 0.610000]",
-        'socket_open("192.168.3.10", 7622, "rs_pick")',
-        '"FIND "',
-        " u=412 v=233",
-        '"LOOK "',
-        "rs_leans = [0, 12, 24]",
-        '"REFINE "',
-        "movel(rs_hover",
-        "movel(rs_grip, a=0.3, v=0.05)",
-        "set_tcp(rs_tcp0)",
-        "CHILDREN_HERE()",
-        "movel(rs_lift",
-        "rs_pick_found = True",
-        'socket_close("rs_pick")',
-    ]
-    at = [text.index(s) for s in order]
-    assert at == sorted(at), order
-    # nothing moves before the controller's own IK has solved hover, grip and lift
-    ik = text.index("get_inverse_kin_has_solution(rs_hover")
-    assert ik < text.index("movel(rs_hover")
-    # the grip is the configured depth below the top, the lift the configured height above it
-    assert "pose_trans(rs_top, p[0, 0, 0.0150, 0, 0, 0])" in text
-    assert "pose_trans(rs_top, p[0, 0, -0.0600, 0, 0, 0])" in text
-    assert text.rstrip().endswith("set_tcp(rs_tcp0)")  # the operator's TCP back, whatever happened
-
-
-def test_pick_script_without_a_tap_asks_for_any_block(java_client):
-    assert " u=-1 v=-1" in _pick(java_client, u=-1, v=-1)["script"]
-
-
-@pytest.mark.parametrize(
-    ("kw", "problem"),
-    [
-        ({"host": ""}, "cockpit address"),
-        ({"host": 'x"); popup("pwned'}, "not an address"),  # a saved field can't inject URScript
-        ({"port": 0}, "port"),
-        ({"grip": 61}, "grip depth"),
-        ({"lift": 2}, "lift"),
-        ({"var": "1bad name"}, "variable"),
-    ],
-)
-def test_pick_script_refuses_what_it_cannot_generate_safely(java_client, kw, problem):
-    kw = {k: v for k, v in kw.items()}
-    if kw.get("q", 0) is None:
-        body = {k: v for k, v in PICK.items() if k != "q"}
-        out = java_client("pick", json.dumps(body))
-    else:
-        out = _pick(java_client, **kw)
-    assert out["script"] is None and problem in out["problem"]
-
-
-def test_without_a_survey_position_the_first_look_is_from_where_the_arm_is(java_client):
-    body = {k: v for k, v in PICK.items() if k != "q"}
-    out = java_client("pick", json.dumps({**body, "children": "  CHILD()"}))
-    assert out["problem"] is None
-    text = out["script"]
-    assert "first look from where the arm is" in text
-    # no motion at all before the first FIND: the arm stays where the operator left it
-    before = text[: text.index('"FIND "')]
-    assert "movej(" not in before and "movel(" not in before
-
-
-def test_every_stage_is_logged_to_the_server_and_the_log_tab(java_client):
-    text = _pick(java_client, children="  CHILD()")["script"]
-    for stage in (
-        "start",
-        "FIND status",
-        "LOOK",
-        "at the look pose",
-        "REFINE status",
-        "hover",
-        "down to the grip",
-        "gripper nodes",
-        "lift",
-        "picked",
-        "no pick - ",
-    ):
-        assert f'"LOG {stage}' in text, stage
-        assert f'textmsg("RealSense Pick: {stage}' in text, stage
-    # a reply's fields are read only after the read came back whole (rs_r[0] == 10): a timed-out
-    # read must end as "no answer", not as an index error that stops the operator's program
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if "rs_r[1]" in line:
-            guard = next(lines[j] for j in range(i - 1, -1, -1) if lines[j].strip().startswith("if "))
-            assert guard.strip() == "if rs_r[0] == 10:", (line, guard)
-    # LOG is only ever sent on the open socket, never before socket_open
-    assert text.index("socket_send_line(") > text.index("socket_open(")
-
-
-def test_a_failed_pick_says_why_in_a_popup_for_every_status_the_server_sends(java_client):
-    from perception.picknode import STATUS
-
-    text = _pick(java_client, children="  CHILD()")["script"]
-    handled = {int(m) for m in re.findall(r"rs_st == (-?\d+):", text)}
-    # 1 is a pick; -6 (no look pose) never reaches rs_st - the program looks from over the block
-    assert handled - {1} == (set(STATUS) - {1, -6}) | {-8}  # `if rs_st == 1:` is the success branch
-    assert 'popup(str_cat("RealSense Pick: no pick - ", rs_why)' in text
-    assert text.index("if rs_pick_found == False:") < text.index('popup(str_cat("RealSense Pick: no pick')
-
-
-def test_pick_host_comes_from_the_installation_nodes_url(java_client):
-    assert java_client("hostof", "http://192.168.3.10:7621") == "192.168.3.10"
-    assert java_client("hostof", "not a url at all") == ""
-
-
 # -- the urcap5-v<version> release ---------------------------------------------------------
 
 
@@ -579,3 +655,50 @@ def test_release_check_cli_prints_json_or_fails_with_the_reason(capsys):
     assert json.loads(capsys.readouterr().out)["version"] == version
     assert urcap5.main(["release-check", "urcap5-v9.9.9", "--src", str(SRC), "--dist", str(DIST.parent)]) == 1
     assert "Bundle-Version=" in capsys.readouterr().err
+
+
+# -- the mark and the feed poller (0.6.0) ---------------------------------------------------
+
+
+def test_the_logo_java_carries_the_svg_the_docs_and_polyscope_x_use(java_client):
+    """One glyph everywhere: ``urcap/perceptronic.svg`` (the README's mark), the PolyScope X
+    node's icon, and the Java constant next to the Java2D drawing of the same path."""
+    svg = SVG.read_text(encoding="utf-8")
+    assert java_client("svg") == svg
+    px_icon = (
+        ROOT / "urcap" / "perceptronic" / "perceptronic-frontend" / "assets" / "icons" / "perceptronic.svg"
+    )
+    assert px_icon.read_text(encoding="utf-8") == svg
+    assert 'd="M22 54V10h14a14 14 0 0 1 0 28H22"' in svg and 'cx="36" cy="24" r="5"' in svg
+
+
+@pytest.mark.parametrize("size", [24, 30, 64])
+def test_the_logo_renders_a_p_with_a_lens_on_a_badge(java_client, size):
+    got = java_client("logo", str(size))
+    assert got["size"] == size
+    # a rounded badge: transparent corners, mostly badge, a readable share of white glyph
+    assert got["corner_clear"] is True and got["clear"] > 0
+    assert got["badge"] > got["white"] > 0.08 * size * size
+    # the plain glyph: stem where the SVG's stem is, the lens dot filled, a hole between dot and bowl
+    assert got["stem"] and got["lens"] and got["bowl_hole"]
+    assert 0.15 * 64 * 64 < got["glyph_ink"] < 0.45 * 64 * 64
+
+
+def test_feed_poller_streams_frames_and_stops(java_client, cockpit):
+    """Against the real cockpit (a synthetic camera): frames arrive in sequence order with
+    the fps header, `live` is announced once on the first frame, and stop() ends the thread."""
+    got = java_client("poll", cockpit, "3")
+    frames = [e for e in got["events"] if e.startswith("frame ")]
+    assert len(frames) >= 3, got
+    assert re.fullmatch(r"frame \d+x\d+ fps=\d+(\.\d+)?", frames[0]), frames[0]  # its size + X-Fps
+    live = [e for e in got["events"] if e.startswith("live ")]
+    assert live == [f"live http://{cockpit}"], got["events"]  # once, as Cockpit.base spells it
+    assert got["events"].index(live[0]) == 1  # right after the first frame
+    assert got["was_running"] and got["stopped"]
+
+
+def test_feed_poller_explains_a_dead_cockpit_and_keeps_going(java_client):
+    got = java_client("poll", "http://127.0.0.1:9", "0")  # port 9: nothing listens
+    assert got["events"], got
+    assert got["events"][0].startswith("failed nothing answers at http://127.0.0.1:9"), got["events"]
+    assert got["was_running"] and got["stopped"]

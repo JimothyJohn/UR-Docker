@@ -10,9 +10,9 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from perception.config import PerceptionConfig
-from perception.frame import Frame
-from perception.pickcycle import (
+from perceptronics.config import PerceptionConfig
+from perceptronics.frame import Frame
+from perceptronics.pickcycle import (
     Block,
     Cockpit,
     PickCycle,
@@ -24,9 +24,9 @@ from perception.pickcycle import (
     top_face,
     white_blobs,
 )
-from perception.rgbd import DepthImage, Intrinsics, RgbdFrame
-from perception.robotlink import RobotLink
-from perception.webapp import ViewerApp, ViewerHandler
+from perceptronics.rgbd import DepthImage, Intrinsics, RgbdFrame
+from perceptronics.robotlink import RobotLink
+from perceptronics.webapp import ViewerApp, ViewerHandler
 from urctl.config import RobotConfig
 from urctl.pose import Transform
 
@@ -200,7 +200,7 @@ def test_cli_parser_carries_every_option_the_runner_reads():
     import inspect
     import re
 
-    from perception.pickcycle import add_pick_cycle_args, run_pick_cycle
+    from perceptronics.pickcycle import add_pick_cycle_args, run_pick_cycle
 
     ap = argparse.ArgumentParser()
     add_pick_cycle_args(ap)

@@ -14,11 +14,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 cell="${UR_CELL:-ur3}"
-cors="${PERCEPTION_CORS:-http://localhost:8001,http://127.0.0.1:8001}"
-robot="$(sed -n 's/^UR_HOST=//p' "perception/cells/$cell.env" | head -1)"
+cors="${PERCEPTRONICS_CORS:-http://localhost:8001,http://127.0.0.1:8001}"
+robot="$(sed -n 's/^UR_HOST=//p' "perceptronics/cells/$cell.env" | head -1)"
 iface="$(route -n get "${robot:-192.168.3.3}" 2>/dev/null | awk '/interface:/{print $2}')"
 ip="$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || true)"
 
 echo "cell $cell · robot ${robot:-?} · this Mac ${ip:-?} (${iface:-?})"
-echo "In the pendant's RealSense Pilot node, set Cockpit to:  http://${ip:-<this-mac-ip>}:7621"
-exec sudo .venv/bin/perception --cell "$cell" gui --rs-lean --bind 0.0.0.0 --cors "$cors"
+echo "In the pendant's Perceptronic node, set Cockpit to:  http://${ip:-<this-mac-ip>}:7621"
+exec sudo .venv/bin/perceptronics --cell "$cell" gui --rs-lean --bind 0.0.0.0 --cors "$cors"

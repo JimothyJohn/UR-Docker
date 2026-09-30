@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from perception.realsense import (
+from perceptronics.realsense import (
     FORMAT_RGB8,
     FORMAT_Z16,
     LASER_MAX,
@@ -37,7 +37,7 @@ from perception.realsense import (
     open_camera,
     platform_hint,
 )
-from perception.rgbd import Intrinsics
+from perceptronics.rgbd import Intrinsics
 
 COLOR_K = Intrinsics(64, 48, 60.0, 60.0, 32.0, 24.0, model="inverse_brown_conrady")
 
@@ -51,7 +51,7 @@ DEPTH_K = Intrinsics(64, 48, 58.0, 58.0, 31.0, 23.5, model="brown_conrady")
 
 
 class FakeApi:
-    """Mimics :class:`perception.realsense.Api`'s pythonic surface with plain
+    """Mimics :class:`perceptronics.realsense.Api`'s pythonic surface with plain
     Python objects and counts every handle it hands out / takes back."""
 
     def __init__(
@@ -358,7 +358,7 @@ def test_synthetic_camera_and_factory():
 def test_library_lookup_failure_is_explained(monkeypatch, tmp_path):
     monkeypatch.setenv("REALSENSE_LIB", str(tmp_path / "missing.so"))
     monkeypatch.setattr("ctypes.util.find_library", lambda name: None)
-    monkeypatch.setattr("perception.realsense._LIBRARY_CANDIDATES", (str(tmp_path / "nope.so"),))
+    monkeypatch.setattr("perceptronics.realsense._LIBRARY_CANDIDATES", (str(tmp_path / "nope.so"),))
     with pytest.raises(RealSenseLibraryNotFound) as ei:
         find_library_path()
     msg = str(ei.value)
@@ -381,7 +381,7 @@ def test_platform_hint():
 def test_platform_hint_macos_already_root(monkeypatch):
     """Under sudo the claim failure is a held interface, not a permission problem —
     the hint must not send the operator back to `sudo`."""
-    import perception.realsense as rs
+    import perceptronics.realsense as rs
 
     monkeypatch.setattr(rs.sys, "platform", "darwin")
     monkeypatch.setattr(rs, "_is_root", lambda: True)

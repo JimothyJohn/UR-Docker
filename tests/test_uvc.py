@@ -1,12 +1,12 @@
-"""perception.uvc: finding the camera terminal in a raw configuration descriptor,
-the PERCEPTION_VIEW_FOCUS grammar, and set_focus's never-raise contract."""
+"""perceptronics.uvc: finding the camera terminal in a raw configuration descriptor,
+the PERCEPTRONICS_VIEW_FOCUS grammar, and set_focus's never-raise contract."""
 
 from __future__ import annotations
 
 import pytest
 
-from perception import uvc
-from perception.pickcycle import PickCycle
+from perceptronics import uvc
+from perceptronics.pickcycle import PickCycle
 
 
 def _iface(number: int, cls: int, sub: int) -> bytes:

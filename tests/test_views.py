@@ -1,4 +1,4 @@
-"""Extra viewpoints (perception.views): the MJPEG splitter, device resolution,
+"""Extra viewpoints (perceptronics.views): the MJPEG splitter, device resolution,
 the synthetic stand-in, and the cockpit's /api/view/<i> route + snapshot files."""
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from perception.config import PerceptionConfig
-from perception.realsense import SyntheticRgbdCamera
-from perception.views import (
+from perceptronics.config import PerceptionConfig
+from perceptronics.realsense import SyntheticRgbdCamera
+from perceptronics.views import (
     FfmpegView,
     SyntheticView,
     ViewError,
@@ -27,7 +27,7 @@ from perception.views import (
     resolve_avfoundation,
     split_jpeg,
 )
-from perception.webapp import ViewerApp, ViewerHandler
+from perceptronics.webapp import ViewerApp, ViewerHandler
 
 JPEG_A = b"\xff\xd8\xff\xe0" + b"\x00" * 10 + b"\xff\x00\xd9" + b"\xff\xd9"  # a stuffed FF inside
 JPEG_B = b"\xff\xd8\xff\xdb" + b"\x11" * 5 + b"\xff\xd9"
@@ -80,10 +80,10 @@ def test_input_args_per_platform(monkeypatch):
         "-i",
         "testsrc=size=320x240:rate=10",
     ]
-    monkeypatch.setattr("perception.views.sys.platform", "darwin")
+    monkeypatch.setattr("perceptronics.views.sys.platform", "darwin")
     devs = parse_avfoundation_devices(LISTING)
     assert ffmpeg_input_args("Logi", width=640, height=480, fps=15, devices=devs)[-1] == "1"
-    monkeypatch.setattr("perception.views.sys.platform", "linux")
+    monkeypatch.setattr("perceptronics.views.sys.platform", "linux")
     assert ffmpeg_input_args("/dev/video2", width=640, height=480, fps=15) == [
         "-f",
         "v4l2",
@@ -94,7 +94,7 @@ def test_input_args_per_platform(monkeypatch):
         "-i",
         "/dev/video2",
     ]
-    monkeypatch.setattr("perception.views.sys.platform", "win32")
+    monkeypatch.setattr("perceptronics.views.sys.platform", "win32")
     assert (
         ffmpeg_input_args("HD Pro Webcam C920", width=640, height=480, fps=15)[-1]
         == "video=HD Pro Webcam C920"
@@ -216,10 +216,10 @@ def test_no_views_means_no_view_route_and_empty_list(tmp_path):
 
 
 def test_stall_hint_names_tcc_on_macos(monkeypatch):
-    from perception.views import platform_hint
+    from perceptronics.views import platform_hint
 
-    monkeypatch.setattr("perception.views.sys.platform", "darwin")
+    monkeypatch.setattr("perceptronics.views.sys.platform", "darwin")
     hint = platform_hint(ViewError("stalled from 'HD Pro Webcam C920': nv12; 0rgb; bgr0"))
     assert "TCC" in hint and "SSH" in hint and "Screen Sharing" in hint
-    monkeypatch.setattr("perception.views.sys.platform", "linux")
+    monkeypatch.setattr("perceptronics.views.sys.platform", "linux")
     assert platform_hint(ViewError("stalled from '/dev/video0'")) == ""

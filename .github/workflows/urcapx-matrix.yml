@@ -1,0 +1,87 @@
+# The PolyScope X URCap on the newest PolyScope X releases from the floor the URCap is built
+# for (urcap/psx_matrix.py RELEASES / FLOOR — the job list comes from `psx_matrix.py list`,
+# never from this file): per
+# release, `urcap/e2e.py` boots that simulator image, installs a fresh build over the
+# urservice endpoint and, in headless Chromium, loads the application node (feed, hover,
+# click → segment, PolyScope's kinematics services) and the Pick program node (toolbox →
+# tree row → its dialog → a picture point from PolyScope's joints → the row's verdict).
+# urcap-e2e.yml runs the same against the one pinned target on every change; this one
+# says which releases the URCap works on. Not a required check.
+#
+# Weekly, `psx_matrix.py check-tags` fails when UR has published a release newer than the
+# list's newest ("PolyScope X 10.15.0 exists on Docker Hub: add it").
+
+name: URCapX matrix
+
+on:
+  pull_request:
+    paths:
+      - "urcap/perceptronic/**"
+      - "urcap/e2e.py"
+      - "urcap/urcapx.py"
+      - "urcap/psx_matrix.py"
+      - ".github/workflows/urcapx-matrix.yml"
+  schedule:
+    - cron: "47 6 * * 1" # Mondays 06:47 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: urcapx-matrix-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tags:
+    # Docker Hub vs the list. Not on pull requests: a UR release must not block a PR.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the list has the newest PolyScope X releases on Docker Hub
+        run: python3 urcap/psx_matrix.py check-tags
+
+  releases:
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: list
+        run: echo "list=$(python3 urcap/psx_matrix.py list)" >> "$GITHUB_OUTPUT"
+
+  matrix:
+    name: PolyScope X ${{ matrix.release }}
+    needs: releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.releases.outputs.list) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - name: Install (locked) + the headless browser
+        run: |
+          uv sync --locked
+          uv run --with playwright==1.63.0 playwright install --with-deps chromium
+      - name: The URCap in PolyScope X ${{ matrix.release }}
+        env:
+          RELEASE: ${{ matrix.release }}
+        run: uv run --with playwright==1.63.0 python urcap/psx_matrix.py run --version "$RELEASE" --artifacts psx-artifacts
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: urcapx-matrix-${{ matrix.release }}
+          path: psx-artifacts/
+          if-no-files-found: ignore

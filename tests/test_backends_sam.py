@@ -13,9 +13,9 @@ import pytest
 pytest.importorskip("torch")
 pytest.importorskip("transformers")
 
-from perception.backends.sam import FAST_MODEL_ID, SamSegmenter  # noqa: E402
-from perception.frame import Frame  # noqa: E402
-from perception.rgbd import DepthImage, RgbdFrame, synthetic_intrinsics  # noqa: E402
+from perceptronics.backends.sam import FAST_MODEL_ID, SamSegmenter  # noqa: E402
+from perceptronics.frame import Frame  # noqa: E402
+from perceptronics.rgbd import DepthImage, RgbdFrame, synthetic_intrinsics  # noqa: E402
 
 pytestmark = pytest.mark.sam
 

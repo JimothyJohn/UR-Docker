@@ -2,7 +2,9 @@
 # urcap/dist (tests/test_urcap.py, tests/test_urcap5.py). A Windows checkout with
 # core.autocrlf rewrites them to CRLF and every build then reads as "stale" (CI,
 # windows-latest, 2026-09-27) — keep them LF on every OS. LICENSE is packaged too.
-urcap/realsense-pilot/** text eol=lf
-urcap/realsense-pilot-ps5/** text eol=lf
+urcap/perceptronic/** text eol=lf
+urcap/perceptronic-ps5/** text eol=lf
 LICENSE text eol=lf
 urcap/dist/** binary
+# screenshots of the node, not sources: never line-ending converted
+urcap/perceptronic-ps5/screens/** binary

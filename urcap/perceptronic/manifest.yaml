@@ -1,0 +1,10 @@
+metadata:
+  vendorID: "nickarmenta"
+  urcapID: "perceptronic"
+  vendorName: "Nick Armenta"
+  urcapName: "Perceptronic"
+  version: 0.3.0
+artifacts:
+  webArchives:
+  - id: "perceptronic-frontend"
+    folder: "perceptronic-frontend"

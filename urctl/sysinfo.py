@@ -132,7 +132,7 @@ class SshRunner:
 class DockerRunner:
     """Run commands inside this repo's URSim container via ``docker exec``."""
 
-    container: str = "ur-docker-ursim-1"
+    container: str = "perceptronics-ursim-1"
     timeout: float = 15.0
     paths: dict = field(default_factory=lambda: dict(_URSIM_PATHS))
 

@@ -2,12 +2,12 @@
 
 Working scripts from the first hardware pick (see `docs/realsense.md` §Hand-eye
 without a mark and §Picking with the Hand-E). They drive a **running cockpit**
-(`perception --cell ur3 gui --rs-lean`, port 7621) over its HTTP API and the
+(`perceptronics --cell ur3 gui --rs-lean`, port 7621) over its HTTP API and the
 gripper through `urctl gripper`; nothing here talks to the robot directly.
 Scratch quality, kept because they worked. `orbit_cal6.py` is folded into
-`perception calibrate` (`perception/orbitcal.py`, 2026-09-26); the scripts stay
+`perceptronics calibrate` (`perceptronics/orbitcal.py`, 2026-09-26); the scripts stay
 until that command has run once on the UR3e, then they go. `pick.py`/`place.py`
-are superseded by `perception pick-cycle`.
+are superseded by `perceptronics pick-cycle`.
 
 | script | what |
 | --- | --- |

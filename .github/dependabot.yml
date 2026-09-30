@@ -4,11 +4,15 @@
 #   - docker-compose: the URSim / PolyScope X simulator images
 # Minor + patch bumps are grouped into one weekly PR per ecosystem so the
 # noise stays low; majors arrive individually. Auto-merge for the safe subset
-# is handled by .github/workflows/dependabot-auto-merge.yml.
+# is handled by .github/workflows/dependabot-auto-merge.yml. Every PR targets
+# the `dev` integration branch; dev -> main is Nick's manual merge.
+# NOTE: Dependabot reads this file from the DEFAULT branch (main) only — the
+# target-branch lines do nothing until this reaches main.
 version: 2
 updates:
   - package-ecosystem: "uv"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -19,6 +23,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -29,6 +34,7 @@ updates:
 
   - package-ecosystem: "docker-compose"
     directory: "/"
+    target-branch: "dev"
     schedule:
       # Simulator image bumps change controller behavior (new PolyScope /
       # URControl versions) — monthly, and never auto-merged: they need a

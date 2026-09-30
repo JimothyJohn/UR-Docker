@@ -8,8 +8,8 @@ import threading
 
 import pytest
 
-from perception.doctor import Report, check_stream, run_doctor, sdk_version_text
-from perception.realsense import SyntheticRgbdCamera
+from perceptronics.doctor import Report, check_stream, run_doctor, sdk_version_text
+from perceptronics.realsense import SyntheticRgbdCamera
 from tests.test_urctl import FakeController
 from urctl.config import RobotConfig
 from urctl.robot import Robot
@@ -96,7 +96,7 @@ def test_synthetic_stream_passes():
 class BlackCamera(SyntheticRgbdCamera):
     def read(self):
         f = super().read()
-        from perception.frame import Frame
+        from perceptronics.frame import Frame
 
         return type(f)(
             color=Frame(f.color.width, f.color.height, bytes(len(f.color.data)), f.color.channels),
@@ -114,7 +114,7 @@ def test_black_colour_is_the_resolution_mismatch_symptom():
 
 class FailingCamera(SyntheticRgbdCamera):
     def open(self):
-        from perception.realsense import RealSenseError
+        from perceptronics.realsense import RealSenseError
 
         raise RealSenseError("failed to set power state")
 
@@ -157,11 +157,11 @@ def test_protective_stop_and_local_mode_gate_motion_only(listener, monkeypatch):
 
 def test_bracket_model_mismatch_is_flagged(listener, monkeypatch):
     cfg, robot = _fake_robot(listener, monkeypatch)
-    env = {"UR_ROBOT_MODEL": "UR20", "PERCEPTION_BRACKET": "eseries"}
+    env = {"UR_ROBOT_MODEL": "UR20", "PERCEPTRONICS_BRACKET": "eseries"}
     c = _by_name(
         run_doctor(robot_config=cfg, camera=False, robot_factory=lambda _c: robot, env=env).as_dict()
     )
-    assert c["handeye.bracket"]["ok"] is False and "PERCEPTION_BRACKET=ur20" in c["handeye.bracket"]["fix"]
+    assert c["handeye.bracket"]["ok"] is False and "PERCEPTRONICS_BRACKET=ur20" in c["handeye.bracket"]["fix"]
 
 
 def test_render_lists_fixes_under_failures():
@@ -195,13 +195,15 @@ def test_model_check_reports_the_reach_cap_and_catches_a_mismatch(listener, monk
 
 
 def test_approach_check_names_the_tool_offset_every_move_runs_with():
-    from perception.doctor import approach_check
+    from perceptronics.doctor import approach_check
 
     ok = approach_check([0, 0, 0.163, 0, 0, 0], {})  # default: fingertips, Hand-E length
     assert ok.ok is True and "163 mm" in ok.detail and ok.data["matches_active_tcp"] is True
-    ur3e = approach_check([0.000256, -0.0352, 0.2204, 0.2572, -0.4104, 1.4319], {"PERCEPTION_TIP_M": "0.163"})
+    ur3e = approach_check(
+        [0.000256, -0.0352, 0.2204, 0.2572, -0.4104, 1.4319], {"PERCEPTRONICS_TIP_M": "0.163"}
+    )
     assert ur3e.ok is True and "differs and is overridden" in ur3e.detail
-    flange = approach_check([0] * 6, {"PERCEPTION_APPROACH_REFERENCE": "flange"})
+    flange = approach_check([0] * 6, {"PERCEPTRONICS_APPROACH_REFERENCE": "flange"})
     assert flange.ok is None and flange.severity == "warn" and "fingertip" in flange.fix
-    bad = approach_check([0] * 6, {"PERCEPTION_TIP_M": "-1"})
+    bad = approach_check([0] * 6, {"PERCEPTRONICS_TIP_M": "-1"})
     assert bad.ok is False and bad.severity == "critical"

@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 import zlib
 
-from perception.pngio import load_png
+from perceptronics.pngio import load_png
 from urctl.pose import Transform, matrix_to_rotvec, rotvec_to_matrix
 
 BASE = "http://127.0.0.1:7621"

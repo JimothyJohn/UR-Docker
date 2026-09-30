@@ -1,6 +1,4 @@
-![ur](docs/ur-hero.png)
-
-# UR-utils
+# perceptronics
 
 Drive a Universal Robots arm from your laptop. This repo gives you a PolyScope
 simulator in Docker and `urctl`, a zero-dependency Python CLI, library and MCP
@@ -39,8 +37,8 @@ A RealSense D435 on the tool flange turns a click on the camera image into a
 robot move:
 
 ```bash
-uv run perception --fake gui     # the cockpit on a synthetic scene, no camera
-uv run perception --cell ur3 gui # a real cell
+uv run perceptronics --fake gui     # the cockpit on a synthetic scene, no camera
+uv run perceptronics --cell ur3 gui # a real cell
 ```
 
 ## More

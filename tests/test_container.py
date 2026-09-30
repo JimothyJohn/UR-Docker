@@ -1,5 +1,5 @@
-"""The perception container's contract, checked without Docker: the image's CMD
-must parse under the real ``perception-gui`` CLI (a stale flag crashes the
+"""The perceptronics container's contract, checked without Docker: the image's CMD
+must parse under the real ``perceptronics-gui`` CLI (a stale flag crashes the
 container on start — ``--out`` outlived the capture store that owned it), and
 the captures volume must sit where the cockpit's relative ``captures/`` paths
 resolve, i.e. under WORKDIR — or snapshots and the hand-eye file die with the
@@ -13,10 +13,10 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from perception import handeye, webapp
+from perceptronics import handeye, webapp
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCKERFILE = ROOT / "Dockerfile.perception"
+DOCKERFILE = ROOT / "Dockerfile.perceptronics"
 COMPOSE = ROOT / "docker-compose.yml"
 
 
@@ -34,7 +34,7 @@ def _instruction(name: str) -> str:
 
 def test_cmd_parses_under_the_real_cli(monkeypatch):
     cmd = json.loads(_instruction("CMD"))
-    assert cmd[0] == "perception-gui"
+    assert cmd[0] == "perceptronics-gui"
     monkeypatch.delenv("UR_CELL", raising=False)
     served = {}
     monkeypatch.setattr(webapp, "camera_from_args", lambda args, config: None)

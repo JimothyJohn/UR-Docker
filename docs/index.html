@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UR-utils · a Universal Robots sandbox</title>
+<title>perceptronics · vision-guided UR control</title>
 <meta name="description" content="Drive a Universal Robots arm from your laptop: a PolyScope simulator in Docker and urctl, a zero-dependency Python CLI, library and MCP server that drives the sim and a real robot the same way.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23020403'/><circle cx='16' cy='16' r='9' fill='none' stroke='%237CF7A2' stroke-width='2'/><circle cx='16' cy='16' r='2' fill='%237CF7A2'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
 <!--
-  The landing page in the cockpit's clothes (perception/webui/index.html). The
+  The landing page in the cockpit's clothes (perceptronics/webui/index.html). The
   scan in the hero is a synthetic scene on a 2-D canvas — a table, four blocks,
   the arm visiting each — so the page needs no camera, WebGL or dependencies.
 -->
@@ -104,7 +104,7 @@
 
   <section class="hero">
     <div class="hero-l">
-      <h1>UR-UTILS<span class="cur" aria-hidden="true"></span></h1>
+      <h1>PERCEPTRONICS<span class="cur" aria-hidden="true"></span></h1>
       <p class="lead">Drive a Universal Robots arm from your laptop. A PolyScope simulator in
         Docker, and <code>urctl</code> — one Python tool that drives the simulator and a real
         robot the same way.</p>
@@ -147,7 +147,7 @@
     <div class="tag"><b>03</b><span>CAMERA</span><span class="r">OPTIONAL</span></div>
     <h2>Click to pick</h2>
     <p>A RealSense D435 on the tool flange turns a click on the camera image into a robot move.</p>
-    <div class="term"><pre><span class="p">&gt; </span>uv run perception --fake gui    <span class="c"># no camera needed</span></pre></div>
+    <div class="term"><pre><span class="p">&gt; </span>uv run perceptronics --fake gui    <span class="c"># no camera needed</span></pre></div>
   </section>
 
   <section class="panel corners" id="more">
@@ -160,7 +160,7 @@
     </ul>
   </section>
 
-  <footer>UR-utils · by Nick Armenta · not affiliated with Universal Robots</footer>
+  <footer>perceptronics · by Nick Armenta · not affiliated with Universal Robots</footer>
 </div>
 
 <script>

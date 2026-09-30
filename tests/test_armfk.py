@@ -1,4 +1,4 @@
-"""perception.armfk: the linkage from the joints, checked against the controller."""
+"""perceptronics.armfk: the linkage from the joints, checked against the controller."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from perception import armfk
+from perceptronics import armfk
 from urctl.pose import Transform
 
 # UR3e, 2026-09-27 21:5x at the picture pose: RTDE actual_q and the flange from
@@ -61,10 +61,10 @@ def test_model_key(given, key):
 def test_frames_carry_the_arm_only_when_it_checks_out(monkeypatch):
     import time
 
-    from perception.config import PerceptionConfig
-    from perception.posestream import PoseStream
-    from perception.realsense import SyntheticRgbdCamera
-    from perception.webapp import ViewerApp
+    from perceptronics.config import PerceptionConfig
+    from perceptronics.posestream import PoseStream
+    from perceptronics.realsense import SyntheticRgbdCamera
+    from perceptronics.webapp import ViewerApp
     from urctl.config import RobotConfig
 
     ps = PoseStream(RobotConfig(host="x"), history_s=60.0)

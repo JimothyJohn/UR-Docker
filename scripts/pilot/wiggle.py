@@ -10,7 +10,7 @@ import json
 import sys
 import urllib.request
 
-from perception.pngio import load_png
+from perceptronics.pngio import load_png
 from urctl.pose import Transform
 
 BASE = "http://127.0.0.1:7621"

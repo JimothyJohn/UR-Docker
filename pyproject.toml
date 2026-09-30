@@ -1,19 +1,18 @@
 [project]
-name = "ur-docker"
+name = "perceptronics"
 version = "0.1.0"
-description = "Host-side control + perception tooling for Universal Robots e-Series (URSim sandbox)"
+description = "perceptronics — vision-guided, agent-driven control for Universal Robots arms (URSim sandbox, RGB-D cockpit, MCP tools)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-# The core control library (urctl) and the perception core are pure stdlib —
+# The core control library (urctl) and the perceptronics core are pure stdlib —
 # heavy/optional deps (numpy, OpenCV, torch, the MCP SDK) are imported lazily
 # and live under the optional-dependency extras below.
 dependencies = []
 
 [project.optional-dependencies]
-# The `urctl-mcp` MCP server is pure stdlib since the JSON-RPC rewrite; the
 # Classic-CV perception backend (blob detection) + numpy/OpenCV Frame interop.
-perception = ["numpy>=1.24", "opencv-python>=4.8", "pillow>=10.0"]
+vision = ["numpy>=1.24", "opencv-python>=4.8", "pillow>=10.0"]
 # Learned monocular depth (Depth Anything V2) backend.
 depth = ["torch>=2.0", "transformers>=4.40", "numpy>=1.24", "pillow>=10.0"]
 # Segment Anything click-to-segment backend for the RealSense cockpit.
@@ -22,9 +21,9 @@ sam = ["torch>=2.0", "transformers>=4.40", "numpy>=1.24", "pillow>=10.0"]
 [project.scripts]
 urctl = "urctl.cli:main"
 urctl-mcp = "urctl.mcp_server:main"
-perception = "perception.cli:main"
-perception-gui = "perception.webapp:main"
-perception-mcp = "perception.mcp_server:main"
+perceptronics = "perceptronics.cli:main"
+perceptronics-gui = "perceptronics.webapp:main"
+perceptronics-mcp = "perceptronics.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -35,13 +34,13 @@ build-backend = "hatchling.build"
 # package); urctl.urp bootstraps it onto sys.path from a source checkout, and
 # the wheel ships a build-time copy as urctl/_urp_convert.py so installs work
 # without the checkout (the CI package job smoke-tests exactly that).
-packages = ["urctl", "perception"]
+packages = ["urctl", "perceptronics"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "scripts/urp_convert.py" = "urctl/_urp_convert.py"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["hypothesis>=6.100", "pytest>=8", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -8,8 +8,8 @@ import random
 
 import pytest
 
-from perception.calibrate import CalibrationError, CalibrationSession, load_calibration_pose
-from perception.handeye import BRACKET_NOMINAL_ESERIES, HandEye
+from perceptronics.calibrate import CalibrationError, CalibrationSession, load_calibration_pose
+from perceptronics.handeye import BRACKET_NOMINAL_ESERIES, HandEye
 from urctl.pose import Transform, rotvec_to_matrix
 
 
@@ -57,7 +57,7 @@ def test_recovers_transform_with_touched_mark():
     for axis in ((1, 0, 0), (0, 1, 0), (0, 0, 1)):
         assert all(abs(a - b) < 1e-6 for a, b in zip(got.rotate(axis), true_fc.rotate(axis), strict=True))
     assert res["rms_m"] < 1e-7 and res["views"] == 5 and not res["warnings"]
-    assert res["env_line"].startswith('PERCEPTION_T_FLANGE_CAMERA="[')
+    assert res["env_line"].startswith('PERCEPTRONICS_T_FLANGE_CAMERA="[')
     assert 4 < max(abs(v) for v in res["delta_from_seed_mm"]) < 20  # it moved off the seed, sensibly
     assert s.handeye().calibrated and s.handeye().source.startswith("calibrated")
 

@@ -10,7 +10,7 @@
 param(
     [string]$Cell = "sim",
     # librealsense release whose Windows installer we fetch (GitHub Releases asset name pattern:
-    # RealSense.SDK-WIN10-<ver>.<build>.exe). Keep in step with Dockerfile.perception's LIBREALSENSE_REF.
+    # RealSense.SDK-WIN10-<ver>.<build>.exe). Keep in step with Dockerfile.perceptronics's LIBREALSENSE_REF.
     [string]$SdkVersion = "2.58.4",
     [switch]$SkipSdk,
     [switch]$Stream
@@ -67,7 +67,7 @@ uv sync
 
 # ---- 4. pre-flight -------------------------------------------------------------
 Step "doctor ($Cell)"
-$args = @("run", "perception", "--cell", $Cell, "doctor")
+$args = @("run", "perceptronics", "--cell", $Cell, "doctor")
 if ($Stream) { $args += "--stream" }
 & uv @args
 Write-Host "`nnext: scripts\cockpit.ps1 -Cell $Cell    (the pilot's seat, opens the browser)" -ForegroundColor Green

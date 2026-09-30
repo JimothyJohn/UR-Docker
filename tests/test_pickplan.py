@@ -1,4 +1,4 @@
-"""perception.pickplan: the approach Nick specified (2026-09-27) — straight down the
+"""perceptronics.pickplan: the approach Nick specified (2026-09-27) — straight down the
 base Z axis, fingers across the short side at 1.2x its width, fingertips 25 mm over
 the top — and a blended program the controller will accept."""
 
@@ -8,7 +8,7 @@ import math
 
 import pytest
 
-from perception import pickplan
+from perceptronics import pickplan
 from urctl.pose import Transform
 
 HOME = [-0.23587, 0.18254, 0.22134, -2.51512, 0.17760, 0.09959]  # the ur3 cell's picture pose
@@ -120,14 +120,14 @@ def test_the_cockpit_plans_and_dry_runs_a_pick(monkeypatch):
     import urllib.request
     from http.server import ThreadingHTTPServer
 
-    from perception.config import PerceptionConfig
-    from perception.posestream import PoseStream
-    from perception.realsense import SyntheticRgbdCamera
-    from perception.robotlink import RobotLink
-    from perception.webapp import ViewerApp, ViewerHandler
+    from perceptronics.config import PerceptionConfig
+    from perceptronics.posestream import PoseStream
+    from perceptronics.realsense import SyntheticRgbdCamera
+    from perceptronics.robotlink import RobotLink
+    from perceptronics.webapp import ViewerApp, ViewerHandler
     from urctl.config import RobotConfig
 
-    monkeypatch.setenv("PERCEPTION_HOME_POSE", ",".join(map(str, HOME)))
+    monkeypatch.setenv("PERCEPTRONICS_HOME_POSE", ",".join(map(str, HOME)))
     cfg = RobotConfig(host="127.0.0.1")
     ps = PoseStream(cfg, history_s=60.0)
     down = [-0.2, 0.36, 0.3, math.pi, 0.0, 0.0]  # looking straight down from 0.3 m over base
@@ -272,7 +272,7 @@ def test_white_level_keeps_a_shadowed_block_and_drops_the_carpet():
     """The close look on the UR3e (2026-09-27): the block read (169, 180, 178) under the
     camera's and gripper's shadow — grey to the fixed 180 — while the slats read 238 and the
     carpet at most 64. The level is relative to the picture's brightest neutrals."""
-    from perception.pickcycle import WHITE_MIN, white_blobs, white_level
+    from perceptronics.pickcycle import WHITE_MIN, white_blobs, white_level
 
     w, h = 160, 120
     px = bytearray()

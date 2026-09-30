@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end driver for the UR-Docker URSim.
+"""End-to-end driver for the perceptronics URSim.
 
 Walks a real cobot's operating envelope from "controller booted" to
 "program ran successfully", using the documented backend ports:
@@ -101,14 +101,6 @@ def wait_until(
 # Strings of >=4 printable ASCII chars, used to harvest textmsg output from
 # the Primary client's binary state broadcast.
 _ASCII_RUN = re.compile(rb"[\x20-\x7e]{4,}")
-
-
-def primary_send(host: str, urscript: str) -> None:
-    """Stream a URScript snippet to the Primary Client. The controller parses
-    and executes immediately; this socket does NOT wait for a response —
-    Primary is a broadcast channel."""
-    with socket.create_connection((host, PRIMARY_PORT), timeout=5.0) as s:
-        s.sendall(urscript.encode("utf-8"))
 
 
 def primary_send_and_capture(
@@ -371,7 +363,7 @@ def phase6_play_or_primary_fallback(host: str) -> PhaseResult:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default=DEFAULT_HOST)
-    ap.add_argument("--container", default="ur-docker-ursim-1")
+    ap.add_argument("--container", default="perceptronics-ursim-1")
     ap.add_argument(
         "--docker",
         # Honour the DOCKER env var (matches tests/_ursim.py and the CI job) so a

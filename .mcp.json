@@ -2,7 +2,7 @@
   "mcpServers": {
     "cell": {
       "command": "uv",
-      "args": ["run", "perception-mcp"],
+      "args": ["run", "perceptronics-mcp"],
       "env": {}
     }
   }

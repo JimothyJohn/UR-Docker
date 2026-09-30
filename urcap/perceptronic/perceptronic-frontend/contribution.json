@@ -1,0 +1,31 @@
+{
+  "applicationNodes": [
+    {
+      "translationPath": "assets/i18n/",
+      "behaviorURI": "perceptronic-node.worker.js",
+      "presenterURI": "main.js",
+      "componentTagName": "nickarmenta-perceptronic"
+    }
+  ],
+  "programNodes": [
+    {
+      "translationPath": "assets/i18n/",
+      "iconURI": "assets/icons/perceptronic-pick.svg",
+      "behaviorURI": "pick-node.worker.js",
+      "presenterURI": "pick.js",
+      "componentTagName": "nickarmenta-perceptronic-pick",
+      "categoryName": "perceptronic"
+    },
+    {
+      "translationPath": "assets/i18n/",
+      "iconURI": "assets/icons/perceptronic-after.svg",
+      "behaviorURI": "after-node.worker.js",
+      "presenterURI": "pick.js",
+      "componentTagName": "nickarmenta-perceptronic-after",
+      "categoryName": "perceptronic"
+    }
+  ],
+  "smartSkills": [],
+  "sidebarItems": [],
+  "operatorScreens": []
+}

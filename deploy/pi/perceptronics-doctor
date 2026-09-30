@@ -1,0 +1,17 @@
+#!/bin/sh
+# The pick PC's pre-flight: `perceptronics doctor` as the service user, with the service's
+# cell file, working directory and cockpit URL, so it sees exactly what the cockpit sees
+# (udev permissions included). Extra arguments go to `perceptronics doctor` (--json, --stream,
+# --no-robot ...). `--stream` opens the camera: stop the cockpit first, one process owns it.
+#
+#   sudo perceptronics-doctor
+set -eu
+APP=/opt/perceptronics/current/bin/perceptronics
+CELL=/etc/perceptronics/cell.env
+STATE=/var/lib/perceptronics
+URL=http://127.0.0.1:7621
+cd "$STATE"
+if [ "$(id -u)" -eq 0 ]; then
+    exec runuser -u perceptronics -- env HOME="$STATE" "$APP" --cell "$CELL" doctor --cockpit-url "$URL" "$@"
+fi
+exec "$APP" --cell "$CELL" doctor --cockpit-url "$URL" "$@"

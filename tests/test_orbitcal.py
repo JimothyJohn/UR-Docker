@@ -11,9 +11,9 @@ import re
 
 import pytest
 
-from perception.calibrate import CalibrationSession
-from perception.handeye import HandEye
-from perception.orbitcal import (
+from perceptronics.calibrate import CalibrationSession
+from perceptronics.handeye import HandEye
+from perceptronics.orbitcal import (
     OrbitCalibration,
     add_calibrate_args,
     centred_pose,
@@ -22,7 +22,7 @@ from perception.orbitcal import (
     predict_pixel,
     run_calibrate,
 )
-from perception.pickcycle import CockpitError
+from perceptronics.pickcycle import CockpitError
 from tests.test_urctl import FakeController
 from urctl.config import RobotConfig
 from urctl.pose import Transform, matrix_to_rotvec, pose_inv, pose_trans
@@ -247,7 +247,7 @@ def test_recovers_the_hand_eye_from_a_wrong_seed(rig):
     got = cockpit.session.result["flange_to_color_pose"]
     mm, deg = _delta(got, TRUE_FC)
     assert mm < 2.0 and deg < 0.8, (mm, deg)  # roll about the mark's ray is the weak axis
-    assert out["rms_mm"] < 2.0 and out["env_line"].startswith("PERCEPTION_T_FLANGE_CAMERA=")
+    assert out["rms_mm"] < 2.0 and out["env_line"].startswith("PERCEPTRONICS_T_FLANGE_CAMERA=")
     assert cockpit.applied is None and any("Not applied" in e for e in events)
     # every move was the flange (tcp override) at the calibration speed, and the arm came home
     moves = [b for b in ctl.primary_sends if "movel(" in b and "urctl/flange" not in b]
@@ -348,7 +348,7 @@ def test_dry_run_plans_and_moves_nothing(rig):
 
 
 def test_interrupt_reaches_the_bail_out_and_exits_130(monkeypatch):
-    from perception import orbitcal as oc
+    from perceptronics import orbitcal as oc
 
     calls = []
     monkeypatch.setattr(
@@ -363,12 +363,12 @@ def test_interrupt_reaches_the_bail_out_and_exits_130(monkeypatch):
 def test_parser_and_runner_agree_on_every_option(monkeypatch, capsys):
     """Every attribute the runner reads exists on the parsed namespace (the pick-cycle
     shipped once with an option the runner read and the parser lacked)."""
-    from perception import orbitcal as oc
+    from perceptronics import orbitcal as oc
 
     monkeypatch.setattr(
         oc.OrbitCalibration,
         "run",
-        lambda self, **kw: {"ok": True, "env_line": "PERCEPTION_T_FLANGE_CAMERA=x"},
+        lambda self, **kw: {"ok": True, "env_line": "PERCEPTRONICS_T_FLANGE_CAMERA=x"},
     )
     ap = argparse.ArgumentParser()
     add_calibrate_args(ap)

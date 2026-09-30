@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PERCEPTRONICS · RGB-D cockpit (classic)</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>&#128247;</text></svg>">
+<style>
+  /* Same industrial cockpit palette as urctl/webui — one family of tools. */
+  :root {
+    --ground: #0D1319; --panel: #141C25; --raised: #1A2430; --inset: #090E13;
+    --line: #283542; --line-soft: #1F2A36;
+    --text: #D7E1EB; --strong: #F1F6FA; --muted: #7F91A3; --faint: #576A7C;
+    --accent: #4FBBE2; --accent-dim: #2A7794;
+    --ok: #57B87C; --warn: #DFA43E; --crit: #E06552; --info: #7E93E8;
+    --ok-soft: rgba(87,184,124,.14); --warn-soft: rgba(223,164,62,.14);
+    --crit-soft: rgba(224,101,82,.16); --accent-soft: rgba(79,187,226,.12);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--ground); color: var(--text);
+         font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; font-size: 14px;
+         display: flex; flex-direction: column; }
+  .mono, code, table { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1, h2, button, .chip { font-family: "Chakra Petch", "IBM Plex Sans", system-ui, sans-serif; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 16px; background: var(--panel);
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: var(--strong); }
+  h1 .accent { color: var(--accent); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+  .chip { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; padding: 3px 10px;
+          border-radius: 3px; border: 1px solid var(--line); background: var(--raised); color: var(--muted); white-space: nowrap; }
+  .chip.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+  .chip.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .chip.crit { color: var(--crit); border-color: var(--crit); background: var(--crit-soft); }
+  .banner { display: none; padding: 7px 16px; font-size: 13px; font-weight: 500; gap: 12px; align-items: center; }
+  .banner.show { display: flex; }
+  .banner.crit { background: var(--crit-soft); color: var(--crit); border-bottom: 1px solid var(--crit); }
+  main { flex: 1; display: grid; gap: 10px; padding: 10px; min-height: 0;
+         grid-template-columns: minmax(360px, 1.4fr) minmax(360px, 1.4fr) minmax(280px, .9fr);
+         grid-template-rows: auto auto; grid-template-areas: "color depth side" "color depth side"; }
+  @media (max-width: 1200px) { main { grid-template-columns: 1fr 1fr; grid-template-areas: "color depth" "side side"; } }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; grid-template-areas: "color" "depth" "side"; } }
+  /* extra viewpoints (--view): a second row → the 2×2 grid */
+  .panel.view { display: none; }
+  body.views .panel.view { display: flex; }
+  body.views main { grid-template-rows: 1fr 1fr; grid-template-areas: "color depth side" "view0 view1 side"; }
+  body.views.views1 main { grid-template-areas: "color depth side" "view0 view0 side"; }
+  @media (max-width: 1200px) { body.views main { grid-template-areas: "color depth" "view0 view1" "side side"; }
+                               body.views.views1 main { grid-template-areas: "color depth" "view0 view0" "side side"; } }
+  @media (max-width: 760px) { body.views main, body.views.views1 main { grid-template-areas: "color" "depth" "view0" "view1" "side"; } }
+  #view0Panel { grid-area: view0; } #view1Panel { grid-area: view1; }
+  .stage img.view { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  body.demo .panel.view { display: none; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; display: flex;
+           flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+  .panel > .head { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line-soft); }
+  .panel > .head h2 { margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  .panel > .head .right { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+  .panel > .body { padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
+  .stage { position: relative; background: var(--inset); border: 1px solid var(--line-soft); border-radius: 4px; overflow: hidden;
+           aspect-ratio: 4 / 3; cursor: crosshair; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: auto; }
+  .stage .readout { position: absolute; left: 8px; bottom: 8px; background: rgba(9,14,19,.82); border: 1px solid var(--line);
+                    border-radius: 4px; padding: 4px 8px; font-size: 12px; color: var(--strong); pointer-events: none; }
+  #colorPanel { grid-area: color; } #depthPanel { grid-area: depth; } #side { grid-area: side; }
+  button { background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+           font-size: 12px; font-weight: 600; letter-spacing: .06em; padding: 7px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--strong); }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--strong); }
+  button.danger { border-color: var(--crit); color: var(--crit); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=text], input[type=number] { background: var(--inset); color: var(--strong); border: 1px solid var(--line);
+                                         border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+  input[type=number] { width: 70px; }
+  label { font-size: 12px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td { padding: 3px 4px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  td:first-child { color: var(--muted); width: 42%; }
+  .hint { font-size: 11.5px; color: var(--faint); }
+  .kbd { font-family: inherit; font-size: 11px; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; color: var(--muted); }
+  #toast { position: fixed; right: 14px; bottom: 14px; background: var(--raised); border: 1px solid var(--accent);
+           border-radius: 5px; padding: 8px 12px; font-size: 13px; display: none; max-width: 420px; }
+  #toast.show { display: block; }
+  ul.sets { margin: 0; padding-left: 18px; font-size: 12px; }
+  /* pilot */
+  .pilot { display: flex; flex-direction: column; gap: 8px; }
+  .status { display: flex; gap: 6px; flex-wrap: wrap; }
+  .jog { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .jog button { padding: 6px 4px; font-size: 12px; }
+  .jog .axis { text-align: center; font-size: 11px; color: var(--muted); align-self: center; letter-spacing: .1em; }
+  select { background: var(--inset); color: var(--strong); border: 1px solid var(--line); border-radius: 4px; padding: 5px 6px; font-size: 12px; }
+  ul.checks, ul.events { margin: 0; padding: 0; list-style: none; font-size: 11.5px; }
+  ul.checks li, ul.events li { padding: 3px 0; border-bottom: 1px solid var(--line-soft); display: flex; gap: 6px; align-items: baseline; }
+  ul.checks li .m, ul.events li .m { flex: 0 0 auto; font-weight: 700; font-family: "IBM Plex Mono", monospace; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .crit { color: var(--crit); } .info { color: var(--muted); }
+  ul.checks li .fix { display: block; color: var(--warn); font-size: 11px; }
+  ul.events { max-height: 180px; overflow: auto; }
+  ul.events li .t { color: var(--faint); font-family: "IBM Plex Mono", monospace; flex: 0 0 auto; }
+  button.crit { background: var(--crit-soft); border-color: var(--crit); color: var(--crit); }
+  details.cal summary { cursor: pointer; font-size: 11.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); padding: 7px 0 4px; list-style: none; }
+  details.cal summary::before { content: "▸ "; } details.cal[open] summary::before { content: "▾ "; }
+  ul.views { margin: 0; padding: 0; list-style: none; font-size: 11.5px; }
+  ul.views li { display: flex; gap: 6px; padding: 2px 0; border-bottom: 1px solid var(--line-soft); align-items: center; }
+  ul.views li .x { margin-left: auto; padding: 0 6px; font-size: 11px; }
+  pre.env { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-all; background: var(--inset); border: 1px solid var(--line-soft); border-radius: 4px; padding: 6px; }
+  /* ---- demo mode: one picture, four big buttons, one light (body.demo; ?demo=1 or the header toggle) ---- */
+  #demoBar { display: none; }
+  body.demo header .chips .chip, body.demo #cam, body.demo #pauseBtn { display: none; }
+  body.demo header h1 { font-size: 22px; }
+  body.demo #demoBar { display: flex; gap: 14px; align-items: center; padding: 12px 16px; background: var(--panel);
+                       border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  body.demo #demoBar button { font-size: 22px; padding: 16px 28px; border-radius: 10px; min-width: 170px; font-weight: 700; }
+  body.demo #demoBar button:disabled { opacity: .35; }
+  body.demo #demoBar .light { font-size: 20px; font-weight: 700; padding: 12px 22px; border-radius: 999px; margin-left: auto;
+                              border: 2px solid var(--line); color: var(--muted); }
+  body.demo #demoBar .light.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+  body.demo #demoBar .light.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  body.demo #demoBar .light.crit { color: var(--crit); border-color: var(--crit); background: var(--crit-soft); }
+  body.demo #demoStep { flex-basis: 100%; font-size: 18px; color: var(--text); }
+  body.demo main { grid-template-columns: 1fr; grid-template-areas: "color"; grid-template-rows: 1fr; }
+  body.demo #depthPanel, body.demo #side, body.demo .hint, body.demo #colorPanel .head { display: none; }
+  body.demo .readout { font-size: 16px; }
+  body.demo #toast { font-size: 18px; padding: 14px 22px; max-width: 720px; left: 50%; right: auto; transform: translateX(-50%); bottom: 28px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>perceptronics <span class="accent">·</span> RGB-D cockpit</h1>
+  <span id="cam" class="mono" style="color:var(--muted);font-size:12.5px">connecting…</span>
+  <div class="chips">
+    <span id="chipKind" class="chip">camera</span>
+    <span id="chipUsb" class="chip">usb ?</span>
+    <span id="chipFps" class="chip">0.0 fps</span>
+    <span id="chipSeq" class="chip">seq 0</span>
+    <span id="chipSeg" class="chip">seg ?</span>
+    <span id="chipRobot" class="chip" title="robot_mode · safety_mode · control_mode">robot ?</span>
+    <button id="pauseBtn" title="space">Pause</button>
+    <button id="demoToggle" title="one picture, four buttons">Demo</button>
+  </div>
+</header>
+<div id="banner" class="banner crit"><span id="bannerText"></span></div>
+<div id="demoBar">
+  <button id="dStart" class="primary" title="power on + brake release">1 · Start robot</button>
+  <button id="dFind" title="pick out the nearest object in the picture">2 · Find object</button>
+  <button id="dPick" class="primary" disabled title="go over the object, down to it, and back">3 · Pick</button>
+  <button id="dStop" class="crit" title="stop all motion now">STOP</button>
+  <span id="demoLight" class="light">robot ?</span>
+  <div id="demoStep">Press <b>Start robot</b>, then click the object in the picture (or press <b>Find object</b>), then <b>Pick</b>.</div>
+</div>
+
+<main>
+  <section id="colorPanel" class="panel">
+    <div class="head"><h2>Color</h2><div class="right"><span id="colorMeta">–</span></div></div>
+    <div class="body">
+      <div class="stage" id="colorStage">
+        <canvas id="colorCv"></canvas><canvas id="colorOv"></canvas>
+        <div class="readout" id="colorReadout">click an object, or drag a box around it, to segment</div>
+      </div>
+      <div class="hint">Click = segment under the cursor · drag = box prompt · <span class="kbd">n</span> nearest object · <span class="kbd">esc</span> clear · <span class="kbd">c</span> capture</div>
+    </div>
+  </section>
+
+  <section id="depthPanel" class="panel">
+    <div class="head"><h2>Depth</h2>
+      <div class="right">
+        <label>near</label><input id="near" type="number" step="0.05" value="0.20">
+        <label>far</label><input id="far" type="number" step="0.05" value="2.00">
+        <label>m</label><button id="autoRange" title="fit range to the current frame">auto</button>
+      </div>
+    </div>
+    <div class="body">
+      <div class="stage" id="depthStage">
+        <canvas id="depthCv"></canvas><canvas id="depthOv"></canvas>
+        <div class="readout" id="depthReadout">hover to measure</div>
+      </div>
+      <div class="hint">Colour = metres (near→far). Dark grey = no depth. Readout gives the camera-frame point X/Y/Z of the pixel under the cursor.</div>
+    </div>
+  </section>
+
+  <section id="view0Panel" class="panel view">
+    <div class="head"><h2 id="view0Title">View 1</h2><div class="right"><span id="view0Meta">–</span></div></div>
+    <div class="body"><div class="stage" id="view0Stage"><img class="view" id="view0Img" alt=""><div class="readout" id="view0Readout">waiting for the first frame…</div></div></div>
+  </section>
+
+  <section id="view1Panel" class="panel view">
+    <div class="head"><h2 id="view1Title">View 2</h2><div class="right"><span id="view1Meta">–</span></div></div>
+    <div class="body"><div class="stage" id="view1Stage"><img class="view" id="view1Img" alt=""><div class="readout" id="view1Readout">waiting for the first frame…</div></div></div>
+  </section>
+
+  <aside id="side" class="panel">
+    <div class="head"><h2>Pilot</h2><div class="right"><span id="cellMeta">–</span></div></div>
+    <div class="body pilot" id="pilotSec">
+      <div class="status">
+        <span id="stMode" class="chip">mode ?</span><span id="stSafety" class="chip">safety ?</span>
+        <span id="stControl" class="chip">control ?</span><span id="stProgram" class="chip">program ?</span>
+      </div>
+      <div class="row">
+        <button id="bringUpBtn" class="primary" title="power on + brake release (needs Remote)">Bring up</button>
+        <button id="stopBtn" class="crit" title="stop the running program / motion">STOP</button>
+        <button id="freedriveBtn" title="hand-guide the arm">Freedrive</button>
+        <button id="gripOpenBtn" title="Robotiq gripper: open">Open</button>
+        <button id="gripCloseBtn" title="Robotiq gripper: close (stops on an object)">Close</button>
+        <button id="doctorBtn" title="run the pre-flight checks">Doctor</button>
+        <label style="margin-left:auto"><input id="livePoll" type="checkbox" checked> live</label>
+      </div>
+      <div class="row">
+        <label>jog step</label>
+        <select id="jogStep"><option value="0.001">1 mm</option><option value="0.005">5 mm</option><option value="0.01" selected>10 mm</option><option value="0.025">25 mm</option><option value="0.05">50 mm</option></select>
+        <span class="hint">base frame · one safety-checked movel per press</span>
+      </div>
+      <div class="jog">
+        <button data-jog="0,1,0" title="+Y">+Y</button><button data-jog="0,0,1" title="+Z (up)">+Z</button><button data-jog="1,0,0" title="+X">+X</button>
+        <button data-jog="0,-1,0" title="−Y">−Y</button><button data-jog="0,0,-1" title="−Z (down)">−Z</button><button data-jog="-1,0,0" title="−X">−X</button>
+      </div>
+      <div id="tcpLine" class="hint mono">tcp –</div>
+      <ul id="checks" class="checks" hidden></ul>
+      <div class="head" style="padding:7px 0 0;border:0"><h2>Events</h2><div class="right"><span id="evMeta">–</span></div></div>
+      <ul id="events" class="events"><li class="hint">nothing yet</li></ul>
+    </div>
+    <div class="head"><h2>Object</h2><div class="right"><span id="segMeta">–</span></div></div>
+    <div class="body">
+      <div class="row">
+        <button id="nearestBtn">Nearest object</button>
+        <button id="clearBtn" class="danger">Clear</button>
+      </div>
+      <table id="features"><tbody><tr><td colspan="2" class="hint">No segment yet.</td></tr></tbody></table>
+      <div id="robotSec">
+        <div class="head" style="padding:7px 0 0;border:0"><h2>Robot</h2><div class="right"><span id="robotMeta">–</span></div></div>
+        <div class="row">
+          <label>standoff <input id="standoff" type="number" value="0.10" step="0.005" min="0" max="1" style="width:5.5em"> m</label>
+          <label>from <select id="reference"><option value="fingertip">fingertips</option><option value="flange">flange</option><option value="tcp">active TCP</option></select></label>
+          <button id="locateBtn">Locate in base</button>
+          <button id="moveBtn" disabled>Move TCP to approach</button>
+          <button id="cycleBtn" class="primary" disabled title="over the object → down to the standoff → hold 1 s → back up → back here">Approach</button>
+        </div>
+        <table id="robotTable"><tbody><tr><td colspan="2" class="hint">Segment an object with depth, then Locate.</td></tr></tbody></table>
+        <div class="hint">Locate reads the live flange pose and maps the segment's camera point into the base frame through the hand-eye transform (bracket nominal unless <code>PERCEPTRONICS_T_FLANGE_CAMERA</code> is set). Move sends one safety-validated <code>movel</code> to the approach pose, tool orientation unchanged. <em>from</em> picks what the standoff is measured to: the gripper's <em>fingertips</em> (the default — <code>PERCEPTRONICS_TIP_M</code> along the flange axis, approached along the tool axis, and the move runs with that TCP; the controller's active TCP is not used), the tool <em>flange</em>, or the controller's <em>active TCP</em> (both along the camera ray). The cell file sets the defaults (<code>PERCEPTRONICS_STANDOFF_M</code>, <code>PERCEPTRONICS_APPROACH_REFERENCE</code>, <code>PERCEPTRONICS_TIP_M</code>). <b>Approach</b> is the test loop: click an object (depth region-growing, no model), then Approach — the arm goes over it, down to the standoff, holds a second, comes back up and returns to where the picture was taken, all as one program. Move the object, click, Approach again.</div>
+        <details class="cal" id="calSec">
+          <summary>Calibrate hand-eye <span id="calMeta" style="font-weight:400;letter-spacing:0;text-transform:none">–</span></summary>
+          <div class="hint">1. Freedrive the tool tip onto a mark → <b>Record mark</b>. 2. From 4–6 varied poses (rotate + tilt the wrist), click the mark in the colour view → <b>Add view</b>. 3. <b>Solve</b>, check the residuals, <b>Apply</b>.</div>
+          <div class="row">
+            <button id="calMarkBtn">Record mark</button>
+            <button id="calViewBtn" disabled title="click the mark in the colour view first">Add view</button>
+            <button id="calSolveBtn" disabled>Solve</button>
+            <button id="calApplyBtn" class="primary" disabled>Apply + save</button>
+            <button id="calResetBtn" class="danger">Reset</button>
+          </div>
+          <div id="calMark" class="hint mono">mark –</div>
+          <ul id="calViews" class="views"></ul>
+          <div id="calResult" hidden><table id="calTable"><tbody></tbody></table><pre class="env" id="calEnv"></pre></div>
+        </details>
+      </div>
+      <div class="head" style="padding:7px 0 0;border:0"><h2>Camera</h2></div>
+      <table id="camTable"><tbody></tbody></table>
+    </div>
+  </aside>
+</main>
+<div id="toast"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const colorCv = $('colorCv'), colorOv = $('colorOv'), depthCv = $('depthCv'), depthOv = $('depthOv');
+  const cctx = colorCv.getContext('2d'), dctx = depthCv.getContext('2d');
+  const coctx = colorOv.getContext('2d'), doctx = depthOv.getContext('2d');
+  let seq = 0, running = true, latest = null, features = null, maskImg = null, maskSeq = 0, hover = null;
+  let drag = null, promptBox = null;   // drag = {u0, v0, u1, v1, moved}; promptBox = last box prompt sent
+  const DRAG_MIN_PX = 4;               // smaller movement than this is a click
+  let inflight = false, lut = buildLut();
+
+  // ---- utilities ----------------------------------------------------------------
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  function toast(msg, ms = 2600) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms); }
+  function banner(msg) { const b = $('banner'); if (msg) { $('bannerText').textContent = msg; b.classList.add('show'); } else b.classList.remove('show'); }
+  function fmt(v, d = 3) { return (v === null || v === undefined) ? '–' : (typeof v === 'number' ? v.toFixed(d) : String(v)); }
+  function buildLut() {
+    // turbo-like anchors, interpolated to 256 entries; index 0..255 = near..far
+    const a = [[48,18,59],[70,107,229],[27,208,213],[163,255,62],[245,193,52],[220,52,23],[122,4,3]];
+    const out = new Uint8Array(256 * 3);
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255 * (a.length - 1), k = Math.min(a.length - 2, Math.floor(t)), f = t - k;
+      for (let c = 0; c < 3; c++) out[i * 3 + c] = Math.round(a[k][c] * (1 - f) + a[k + 1][c] * f);
+    }
+    return out;
+  }
+  async function inflate(bytes) {
+    const ds = new DecompressionStream('deflate');
+    const buf = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+    return new Uint16Array(buf);  // little-endian, matches RS2_FORMAT_Z16 on every host we run on
+  }
+  function parseContainer(buf) {
+    const dv = new DataView(buf), dec = new TextDecoder();
+    if (dec.decode(new Uint8Array(buf, 0, 4)) !== 'RGBD') throw new Error('bad frame container');
+    const hl = dv.getUint32(4); const header = JSON.parse(dec.decode(new Uint8Array(buf, 8, hl)));
+    let i = 8 + hl; const pl = dv.getUint32(i); const png = new Uint8Array(buf, i + 4, pl); i += 4 + pl;
+    const dl = dv.getUint32(i); const depth = new Uint8Array(buf, i + 4, dl);
+    return { header, png, depth };
+  }
+
+  // ---- frame loop -----------------------------------------------------------------
+  async function loop() {
+    while (true) {
+      if (!running) { await sleep(120); continue; }
+      try {
+        const r = await fetch(`/api/rgbd?after=${seq}&timeout_ms=1500`);
+        if (r.status === 503) { const j = await r.json(); banner(j.last_error || 'waiting for the first frame…'); await sleep(500); continue; }
+        if (!r.ok) throw new Error(`frame fetch ${r.status}`);
+        const f = parseContainer(await r.arrayBuffer());
+        if (f.header.seq === seq) continue;   // long-poll timed out: nothing new
+        seq = f.header.seq;
+        banner(null);
+        await render(f);
+      } catch (e) { banner(`stream: ${e.message}`); await sleep(500); }
+    }
+  }
+  async function render(f) {
+    const h = f.header;
+    const [bmp, depth] = await Promise.all([createImageBitmap(new Blob([f.png], { type: 'image/png' })), inflate(f.depth)]);
+    if (colorCv.width !== h.width || colorCv.height !== h.height) {
+      for (const c of [colorCv, colorOv, depthCv, depthOv]) { c.width = h.width; c.height = h.height; }
+    }
+    cctx.drawImage(bmp, 0, 0); bmp.close && bmp.close();
+    latest = { header: h, depth };
+    drawDepth();
+    drawOverlays();
+    $('chipSeq').textContent = `seq ${h.seq}`;
+    $('chipFps').textContent = `${(h.fps || 0).toFixed(1)} fps`;
+    $('colorMeta').textContent = `${h.width}×${h.height} · #${h.frame_number} · ${h.aligned ? 'aligned' : 'raw depth'}`;
+  }
+  function drawDepth() {
+    if (!latest) return;
+    const { header: h, depth } = latest, w = h.depth_width, hh = h.depth_height;
+    const near = parseFloat($('near').value) || 0.2, far = Math.max(near + 0.01, parseFloat($('far').value) || 2.0);
+    const scale = h.depth_scale_m, span = far - near;
+    const img = dctx.createImageData(w, hh), px = img.data;
+    for (let i = 0, j = 0; i < depth.length; i++, j += 4) {
+      const d = depth[i];
+      if (d === 0) { px[j] = 40; px[j + 1] = 40; px[j + 2] = 48; px[j + 3] = 255; continue; }
+      let t = (d * scale - near) / span; t = t < 0 ? 0 : (t > 1 ? 1 : t);
+      const k = Math.round(t * 255) * 3;
+      px[j] = lut[k]; px[j + 1] = lut[k + 1]; px[j + 2] = lut[k + 2]; px[j + 3] = 255;
+    }
+    dctx.putImageData(img, 0, 0);
+  }
+  $('autoRange').onclick = () => {
+    if (!latest) return;
+    const { header: h, depth } = latest; const vals = [];
+    for (let i = 0; i < depth.length; i += 7) if (depth[i]) vals.push(depth[i]);
+    if (!vals.length) return;
+    vals.sort((a, b) => a - b);
+    $('near').value = (vals[Math.floor(vals.length * 0.02)] * h.depth_scale_m).toFixed(2);
+    $('far').value = (vals[Math.floor(vals.length * 0.98)] * h.depth_scale_m).toFixed(2);
+    drawDepth();
+  };
+  $('near').onchange = $('far').onchange = drawDepth;
+
+  // ---- measurement + overlays -----------------------------------------------------
+  function pixelFromEvent(ev, cv) {
+    const r = cv.getBoundingClientRect();
+    const u = Math.floor((ev.clientX - r.left) / r.width * cv.width), v = Math.floor((ev.clientY - r.top) / r.height * cv.height);
+    return (u >= 0 && v >= 0 && u < cv.width && v < cv.height) ? { u, v } : null;
+  }
+  function measure(u, v) {
+    if (!latest) return null;
+    const { header: h, depth } = latest, K = h.intrinsics;
+    const raw = depth[v * h.depth_width + u]; if (!raw) return { u, v, z: null };
+    const z = raw * h.depth_scale_m;
+    return { u, v, z, x: (u - K.ppx) / K.fx * z, y: (v - K.ppy) / K.fy * z };  // pinhole (D4xx colour intrinsics carry zero distortion)
+  }
+  function drawOverlays() {
+    for (const [ctx, cv] of [[coctx, colorOv], [doctx, depthOv]]) {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (maskImg) { ctx.globalAlpha = 0.45; ctx.drawImage(maskImg, 0, 0); ctx.globalAlpha = 1; }
+      if (features) {
+        const [x0, y0, x1, y1] = features.bbox, [cx, cy] = features.centroid_px;
+        ctx.strokeStyle = '#4FBBE2'; ctx.lineWidth = 2; ctx.strokeRect(x0 + .5, y0 + .5, x1 - x0, y1 - y0);
+        const th = features.orientation_deg * Math.PI / 180, L = Math.max(20, (x1 - x0 + y1 - y0) / 4);
+        ctx.strokeStyle = '#DFA43E'; ctx.beginPath(); ctx.moveTo(cx - Math.cos(th) * L, cy - Math.sin(th) * L); ctx.lineTo(cx + Math.cos(th) * L, cy + Math.sin(th) * L); ctx.stroke();
+        ctx.fillStyle = '#F1F6FA'; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+      }
+      const box = drag && drag.moved ? drag : promptBox;
+      if (box) {
+        const x0 = Math.min(box.u0, box.u1), y0 = Math.min(box.v0, box.v1), x1 = Math.max(box.u0, box.u1), y1 = Math.max(box.v0, box.v1);
+        ctx.setLineDash([6, 4]); ctx.strokeStyle = drag && drag.moved ? '#F1F6FA' : '#DFA43E'; ctx.lineWidth = 1.5;
+        ctx.strokeRect(x0 + .5, y0 + .5, x1 - x0, y1 - y0); ctx.setLineDash([]);
+      }
+      if (hover && !(drag && drag.moved)) {
+        ctx.strokeStyle = 'rgba(241,246,250,.85)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(hover.u + .5, 0); ctx.lineTo(hover.u + .5, cv.height); ctx.moveTo(0, hover.v + .5); ctx.lineTo(cv.width, hover.v + .5); ctx.stroke();
+      }
+    }
+  }
+  function onMove(ev, cv) {
+    const p = pixelFromEvent(ev, cv); hover = p;
+    if (drag && p) {
+      drag.u1 = p.u; drag.v1 = p.v;
+      if (Math.abs(drag.u1 - drag.u0) >= DRAG_MIN_PX || Math.abs(drag.v1 - drag.v0) >= DRAG_MIN_PX) drag.moved = true;
+    }
+    drawOverlays();
+    if (!p) return;
+    if (drag && drag.moved) { $('colorReadout').textContent = `box ${Math.abs(drag.u1 - drag.u0) + 1}×${Math.abs(drag.v1 - drag.v0) + 1} px — release to segment`; return; }
+    const m = measure(p.u, p.v);
+    const txt = !m ? '–' : (m.z === null ? `(${m.u}, ${m.v})  no depth` : `(${m.u}, ${m.v})  z ${m.z.toFixed(3)} m   X ${m.x.toFixed(3)}  Y ${m.y.toFixed(3)}  Z ${m.z.toFixed(3)}`);
+    $('depthReadout').textContent = txt;
+    if (!features) $('colorReadout').textContent = txt;
+  }
+  // Press-drag-release draws a box prompt; a press-release without movement is a click (point prompt).
+  for (const cv of [colorOv, depthOv]) {
+    cv.addEventListener('mousemove', (ev) => onMove(ev, cv));
+    cv.addEventListener('mouseleave', () => { hover = null; drawOverlays(); });
+    cv.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      const p = pixelFromEvent(ev, cv); if (!p) return;
+      drag = { u0: p.u, v0: p.v, u1: p.u, v1: p.v, moved: false }; ev.preventDefault();
+    });
+    cv.addEventListener('mouseup', (ev) => {
+      if (!drag) return;
+      const d = drag; drag = null;
+      const p = pixelFromEvent(ev, cv);
+      if (p) { d.u1 = p.u; d.v1 = p.v; }
+      if (d.moved) {
+        const box = [Math.min(d.u0, d.u1), Math.min(d.v0, d.v1), Math.max(d.u0, d.u1) + 1, Math.max(d.v0, d.v1) + 1];
+        promptBox = { u0: box[0], v0: box[1], u1: box[2] - 1, v1: box[3] - 1 };
+        segmentBox(box);
+      } else { promptBox = null; segmentAt(d.u0, d.v0); }
+      drawOverlays();
+    });
+  }
+  window.addEventListener('mouseup', () => { if (drag) { drag = null; drawOverlays(); } });  // released off-canvas: cancel
+
+  // ---- segmentation ---------------------------------------------------------------
+  async function post(url, body) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const j = await r.json(); if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`); return j;
+  }
+  function tintedMask(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => {
+        const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const x = c.getContext('2d');
+        x.drawImage(im, 0, 0); x.globalCompositeOperation = 'multiply'; x.fillStyle = '#4FBBE2'; x.fillRect(0, 0, c.width, c.height);
+        // black (0) stays black → make it transparent via luminosity → alpha
+        const d = x.getImageData(0, 0, c.width, c.height), p = d.data;
+        for (let i = 0; i < p.length; i += 4) p[i + 3] = p[i] + p[i + 1] + p[i + 2] > 30 ? 255 : 0;
+        x.putImageData(d, 0, 0); resolve(c);
+      };
+      im.onerror = reject; im.src = dataUrl;
+    });
+  }
+  async function adopt(j) {
+    features = j.features; maskSeq = j.seq;
+    maskImg = j.mask_png_b64 ? await tintedMask('data:image/png;base64,' + j.mask_png_b64) : null;
+    $('segMeta').textContent = `${j.segmenter} · ${j.prompt && j.prompt.box ? (j.prompt.x !== undefined ? 'box+point' : 'box') : (j.prompt && j.prompt.nearest ? 'nearest' : 'point')} · ${j.elapsed_ms} ms · frame ${j.seq}`;
+    renderFeatures(); drawOverlays();
+    $('colorReadout').textContent = features ? `object @ (${features.centroid_px.map(v => v.toFixed(0)).join(', ')}) · ${fmt(features.depth.median_m)} m` : 'empty segment';
+  }
+  let lastClick = null;
+  async function segmentAt(u, v) {
+    lastClick = [u, v]; $('calViewBtn').disabled = !robotInfo; $('calViewBtn').title = `add a view at (${u}, ${v})`;
+    if (inflight) return; inflight = true;
+    try { await adopt(await post('/api/segment', { x: u, y: v })); } catch (e) { toast(`segment: ${e.message}`); } finally { inflight = false; }
+  }
+  async function segmentBox(box) {
+    if (inflight) return; inflight = true;
+    try { await adopt(await post('/api/segment', { box })); } catch (e) { toast(`segment: ${e.message}`); promptBox = null; drawOverlays(); } finally { inflight = false; }
+  }
+  async function nearest() {
+    if (inflight) return; inflight = true;
+    try { await adopt(await post('/api/nearest', { near_ratio: 1.2 })); } catch (e) { toast(`nearest: ${e.message}`); } finally { inflight = false; }
+  }
+  async function clearSeg() {
+    features = null; maskImg = null; maskSeq = 0; promptBox = null; renderFeatures(); drawOverlays(); $('segMeta').textContent = '–';
+    $('colorReadout').textContent = 'click an object, or drag a box around it, to segment';
+    try { await post('/api/clear'); } catch (e) {}
+  }
+  // ---- robot ------------------------------------------------------------------------
+  let robotInfo = null, approachPose = null;
+  for (const id of ['standoff', 'reference']) $(id).addEventListener('input', () => { $('standoff').dataset.touched = '1'; });
+  const vec = (v, d = 3) => v ? v.map(x => x.toFixed(d)).join(', ') : '–';
+  function resetRobot(msg) {
+    approachPose = null; $('moveBtn').disabled = true;
+    $('robotTable').tBodies[0].innerHTML = `<tr><td colspan="2" class="hint">${msg}</td></tr>`;
+  }
+  function renderRobot(j) {
+    const rows = [
+      ['point (cam) m', vec(j.point_cam_m)],
+      ['point (flange) m', vec(j.point_flange_m)],
+      ['point (base) m', `<b>${vec(j.point_base_m)}</b>`],
+      ['view ray (base)', vec(j.view_ray_base, 2)],
+      ['flange pose', vec(j.flange_pose)],
+      ['tcp offset', vec((j.robot || {}).tcp_offset)],
+      ['approach pose', `<b>${vec(j.approach_pose)}</b> (standoff ${fmt(j.standoff_m)} m from the ${j.reference === 'fingertip' ? `fingertips, TCP ${vec(j.tcp)}` : (j.reference || 'tcp')})`],
+      ['flange at approach', vec(j.flange_target_pose)],
+      ['reach', j.reachable === false ? `<b style="color:var(--bad,#c33)">OUT OF REACH</b> — approach ${fmt(j.commanded_distance_m)} m from base, ${j.model || 'arm'} reaches ${fmt(j.max_reach_m)} m` : (j.reachable === true ? `ok (${fmt(j.commanded_distance_m)} m of ${fmt(j.max_reach_m)} m)` : 'unknown model')],
+      ['hand-eye', `${j.handeye.source} · flange→depth ${vec(j.handeye.flange_to_depth_pose)}`],
+    ];
+    if ((j.robot || {}).flange_reported) rows.push(['host/controller Δ', `${(j.robot.host_controller_mismatch_m * 1000 || 0).toFixed(2)} mm`]);
+    $('robotTable').tBodies[0].innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  }
+  async function locateRobot() {
+    if (!features || !features.point_m) { toast('segment an object with depth first'); return; }
+    $('locateBtn').disabled = true;
+    try {
+      const j = await post('/api/robot/locate', { standoff_m: parseFloat($('standoff').value) || 0, reference: $('reference').value });
+      renderRobot(j); approachPose = j.reachable === false ? null : j.approach_pose; $('moveBtn').disabled = !approachPose;
+      if (j.reachable === false) toast('out of reach — move the part closer to the base');
+      toast(`base point ${vec(j.point_base_m)} m`);
+    } catch (e) { resetRobot(`locate failed: ${e.message}`); toast(`locate: ${e.message}`); }
+    finally { $('locateBtn').disabled = false; }
+  }
+  async function approachCycle() {
+    if (!features || !features.point_m) { toast('segment an object with depth first'); return; }
+    $('cycleBtn').disabled = true; $('cycleBtn').textContent = 'Approaching…';
+    try {
+      const j = await post('/api/robot/approach_cycle', { standoff_m: parseFloat($('standoff').value) || 0, reference: $('reference').value });
+      if (j.locate) { renderRobot(j.locate); approachPose = j.locate.reachable === false ? null : j.locate.approach_pose; $('moveBtn').disabled = !approachPose; }
+      if (j.ok) {
+        const legs = (j.legs || []).map((l, i) => `${['over', 'down', 'up', 'back'][i] || i}: ${l.ok ? 'ok' : 'MISSED'}`).join(' · ');
+        toast(j.dry_run ? 'dry-run: cycle validated, nothing sent' : `cycle done · ${legs}`, 5000);
+      } else {
+        toast(`cycle refused: ${j.error || (j.safety && !j.safety.ok ? JSON.stringify(j.safety.violations || j.safety) : (j.protective_stop ? 'protective stop' : `stopped after ${j.completed_legs || 0} legs`))}`, 8000);
+      }
+    } catch (e) { toast(`approach: ${e.message}`, 6000); }
+    finally { $('cycleBtn').disabled = !(features && features.point_m); $('cycleBtn').textContent = 'Approach'; }
+  }
+  async function moveRobot() {
+    if (!approachPose) return;
+    const host = robotInfo ? robotInfo.host : 'robot', dry = robotInfo && robotInfo.dry_run ? ' (dry-run)' : '';
+    if (!confirm(`Move the TCP to\n[${vec(approachPose)}]\non ${host}${dry}?`)) return;
+    $('moveBtn').disabled = true;
+    try {
+      const j = await post('/api/robot/move', { pose: approachPose });
+      if (j.ok) toast(j.dry_run ? 'dry-run: validated, nothing sent' : `moved · landed ${vec(j.landed)}`, 4000);
+      else toast(`refused: ${j.safety && !j.safety.ok ? JSON.stringify(j.safety.violations || j.safety) : (j.error || (j.protective_stop ? 'protective stop' : 'move did not confirm'))}`, 6000);
+    } catch (e) { toast(`move: ${e.message}`, 6000); }
+    finally { $('moveBtn').disabled = !approachPose; }
+  }
+  function renderFeatures() {
+    resetRobot(features && features.point_m ? 'Approach runs the cycle; Locate just shows the maths.' : 'Segment an object with depth, then Approach.');
+    $('cycleBtn').disabled = !(features && features.point_m && robotInfo);
+    $('dPick').disabled = $('cycleBtn').disabled;
+    demoStep(features && features.point_m ? 'Object found — press <b>Pick</b>. Click another object to change your mind.'
+      : (features ? 'No depth on that object — click nearer its middle, or press <b>Find object</b>.'
+        : 'Press <b>Start robot</b>, then click the object in the picture (or press <b>Find object</b>), then <b>Pick</b>.'));
+    const tb = $('features').tBodies[0];
+    if (!features) { tb.innerHTML = '<tr><td colspan="2" class="hint">No segment yet.</td></tr>'; return; }
+    const f = features, d = f.depth, g = f.grasp;
+    const rows = [
+      ['area', `${f.area_px} px · fill ${fmt(f.fill_ratio, 2)}`],
+      ['centroid px', f.centroid_px.map(v => v.toFixed(1)).join(', ')],
+      ['bbox', f.bbox.join(', ')],
+      ['mean RGB', f.mean_rgb.join(', ')],
+      ['depth median', d.median_m === null ? 'no depth' : `${fmt(d.median_m)} m  (min ${fmt(d.min_m)} · max ${fmt(d.max_m)} · ${d.valid_px} px)`],
+      ['point (cam) m', f.point_m ? f.point_m.map(v => v.toFixed(3)).join(', ') : '–'],
+      ['extent m', f.extent_m ? `${fmt(f.extent_m[0])} × ${fmt(f.extent_m[1])}  · thick ${fmt(d.thickness_m)}` : '–'],
+      ['orientation', `${fmt(f.orientation_deg, 1)}°  · elongation ${fmt(f.elongation, 2)}`],
+      ['axes m', f.major_axis_m !== null ? `${fmt(f.major_axis_m)} / ${fmt(f.minor_axis_m)}` : '–'],
+      ['grasp (assumed)', `yaw ${fmt(g.gripper_yaw_deg, 1)}° · opening ${fmt(g.opening_m)} m`],
+    ];
+    tb.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  }
+
+  // ---- pilot ----------------------------------------------------------------------------
+  let lastEvent = 0, freedriveOn = false, stateBusy = false;
+  const cls = (ok) => ok === true ? 'ok' : (ok === false ? 'crit' : 'warn');
+  function chip(id, text, klass) { const e = $(id); e.textContent = text; e.className = 'chip ' + (klass || ''); }
+  async function robotState() {
+    if (!robotInfo || stateBusy || !$('livePoll').checked) return; stateBusy = true;
+    try {
+      const j = await post('/api/robot/state');
+      const rm = j.robot_mode || '?', sm = j.safety_mode || '?', cm = j.control_mode || '?', ps = j.program_state || '?';
+      chip('stMode', rm, rm.includes('RUNNING') ? 'ok' : 'warn');
+      chip('stSafety', sm, (sm.includes('NORMAL') || sm.includes('REDUCED')) ? 'ok' : 'crit');
+      chip('stControl', cm, cm === 'REMOTE' ? 'ok' : 'warn');
+      chip('stProgram', ps, ps.includes('PLAYING') ? 'ok' : '');
+      chip('chipRobot', `${rm.replace('Robotmode: ', '')} · ${sm} · ${cm}`, rm.includes('RUNNING') && cm === 'REMOTE' && (sm.includes('NORMAL') || sm.includes('REDUCED')) ? 'ok' : 'warn');
+      const safe = sm.includes('NORMAL') || sm.includes('REDUCED');
+      if (!safe && sm !== '?') light('STOPPED — press Start robot', 'crit');
+      else if (!rm.includes('RUNNING')) light('Press Start robot', 'warn');
+      else if (cm !== 'REMOTE' && cm !== '?') light('Switch the pendant to REMOTE', 'warn');
+      else light('READY', 'ok');
+      $('tcpLine').textContent = j.tcp ? `tcp ${vec(j.tcp)}` : (j.joints ? `joints ${vec(j.joints, 2)}` : 'tcp – (no telemetry)');
+    } catch (e) { chip('chipRobot', /unreachable|refused|timed out/i.test(e.message) ? 'robot unreachable' : `robot: ${e.message.slice(0, 40)}`, 'crit'); $('chipRobot').title = e.message; light('Robot not reachable', 'crit'); }
+    finally { stateBusy = false; }
+  }
+  // ---- demo mode ----------------------------------------------------------------------
+  function light(text, klass) { const l = $('demoLight'); l.textContent = text; l.className = 'light ' + (klass || ''); }
+  function demoStep(html) { $('demoStep').innerHTML = html; }
+  const demoParam = new URLSearchParams(location.search).get('demo');
+  let demo = demoParam === null ? localStorage.getItem('demo') === '1' : demoParam !== '0';
+  function setDemo(on) {
+    demo = on; document.body.classList.toggle('demo', on); try { localStorage.setItem('demo', on ? '1' : '0'); } catch (e) {}
+    $('demoToggle').textContent = on ? 'Developer view' : 'Demo';
+    if (on) { $('livePoll').checked = true; running = true; $('pauseBtn').textContent = 'Pause'; }
+    window.dispatchEvent(new Event('resize'));
+  }
+  $('demoToggle').onclick = () => setDemo(!demo);
+  $('dStart').onclick = async () => { $('dStart').disabled = true; try { await pilot('/api/robot/bring_up', {}, 'start robot'); } finally { $('dStart').disabled = false; } };
+  $('dFind').onclick = async () => { $('dFind').disabled = true; try { await nearest(); } finally { $('dFind').disabled = false; } };
+  $('dPick').onclick = async () => { $('dPick').textContent = 'Picking…'; try { await approachCycle(); } finally { $('dPick').textContent = '3 · Pick'; } };
+  $('dStop').onclick = () => pilot('/api/robot/stop', {}, 'stop');
+  setDemo(demo);
+  async function pilot(url, body, label) {
+    try { const j = await post(url, body || {}); toast(j.ok === false ? `${label}: ${j.error || j.reply || JSON.stringify(j.safety && j.safety.violations || '') || 'refused'}` : `${label} ok`, 4000); events(); robotState(); return j; }
+    catch (e) { toast(`${label}: ${e.message}`, 6000); events(); }
+  }
+  async function jog(dir) {
+    const step = parseFloat($('jogStep').value) || 0.01;
+    const d = dir.split(',').map(Number).map(v => v * step); await pilot('/api/robot/jog', { delta: [d[0], d[1], d[2], 0, 0, 0] }, `jog ${dir}`);
+  }
+  async function doctor() {
+    $('doctorBtn').disabled = true; const ul = $('checks'); ul.hidden = false; ul.innerHTML = '<li class="hint">running…</li>';
+    try {
+      const j = await (await fetch('/api/doctor')).json();
+      ul.innerHTML = j.checks.map(c => `<li><span class="m ${cls(c.ok)}">${c.ok === true ? 'ok' : (c.ok === false ? 'FAIL' : '--')}</span><span><b>${c.name}</b> ${c.detail}${c.ok === false && c.fix ? `<span class="fix">fix: ${c.fix}</span>` : ''}</span></li>`).join('')
+        + `<li><span class="m ${j.motion_ok ? 'ok' : (j.ok ? 'warn' : 'crit')}">${j.motion_ok ? 'READY' : (j.ok ? 'STATE ONLY' : 'NOT READY')}</span><span class="hint">${j.elapsed_s}s · click to hide</span></li>`;
+    } catch (e) { ul.innerHTML = `<li class="crit">doctor: ${e.message}</li>`; }
+    finally { $('doctorBtn').disabled = false; }
+  }
+  async function events() {
+    try {
+      const j = await (await fetch(`/api/events?after=${lastEvent}`)).json();
+      if (!j.events.length) return;
+      const ul = $('events'); if (lastEvent === 0) ul.innerHTML = '';
+      for (const e of j.events) {
+        const t = new Date(e.ts * 1000).toLocaleTimeString([], { hour12: false });
+        const li = document.createElement('li'); li.innerHTML = `<span class="t">${t}</span><span class="m ${cls(e.ok)}">${e.kind}</span><span>${e.message}</span>`;
+        ul.appendChild(li); lastEvent = e.seq;
+      }
+      while (ul.children.length > 200) ul.removeChild(ul.firstChild);
+      ul.scrollTop = ul.scrollHeight; $('evMeta').textContent = `#${lastEvent}`;
+    } catch (e) {}
+  }
+  // ---- hand-eye calibration ----------------------------------------------------------
+  function renderCal(d) {
+    $('calMark').textContent = d.mark_base ? `mark (base) ${vec(d.mark_base, 4)} m` : 'mark – (not touched; the solver can estimate it from ≥ 4 views)';
+    $('calViews').innerHTML = d.views.map((v, i) => `<li><span class="m">#${i + 1}</span><span>px ${v.pixel ? v.pixel.join(',') : '?'} · cam ${vec(v.point_cam)} · flange z ${fmt(v.flange_pose[2])}</span><button class="x" data-i="${i}" title="remove">×</button></li>`).join('');
+    $('calViews').querySelectorAll('button.x').forEach(b => b.onclick = async () => { try { await post('/api/cal/remove', { index: +b.dataset.i }); } catch (e) {} cal(); });
+    $('calSolveBtn').disabled = d.views.length < d.min_views;
+    $('calMeta').textContent = `${d.views.length}/${d.min_views}+ views${d.result ? ` · RMS ${(d.result.rms_m * 1000).toFixed(2)} mm` : ''} · active: ${(d.active_handeye || {}).source || '?'}`;
+    if (d.result) {
+      const r = d.result;
+      $('calTable').tBodies[0].innerHTML = [
+        ['flange→depth', vec(r.flange_to_depth_pose, 4)], ['Δ from seed', r.delta_from_seed_mm.map(v => v.toFixed(1)).join(', ') + ' mm'],
+        ['RMS', `${(r.rms_m * 1000).toFixed(2)} mm · per view ${r.per_view_residual_m.map(v => (v * 1000).toFixed(1)).join(' / ')}`],
+        ['rotation diversity', `${r.rotation_diversity_deg.toFixed(1)}°`], ['warnings', r.warnings.length ? `<span class="warn">${r.warnings.join('<br>')}</span>` : 'none'],
+      ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+      $('calEnv').textContent = r.env_line; $('calResult').hidden = false; $('calApplyBtn').disabled = false;
+    } else { $('calResult').hidden = true; $('calApplyBtn').disabled = true; }
+  }
+  async function cal() { try { renderCal(await (await fetch('/api/cal')).json()); } catch (e) {} }
+  $('calMarkBtn').onclick = async () => { if (!confirm('Is the tool tip resting on the mark right now?')) return; await pilot('/api/cal/mark', {}, 'record mark'); cal(); };
+  $('calViewBtn').onclick = async () => { if (!lastClick) return; await pilot('/api/cal/view', { x: lastClick[0], y: lastClick[1] }, 'add view'); cal(); };
+  $('calSolveBtn').onclick = async () => { await pilot('/api/cal/solve', {}, 'solve'); cal(); };
+  $('calApplyBtn').onclick = async () => {
+    const d = await (await fetch('/api/cal')).json(); const w = (d.result || {}).warnings || [];
+    const msg = w.length ? `This solve has warnings:\n- ${w.join('\n- ')}\n\nApply it anyway and save it for future starts?` : 'Apply the solved hand-eye transform and save it for future starts?';
+    if (!confirm(msg)) return; await pilot('/api/cal/apply', { save: true, force: w.length > 0 }, 'apply'); cal(); info();
+  };
+  $('calResetBtn').onclick = async () => { await pilot('/api/cal/reset', {}, 'reset'); cal(); };
+  $('calSec').addEventListener('toggle', () => { if ($('calSec').open) cal(); });
+
+  $('bringUpBtn').onclick = () => pilot('/api/robot/bring_up', {}, 'bring up');
+  $('stopBtn').onclick = () => pilot('/api/robot/stop', {}, 'stop');
+  $('gripOpenBtn').onclick = () => pilot('/api/robot/gripper', { action: 'open' }, 'gripper open');
+  $('gripCloseBtn').onclick = async () => { const j = await pilot('/api/robot/gripper', { action: 'close' }, 'gripper close'); if (j && j.ok) toast(j.object_detected ? 'gripper: object held' : 'gripper: closed on nothing', 3000); };
+  $('freedriveBtn').onclick = async () => { freedriveOn = !freedriveOn; const j = await pilot('/api/robot/freedrive', { enable: freedriveOn }, `freedrive ${freedriveOn ? 'on' : 'off'}`); if (!j || j.ok === false) freedriveOn = !freedriveOn; $('freedriveBtn').className = freedriveOn ? 'primary' : ''; };
+  $('doctorBtn').onclick = doctor; $('checks').onclick = () => { $('checks').hidden = true; };
+  document.querySelectorAll('button[data-jog]').forEach(b => b.onclick = () => jog(b.dataset.jog));
+
+
+  // ---- info poll -------------------------------------------------------------------
+  // ---- extra viewpoints (--view): one long-poll loop per view, image bytes → <img> ----
+  const viewLoops = new Set();
+  function viewLoop(i) {
+    if (viewLoops.has(i) || i > 1) return;   // the page lays out two view panels
+    viewLoops.add(i);
+    const img = $(`view${i}Img`), meta = $(`view${i}Meta`), readout = $(`view${i}Readout`);
+    let vseq = 0, url = null;
+    (async () => {
+      while (true) {
+        if (!running) { await sleep(120); continue; }
+        try {
+          const r = await fetch(`/api/view/${i}?after=${vseq}&timeout_ms=1500`);
+          if (r.status === 503) { const j = await r.json(); readout.textContent = j.last_error || 'waiting for the first frame…'; readout.style.display = ''; await sleep(500); continue; }
+          if (r.status === 404) { readout.textContent = 'view gone'; await sleep(2000); continue; }
+          if (!r.ok) throw new Error(`view fetch ${r.status}`);
+          const s = parseInt(r.headers.get('X-Seq') || '0', 10);
+          if (s === vseq) continue;   // long-poll timed out: nothing new
+          vseq = s;
+          const blob = await r.blob(), next = URL.createObjectURL(blob);
+          img.src = next; if (url) URL.revokeObjectURL(url); url = next;
+          readout.style.display = 'none';
+          meta.textContent = `${r.headers.get('X-Fps') || '0'} fps · seq ${s}`;
+        } catch (e) { readout.textContent = `view: ${e.message}`; readout.style.display = ''; await sleep(500); }
+      }
+    })();
+  }
+  function views(list) {
+    const n = Math.min((list || []).length, 2);
+    document.body.classList.toggle('views', n > 0); document.body.classList.toggle('views1', n === 1);
+    list.slice(0, 2).forEach((v, i) => { $(`view${i}Title`).textContent = v.name || `View ${i + 1}`; viewLoop(i); });
+  }
+
+  async function info() {
+    try {
+      const j = await (await fetch('/api/info')).json(); const c = j.camera, d = c.device || {};
+      views(j.views || []);
+      $('cam').textContent = `${d.name || c.kind}${d.serial ? ' · ' + d.serial : ''}`;
+      $('chipKind').textContent = c.kind; $('chipKind').className = 'chip ' + (c.kind === 'synthetic' ? 'warn' : (c.open ? 'ok' : 'crit'));
+      $('chipUsb').textContent = d.usb_type ? `usb ${d.usb_type}` : 'usb –'; $('chipUsb').className = 'chip ' + (d.usb_type && !String(d.usb_type).startsWith('3') ? 'warn' : '');
+      $('chipSeg').textContent = `seg ${j.segmenter}`;
+      robotInfo = j.robot; $('robotSec').hidden = !robotInfo;
+      if (robotInfo && robotInfo.approach && !$('standoff').dataset.touched) {
+        $('standoff').value = robotInfo.approach.standoff_m; $('reference').value = robotInfo.approach.reference || 'fingertip';
+      }
+      if (robotInfo) $('robotMeta').textContent = `${robotInfo.host}${robotInfo.dry_run ? ' · dry-run' : ''} · ${robotInfo.handeye.source}`;
+      const cell = j.cell || {};
+      $('cellMeta').textContent = robotInfo ? `${cell.UR_CELL ? 'cell ' + cell.UR_CELL + ' · ' : ''}${robotInfo.platform} ${robotInfo.host}${robotInfo.dry_run ? ' · dry-run' : ''} · bracket ${cell.PERCEPTRONICS_BRACKET || 'eseries'}` : 'no robot (--no-robot)';
+      document.querySelectorAll('#pilotSec button, #pilotSec select').forEach(el => { if (el.id !== 'doctorBtn') el.disabled = !robotInfo; });
+      if (j.last_error && !j.frame) banner(j.last_error);
+      const K = (c.intrinsics || {}).color, s = c.stream || {};
+      const dp = c.depth || {}, ta = dp.tuning_applied || {}, tun = Object.keys(ta).map(k => `${k}=${ta[k].ok ? ta[k].value : 'x'}`).join(' ');
+      const rows = [['kind', c.kind], ['stream', `${s.width}×${s.height} @ ${s.fps} · ${s.aligned ? 'depth→colour' : 'unaligned'}`],
+        ['depth', `${dp.width || s.width}×${dp.height || s.height} · ${(dp.filters || []).length ? dp.filters.join(' → ') : 'raw'}${tun ? ' · ' + tun : ''}`],
+        ['firmware', d.firmware || '–'], ['depth scale', c.depth_scale_m !== null ? `${c.depth_scale_m} m/unit` : '–'],
+        ['fx / fy', K ? `${K.fx.toFixed(1)} / ${K.fy.toFixed(1)}` : '–'], ['pp', K ? `${K.ppx.toFixed(1)}, ${K.ppy.toFixed(1)}` : '–'],
+        ['fov', K ? `${K.fov_deg[0].toFixed(1)}° × ${K.fov_deg[1].toFixed(1)}°` : '–'], ['sdk', c.sdk ? `${c.sdk.api_version}` : '–'],
+        ['frames', `${j.frames_read} in ${j.uptime_s}s`]];
+      $('camTable').tBodies[0].innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+    } catch (e) {}
+  }
+
+  // ---- wiring ----------------------------------------------------------------------
+  $('nearestBtn').onclick = nearest; $('clearBtn').onclick = clearSeg;
+  $('locateBtn').onclick = locateRobot; $('moveBtn').onclick = moveRobot; $('cycleBtn').onclick = approachCycle;
+  $('pauseBtn').onclick = () => { running = !running; $('pauseBtn').textContent = running ? 'Pause' : 'Resume'; };
+  document.addEventListener('keydown', (ev) => {
+    if (ev.target.tagName === 'INPUT') return; if (ev.key === 'n') nearest(); else if (ev.key === 'Escape') clearSeg();
+    else if (ev.key === ' ') { ev.preventDefault(); $('pauseBtn').click(); }
+  });
+  info(); setInterval(info, 2000); loop();
+  setTimeout(robotState, 300); setInterval(robotState, 2500); events(); setInterval(events, 1500);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+# The RealSense cockpit, headless, on the pick PC (deploy/pi/README.md).
+#
+# Listens on:
+#   TCP 7621  the cockpit HTTP API (perceptronics gui --port; the PolyScope 5 URCap's
+#             "Cockpit" field is http://<this PC>:7621, and it fetches /api/color.png)
+#   TCP 7622  the pick server the Perceptronic Pick program node's URScript connects to
+#             (perceptronics gui --pick-port; FIND/LOOK/REFINE/LOG lines)
+# Both are unauthenticated: nftables.conf admits them from the cell subnet only.
+#
+#   stop:     sudo systemctl stop perceptronics-cockpit
+#   restart:  sudo systemctl restart perceptronics-cockpit
+#   logs:     journalctl -u perceptronics-cockpit -f
+#   config:   /etc/perceptronics/cell.env (robot host, ports, tool length, hand-eye)
+#   state:    /var/lib/perceptronics (captures/, calibration, audit.jsonl)
+#
+# A `perceptronics pick-server` sidecar also binds :7622. Kill it before (re)starting this
+# unit (`pkill -f "pick-server --bind"`) or the cockpit warns and runs without its pick
+# server (CLAUDE.md, "Perceptronic Pick program node").
+
+[Unit]
+Description=RealSense RGB-D cockpit + pick server (perceptronics gui, :7621 / :7622)
+Documentation=file:///opt/perceptronics/deploy/README.md
+Wants=network-online.target
+After=network-online.target nftables.service
+
+[Service]
+Type=simple
+User=perceptronics
+Group=perceptronics
+SupplementaryGroups=plugdev video
+EnvironmentFile=/etc/perceptronics/cell.env
+Environment=HOME=/var/lib/perceptronics
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=/var/lib/perceptronics
+StateDirectory=perceptronics
+StateDirectoryMode=0750
+ExecStart=/opt/perceptronics/current/bin/perceptronics gui --bind 0.0.0.0 --port 7621 --pick-port 7622 --no-browser
+Restart=on-failure
+RestartSec=5s
+# Exponential back-off 5 s -> 60 s over 5 restarts (systemd >= 254, i.e. Debian trixie).
+# bookworm's systemd 252 logs "Unknown key" for these two and keeps the fixed RestartSec.
+RestartSteps=5
+RestartMaxDelaySec=60s
+TimeoutStopSec=15s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perceptronics-cockpit
+
+# ---- hardening ----
+# The camera is opened over libusb as this user: the SDK's udev rules
+# (/etc/udev/rules.d/99-realsense-libusb.rules, MODE 0666) grant the /dev/bus/usb node,
+# so no capabilities and no root. USB device nodes are char major "usb_device".
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+DevicePolicy=closed
+DeviceAllow=char-usb_device rw
+ProtectSystem=strict
+ReadWritePaths=/var/lib/perceptronics
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# AF_NETLINK: libudev's hotplug monitor inside librealsense.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+UMask=0027
+# Not set, deliberately: PrivateDevices= (hides /dev/bus/usb), MemoryDenyWriteExecute=
+# (ctypes/libffi), SystemCallFilter= (not yet exercised against librealsense on a Pi).
+
+[Install]
+WantedBy=multi-user.target

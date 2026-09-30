@@ -287,7 +287,7 @@ class Robot:
     def get_flange_pose(self, *, collect_for: float = 3.0, script_fallback: bool = True) -> dict:
         """The tool-flange pose in the base frame, alongside the active TCP pose
         and TCP offset it was derived from — what a camera on the flange needs
-        to put its measurements into base coordinates (``perception.handeye``).
+        to put its measurements into base coordinates (``perceptronics.handeye``).
 
         First the controller's **state broadcast** (Secondary port, read only —
         :mod:`urctl.stateframe`): the flange by forward kinematics of the actual

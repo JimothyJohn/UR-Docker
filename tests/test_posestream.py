@@ -1,4 +1,4 @@
-"""perception.posestream: flange from RTDE's TCP + offset, nearest-sample lookup,
+"""perceptronics.posestream: flange from RTDE's TCP + offset, nearest-sample lookup,
 reconnect, and the cockpit putting the pose in each frame header."""
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from perception.posestream import PoseStream, flange_from
+from perceptronics.posestream import PoseStream, flange_from
 from urctl.config import RobotConfig
 from urctl.pose import Transform
 
@@ -127,10 +127,10 @@ def test_frames_carry_the_pose_they_were_taken_at_and_objects_list():
     import urllib.request
     from http.server import ThreadingHTTPServer
 
-    from perception.config import PerceptionConfig
-    from perception.realsense import SyntheticRgbdCamera
-    from perception.rgbd import unpack_rgbd
-    from perception.webapp import ViewerApp, ViewerHandler
+    from perceptronics.config import PerceptionConfig
+    from perceptronics.realsense import SyntheticRgbdCamera
+    from perceptronics.rgbd import unpack_rgbd
+    from perceptronics.webapp import ViewerApp, ViewerHandler
 
     ps = PoseStream(RobotConfig(host="x"), history_s=60.0)
     app = ViewerApp(

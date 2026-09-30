@@ -9,4 +9,4 @@
 #   scripts/cockpit-mac.sh --robot-dry-run     # extra `gui` flags pass through
 set -euo pipefail
 cd "$(dirname "$0")/.."
-exec sudo .venv/bin/perception --cell ur3 gui --rs-lean --cors http://localhost:8001 "$@"
+exec sudo .venv/bin/perceptronics --cell ur3 gui --rs-lean --cors http://localhost:8001 "$@"

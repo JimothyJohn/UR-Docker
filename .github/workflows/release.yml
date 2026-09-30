@@ -1,10 +1,8 @@
 name: release
 
-# CD: pushing a version tag (v0.2.0) builds the sdist + wheel, attaches them
-# to a GitHub Release, and — if a PyPI trusted publisher is configured for
-# this repo (PyPI → project → Publishing → GitHub Actions, environment
-# "pypi") — publishes to PyPI. The PyPI step is skipped gracefully until that
-# one-time setup is done, so tagging is safe from day one.
+# CD: pushing a version tag (v0.2.0) builds the sdist + wheel and attaches them
+# to a GitHub Release. There is no PyPI package (Nick, 2026-09-28): install from
+# a checkout or from the release's wheel.
 
 on:
   push:
@@ -31,7 +29,7 @@ jobs:
           fi
       - name: full unit suite
         run: |
-          uv sync --extra perception
+          uv sync --locked --extra vision
           uv run pytest -m "not integration" -q
       - name: build
         run: uv build
@@ -54,21 +52,3 @@ jobs:
         run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  pypi:
-    needs: build
-    runs-on: ubuntu-latest
-    # Deliberately bound to an environment so publishing can be gated with
-    # required reviewers, and so PyPI trusted publishing has a stable subject.
-    environment: pypi
-    permissions:
-      id-token: write  # OIDC for PyPI trusted publishing — no API token secrets
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: dist
-          path: dist/
-      - name: publish to PyPI (trusted publishing)
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          skip-existing: true

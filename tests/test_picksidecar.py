@@ -1,4 +1,4 @@
-"""The stand-alone pick server beside a running cockpit (``perception pick-server``).
+"""The stand-alone pick server beside a running cockpit (``perceptronics pick-server``).
 
 Contract: against a real cockpit HTTP server on the synthetic block scene, the
 sidecar's pick socket answers exactly what the cockpit's own planner answers, its
@@ -23,11 +23,11 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from perception.config import PerceptionConfig
-from perception.picknode import PickServer, parse_preview_request
-from perception.picksidecar import CockpitFrames, Sidecar, SidecarServer, _say
-from perception.robotlink import RobotLink
-from perception.webapp import ViewerApp, ViewerHandler
+from perceptronics.config import PerceptionConfig
+from perceptronics.picknode import PickServer, parse_preview_request
+from perceptronics.picksidecar import CockpitFrames, Sidecar, SidecarServer, _say
+from perceptronics.robotlink import RobotLink
+from perceptronics.webapp import ViewerApp, ViewerHandler
 from tests.test_pickcycle import SceneCamera
 from urctl import Robot, RobotConfig
 from urctl.pose import pose_trans
@@ -277,7 +277,7 @@ def test_the_preview_flange_never_falls_back_to_a_primary_script():
 
 
 def test_an_unwritable_log_falls_back_to_the_user_log_dir(tmp_path, monkeypatch):
-    import perception.picksidecar as sidecar
+    import perceptronics.picksidecar as sidecar
 
     locked = tmp_path / "captures"
     locked.mkdir()
@@ -292,3 +292,32 @@ def test_an_unwritable_log_falls_back_to_the_user_log_dir(tmp_path, monkeypatch)
         assert sidecar.writable_log(free) == free  # a writable preference is kept
     finally:
         locked.chmod(0o700)
+
+
+# -- the part's rough size on the teach screen's routes ----------------------------------------
+
+
+@pytest.mark.parametrize("via", ["cockpit", "sidecar"])
+def test_detect_and_preview_take_the_part_size(sidecar, cockpit, via):
+    _, _, _, side_url = sidecar
+    url = side_url if via == "sidecar" else cockpit[1]
+    status, body = _call(url + "/api/pick/detect?part=54x43x40&tol=15")
+    out = json.loads(body)
+    assert status == 200 and out["part"]["length_mm"] == 54.0 and len(out["blocks"]) == 1
+    status, body = _call(url + "/api/pick/detect?part=200x150")
+    out = json.loads(body)
+    assert status == 200 and out["blocks"] == [] and out["rejected"][0]["why"] == "too short"
+    status, body = _call(url + "/api/pick/preview", json.dumps({"part": "200x150"}).encode())
+    assert status == 200 and json.loads(body)["status"] == -7
+    status, body = _call(url + "/api/pick/preview", json.dumps({"part": "54x43x40", "tol": 15}).encode())
+    assert status == 200 and json.loads(body)["ok"]
+
+
+@pytest.mark.parametrize("via", ["cockpit", "sidecar"])
+@pytest.mark.parametrize("query", ["part=60", "part=60x40&tol=0", "part=../../etc", "part=60x40&tol=%00"])
+def test_a_malformed_part_size_is_refused_with_a_reason(sidecar, cockpit, via, query):
+    url = sidecar[3] if via == "sidecar" else cockpit[1]
+    status, body = _call(url + "/api/pick/detect?" + query)
+    assert status == 400 and json.loads(body)["error"].startswith("bad request")
+    status, body = _call(url + "/api/pick/preview", json.dumps({"part": query.split("=", 1)[1]}).encode())
+    assert status == 400 and json.loads(body)["error"].startswith("bad request")

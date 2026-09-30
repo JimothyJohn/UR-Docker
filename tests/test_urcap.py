@@ -1,4 +1,4 @@
-"""The PolyScope X URCap (urcap/realsense-pilot): its source tree agrees with itself,
+"""The PolyScope X URCap (urcap/perceptronic): its source tree agrees with itself,
 urcap/urcapx.py packages it reproducibly (and the downloadable urcap/dist/ copy is
 that build, byte for byte) the way UR's urcap-utils does and installs it the way
 the Robot-API expects (against a real HTTP server), the behavior worker speaks the
@@ -23,17 +23,18 @@ from pathlib import Path
 
 import pytest
 
-from perception.config import PerceptionConfig
-from perception.realsense import SyntheticRgbdCamera
-from perception.webapp import ViewerApp, ViewerHandler
+from perceptronics.config import PerceptionConfig
+from perceptronics.realsense import SyntheticRgbdCamera
+from perceptronics.webapp import ViewerApp, ViewerHandler
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "urcap"))
 import urcapx  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-URCAP = ROOT / "urcap" / "realsense-pilot"
+URCAP = ROOT / "urcap" / "perceptronic"
 DIST = ROOT / "urcap" / "dist"
-FRONTEND = URCAP / "realsense-pilot-frontend"
+FRONTEND = URCAP / "perceptronic-frontend"
+PACKAGE_VERSION = urcapx.read_manifest((URCAP / "manifest.yaml").read_text(encoding="utf-8"))["version"]
 NODE = shutil.which("node")
 
 
@@ -42,8 +43,8 @@ NODE = shutil.which("node")
 
 def test_manifest_contribution_and_sources_agree():
     meta = urcapx.read_manifest((URCAP / "manifest.yaml").read_text(encoding="utf-8"))
-    assert meta["vendorID"] == "olympus-controls" and meta["urcapID"] == "realsense-pilot"
-    assert meta["folders"] == ["realsense-pilot-frontend"]
+    assert meta["vendorID"] == "nickarmenta" and meta["urcapID"] == "perceptronic"
+    assert meta["folders"] == ["perceptronic-frontend"]
     contribution = json.loads((FRONTEND / "contribution.json").read_text(encoding="utf-8"))
     (node,) = contribution["applicationNodes"]
     tag = node["componentTagName"]
@@ -52,8 +53,24 @@ def test_manifest_contribution_and_sources_agree():
     worker_js = (FRONTEND / node["behaviorURI"]).read_text(encoding="utf-8")
     assert f'const TAG = "{tag}"' in main_js and f'const NODE_TYPE = "{tag}"' in worker_js
     i18n = json.loads((FRONTEND / node["translationPath"] / "en.json").read_text(encoding="utf-8"))
-    assert i18n["application"]["nodes"][tag]["title"] == "RealSense Pilot"
-    for key in ("programNodes", "smartSkills", "sidebarItems", "operatorScreens"):
+    assert i18n["application"]["nodes"][tag]["title"] == "Perceptronic"
+    # the two program nodes: Perceptronic Pick and its After picture N child
+    pick, after = contribution["programNodes"]
+    assert [pick["componentTagName"], after["componentTagName"]] == [f"{tag}-pick", f"{tag}-after"]
+    lib = (FRONTEND / "pickscript.js").read_text(encoding="utf-8")
+    for prog in (pick, after):
+        for key in ("presenterURI", "behaviorURI", "iconURI"):
+            assert (FRONTEND / prog[key]).is_file(), prog[key]
+        assert prog["categoryName"] == "perceptronic" and prog["translationPath"] == "assets/i18n/"
+        worker = (FRONTEND / prog["behaviorURI"]).read_text(encoding="utf-8")
+        assert 'importScripts("pickscript.js")' in worker
+        assert i18n["program"]["tree"]["nodes"][prog["componentTagName"]]
+    pick_js = (FRONTEND / pick["presenterURI"]).read_text(encoding="utf-8")
+    assert pick["presenterURI"] == after["presenterURI"]  # one presenter file defines both elements
+    for t in (pick["componentTagName"], after["componentTagName"]):
+        assert f'"{t}"' in pick_js and f'"{t}"' in lib
+    assert f'const APP_TYPE = "{tag}"' in lib and f'const APP_TAG = "{tag}"' in pick_js
+    for key in ("smartSkills", "sidebarItems", "operatorScreens"):
         assert contribution[key] == []
 
 
@@ -71,15 +88,25 @@ def test_manifest_reader_rejects_bad_ids_and_missing_fields():
 
 def test_package_is_a_gzipped_tar_with_the_manifest_first(tmp_path):
     out = urcapx.package(URCAP, tmp_path)
-    assert out.name == "realsense-pilot-0.1.0.urcapx"
+    assert out.name == "perceptronic-0.3.0.urcapx"
     with tarfile.open(out, "r:gz") as tar:
         names = tar.getnames()
     assert names[0] == "manifest.yaml"
     assert "LICENSE" in names
-    for rel in ("main.js", "realsense-pilot-node.worker.js", "contribution.json", "assets/i18n/en.json"):
-        assert f"realsense-pilot-frontend/{rel}" in names
+    for rel in (
+        "main.js",
+        "perceptronic-node.worker.js",
+        "pick.js",
+        "pickscript.js",
+        "pick-node.worker.js",
+        "after-node.worker.js",
+        "contribution.json",
+        "assets/i18n/en.json",
+        "assets/icons/perceptronic-pick.svg",
+    ):
+        assert f"perceptronic-frontend/{rel}" in names
     assert not any(n.startswith("./") or n.startswith("/") for n in names)
-    assert urcapx.manifest_from_urcapx(out)["urcapID"] == "realsense-pilot"
+    assert urcapx.manifest_from_urcapx(out)["urcapID"] == "perceptronic"
 
 
 def test_package_refuses_a_missing_folder(tmp_path):
@@ -98,7 +125,7 @@ def test_package_is_reproducible_and_normalised(tmp_path):
     a = urcapx.package(URCAP, tmp_path / "a").read_bytes()
     b = urcapx.package(URCAP, tmp_path / "b").read_bytes()
     assert a == b
-    with tarfile.open(tmp_path / "a" / "realsense-pilot-0.1.0.urcapx", "r:gz") as tar:
+    with tarfile.open(tmp_path / "a" / "perceptronic-0.3.0.urcapx", "r:gz") as tar:
         infos = tar.getmembers()
     assert {(i.uid, i.gid, i.uname, i.gname) for i in infos} == {(0, 0, "", "")}
     assert len({i.mtime for i in infos}) == 1 and infos[0].mtime > 1_600_000_000
@@ -114,7 +141,7 @@ def test_changed_source_changes_the_timestamp(tmp_path):
     before = urcapx.package(src, tmp_path / "a")
     with tarfile.open(before, "r:gz") as tar:
         old = tar.getmember("manifest.yaml").mtime
-    main = src / "realsense-pilot-frontend" / "main.js"
+    main = src / "perceptronic-frontend" / "main.js"
     main.write_text(main.read_text(encoding="utf-8") + "\n// edit\n", encoding="utf-8")
     after = urcapx.package(src, tmp_path / "b")
     with tarfile.open(after, "r:gz") as tar:
@@ -137,7 +164,7 @@ def test_the_downloadable_package_is_the_current_source(tmp_path):
     assert not stale, f"old packages left in urcap/dist/: {stale} (the README links one version)"
     readme = (ROOT / "urcap" / "README.md").read_text(encoding="utf-8")
     assert f"dist/{fresh.name}" in readme, f"urcap/README.md doesn't link dist/{fresh.name}"
-    linked = set(re.findall(r"realsense-pilot-\d+\.\d+\.\d+\.urcapx", readme))
+    linked = set(re.findall(r"perceptronic-\d+\.\d+\.\d+\.urcapx", readme))
     assert linked == {fresh.name}, f"urcap/README.md names other versions: {sorted(linked - {fresh.name})}"
 
 
@@ -202,13 +229,13 @@ class UrserviceStub(BaseHTTPRequestHandler):
                 status=500,
             )
             return
-        ident = {"vendorID": "olympus-controls", "urcapID": "realsense-pilot"}
+        ident = {"vendorID": "nickarmenta", "urcapID": "perceptronic"}
         if any(it["id"] == ident for it in UrserviceStub.installed):
             self._reply(
                 {"errors": [{"code": "already_installed", "message": "urcap already installed"}]}, status=409
             )
             return
-        UrserviceStub.installed.append({"id": ident, "version": "0.1.0", "urcapName": "RealSense Pilot"})
+        UrserviceStub.installed.append({"id": ident, "version": "0.1.0", "urcapName": "Perceptronic"})
         self._reply({"metadata": {"id": ident}}, status=201)
 
     def do_DELETE(self):  # noqa: N802
@@ -247,7 +274,7 @@ def test_install_posts_urcapxfile_then_409_then_replace_deletes_first(tmp_path, 
     upload = [r for r in UrserviceStub.requests if r["method"] == "POST"][-1]
     assert upload["path"] == urcapx.API_PATH
     assert upload["fields"] == [("urcapxFile", out.name)] and upload["size"] == out.stat().st_size
-    assert urcapx.is_installed(host, port, "olympus-controls", "realsense-pilot")
+    assert urcapx.is_installed(host, port, "nickarmenta", "perceptronic")
     # a second install is a 409 with the --replace hint, and nothing changed
     res = urcapx.install(out, host, port)
     assert not res["ok"] and res["status"] == 409 and "--replace" in res["hint"]
@@ -255,7 +282,7 @@ def test_install_posts_urcapxfile_then_409_then_replace_deletes_first(tmp_path, 
     res = urcapx.install(out, host, port, replace=True)
     assert res["ok"] and res["replaced"] is True
     assert [r["method"] for r in UrserviceStub.requests[-3:]] == ["GET", "DELETE", "POST"]
-    assert UrserviceStub.requests[-2]["path"].endswith("/olympus-controls/realsense-pilot")
+    assert UrserviceStub.requests[-2]["path"].endswith("/nickarmenta/perceptronic")
     assert len(UrserviceStub.installed) == 1
 
 
@@ -297,18 +324,58 @@ def test_cli_list_and_package(tmp_path, urservice, capsys):
     assert urcapx.main(["list", "--host", host, "--port", str(port)]) == 0
     assert "universal-robots/web-frontend-app  1.2.0" in capsys.readouterr().out
     assert urcapx.main(["package", str(URCAP), "--out", str(tmp_path)]) == 0
-    assert (tmp_path / "realsense-pilot-0.1.0.urcapx").is_file()
+    assert (tmp_path / "perceptronic-0.3.0.urcapx").is_file()
     assert (
         urcapx.main(
-            ["install", str(tmp_path / "realsense-pilot-0.1.0.urcapx"), "--host", host, "--port", str(port)]
+            ["install", str(tmp_path / "perceptronic-0.3.0.urcapx"), "--host", host, "--port", str(port)]
         )
         == 0
     )
+    assert urcapx.main(["delete", "nickarmenta", "perceptronic", "--host", host, "--port", str(port)]) == 0
+    assert UrserviceStub.installed == [UrserviceStub.installed[0]] and len(UrserviceStub.installed) == 1
+
+
+# -- release: the urcapx-v<version> tag against the committed package ----------------------------
+
+
+def test_release_check_accepts_the_committed_package():
+    out = urcapx.release_check(f"urcapx-v{PACKAGE_VERSION}", URCAP, DIST)
+    assert out["version"] == PACKAGE_VERSION and out["path"].endswith(
+        f"perceptronic-{PACKAGE_VERSION}.urcapx"
+    )
+    assert re.fullmatch(r"[0-9a-f]{64}", out["sha256"])
+
+
+@pytest.mark.parametrize(
+    ("tag", "problem"),
+    [
+        ("v0.3.0", "is not urcapx-v"),
+        ("urcapx-v9.9.9", "says version"),
+        ("urcapx-v0.3", "is not urcapx-v"),
+    ],
+)
+def test_release_check_refuses_a_wrong_tag(tag, problem):
+    with pytest.raises(urcapx.UrcapError, match=problem):
+        urcapx.release_check(tag, URCAP, DIST)
+
+
+def test_release_check_refuses_a_stale_or_missing_package(tmp_path):
+    src = tmp_path / "src"
+    shutil.copytree(URCAP, src)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    with pytest.raises(urcapx.UrcapError, match="not committed"):
+        urcapx.release_check(f"urcapx-v{PACKAGE_VERSION}", src, dist)
+    urcapx.package(src, dist)
+    assert urcapx.release_check(f"urcapx-v{PACKAGE_VERSION}", src, dist)["version"] == PACKAGE_VERSION
+    main = src / "perceptronic-frontend" / "main.js"
+    main.write_text(main.read_text(encoding="utf-8") + "\n// edit\n", encoding="utf-8")
+    with pytest.raises(urcapx.UrcapError, match="not what the sources package to"):
+        urcapx.release_check(f"urcapx-v{PACKAGE_VERSION}", src, dist)
     assert (
-        urcapx.main(["delete", "olympus-controls", "realsense-pilot", "--host", host, "--port", str(port)])
+        urcapx.main(["release-check", f"urcapx-v{PACKAGE_VERSION}", "--src", str(URCAP), "--dist", str(DIST)])
         == 0
     )
-    assert UrserviceStub.installed == [UrserviceStub.installed[0]] and len(UrserviceStub.installed) == 1
 
 
 # -- the worker under node ----------------------------------------------------------------------
@@ -340,7 +407,7 @@ def test_worker_speaks_the_threads_protocol(tmp_path):
     harness = tmp_path / "harness.js"
     harness.write_text(WORKER_HARNESS, encoding="utf-8")
     proc = subprocess.run(
-        [NODE, str(harness), str(FRONTEND / "realsense-pilot-node.worker.js")],
+        [NODE, str(harness), str(FRONTEND / "perceptronic-node.worker.js")],
         capture_output=True,
         text=True,
         timeout=30,
@@ -356,12 +423,19 @@ def test_worker_speaks_the_threads_protocol(tmp_path):
         by_uid.setdefault(m["uid"], []).append(m)
     assert [m["type"] for m in by_uid["u1"]] == ["running", "result"]
     assert by_uid["u1"][1]["complete"] is True
-    assert by_uid["u1"][1]["payload"] == {
-        "type": "olympus-realsense-pilot",
-        "version": "1.0.0",
+    fresh = {
+        "type": "nickarmenta-perceptronic",
+        "version": "1.1.0",
         "cockpitUrl": "",
+        "areas": [],
+        "tipMm": 163,
+        "reachInnerMm": 150,
+        "reachOuterMm": 150,
+        "robotModel": "",
     }
-    assert by_uid["u2"][1]["payload"] == {"type": "x", "version": "1.0.0", "cockpitUrl": "http://j:7621"}
+    assert by_uid["u1"][1]["payload"] == fresh
+    # a 1.0.0 node (cockpit URL only) comes up with the 1.1.0 defaults and its URL kept
+    assert by_uid["u2"][1]["payload"] == {**fresh, "type": "x", "cockpitUrl": "http://j:7621"}
     assert by_uid["u3"][0]["type"] == "error" and by_uid["u3"][0]["error"]["__error_marker"] == "$$error"
     assert "nope" in by_uid["u3"][0]["error"]["message"]
 
@@ -370,9 +444,17 @@ def test_worker_speaks_the_threads_protocol(tmp_path):
 def test_presenter_parses_and_defines_the_element():
     subprocess.run([NODE, "--check", str(FRONTEND / "main.js")], check=True, timeout=30)
     src = (FRONTEND / "main.js").read_text(encoding="utf-8")
-    assert re.search(r"customElements\.define\(TAG, RealSensePilot\)", src)
+    assert re.search(r"customElements\.define\(TAG, Perceptronic\)", src)
     for prop in ("applicationNode", "applicationAPI", "robotSettings", "robotContext"):
         assert f"set {prop}(" in src, prop
+    # the pick areas: touches through PolyScope's DH, the plane from pickscript.js
+    for member in (
+        "robotInfoService.getRobotType",
+        "applicationNodeService.updateNode",
+        "P.plane(",
+        "P.fingertip(",
+    ):
+        assert member in src, member
     for route in (
         "/api/color.png",
         "/api/point",
@@ -382,6 +464,32 @@ def test_presenter_parses_and_defines_the_element():
         "/api/robot/stop",
     ):
         assert route in src, route
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_program_node_presenter_parses_and_defines_both_elements():
+    subprocess.run([NODE, "--check", str(FRONTEND / "pick.js")], check=True, timeout=30)
+    src = (FRONTEND / "pick.js").read_text(encoding="utf-8")
+    assert "customElements.define(PICK_TAG, PerceptronicPickNode)" in src
+    assert "customElements.define(DIALOG_TAG, PerceptronicPickDialog)" in src
+    assert "customElements.define(AFTER_TAG, PerceptronicAfterNode)" in src
+    for prop in ("contributedNode", "presenterAPI", "robotSettings", "programTree", "applicationContext"):
+        assert src.count(f"set {prop}(") == 2, prop  # both row elements take every property PolyScope sets
+    # the screen is a PolyScope custom dialog: it takes what PolyScope sets on one and is opened by the row
+    for prop in ("inputData", "presenterApi", "afterOpen"):
+        assert f"set {prop}(" in src, prop
+    assert "dialogService.openCustomDialog(DIALOG_TAG" in src
+    for route in ("/api/color.png", "/api/pick/scene?opts="):
+        assert route in src, route
+    for member in (
+        "programNodeService.updateNode",
+        "applicationService.getApplicationNode(APP_TAG)",
+        "variableService",
+        'service("robotPositionService")',
+        'service("robotMoveService")',
+        "rms.autoMove(",
+    ):
+        assert member in src, member
 
 
 # -- the cockpit side the page depends on ---------------------------------------------------------
@@ -461,14 +569,14 @@ def test_cors_star_and_off():
 
 
 def test_cors_from_args_reads_flag_then_env(monkeypatch):
-    from perception.webapp import cors_from_args
+    from perceptronics.webapp import cors_from_args
 
     class A:
         cors = None
 
-    monkeypatch.delenv("PERCEPTION_CORS", raising=False)
+    monkeypatch.delenv("PERCEPTRONICS_CORS", raising=False)
     assert cors_from_args(A()) == []
-    monkeypatch.setenv("PERCEPTION_CORS", "http://a:1, http://b:2")
+    monkeypatch.setenv("PERCEPTRONICS_CORS", "http://a:1, http://b:2")
     assert cors_from_args(A()) == ["http://a:1", "http://b:2"]
     A.cors = "*"
     assert cors_from_args(A()) == ["*"]

@@ -134,13 +134,13 @@
       <text x="442" y="64" text-anchor="middle" font-weight="600" fill="#1f3d7a">Laptop — the brain (today)</text>
       <text x="442" y="82" text-anchor="middle" font-size="12" fill="#646464">Windows · uv · Python, stdlib only</text>
       <rect x="306" y="96" width="130" height="50" rx="8" fill="#c2e1f6"/>
-      <text x="371" y="116" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perception gui</text>
+      <text x="371" y="116" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perceptronics gui</text>
       <text x="371" y="134" text-anchor="middle" font-size="11" fill="#1f3d7a">cockpit · owns the camera</text>
       <rect x="448" y="96" width="130" height="50" rx="8" fill="#c2e1f6"/>
-      <text x="513" y="116" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perception-mcp</text>
+      <text x="513" y="116" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perceptronics-mcp</text>
       <text x="513" y="134" text-anchor="middle" font-size="11" fill="#1f3d7a">the keys for Claude</text>
       <rect x="306" y="156" width="272" height="46" rx="8" fill="#e9eef3"/>
-      <text x="442" y="174" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perception doctor · cell profiles · urctl</text>
+      <text x="442" y="174" text-anchor="middle" font-size="12" font-weight="600" fill="#1f3d7a">perceptronics doctor · cell profiles · urctl</text>
       <text x="442" y="192" text-anchor="middle" font-size="11" fill="#646464">safety envelope + audit log on every robot action</text>
       <!-- network -->
       <line x1="592" y1="130" x2="690" y2="130" stroke="#2f5bb7" stroke-width="2" marker-end="url(#arr)"/>
@@ -163,9 +163,9 @@
       <!-- later -->
       <rect x="292" y="300" width="590" height="110" rx="12" fill="#ffffff" stroke="#56a0d3" stroke-width="1.5" stroke-dasharray="6 5"/>
       <text x="587" y="326" text-anchor="middle" font-weight="600" fill="#1f3d7a">Later: the same stack on the controller's own NVIDIA GPU (UR AI Accelerator)</text>
-      <text x="587" y="348" text-anchor="middle" font-size="12" fill="#646464">USB from the camera into the controller; perception + urctl run next to the robot;</text>
+      <text x="587" y="348" text-anchor="middle" font-size="12" fill="#646464">USB from the camera into the controller; perceptronics + urctl run next to the robot;</text>
       <text x="587" y="366" text-anchor="middle" font-size="12" fill="#646464">the laptop just opens the cockpit in a browser. Same code, a different cell profile.</text>
-      <text x="587" y="392" text-anchor="middle" font-size="11" fill="#c0392b">unverified — no attempt on the accelerator yet; the perception container builds for linux/arm64 (Dockerfile.perception)</text>
+      <text x="587" y="392" text-anchor="middle" font-size="11" fill="#c0392b">unverified — no attempt on the accelerator yet; the perceptronics container builds for linux/arm64 (Dockerfile.perceptronics)</text>
     </svg>
     </div>
     <figcaption class="caption">one process owns the camera; everything else — browser, doctor, agent — talks to it over HTTP</figcaption>
@@ -173,7 +173,7 @@
   <h3>Why these three ports</h3>
   <div class="tblwrap"><table>
     <tr><th>Hop</th><th>What travels</th><th>Notes</th></tr>
-    <tr><td>Camera → laptop, USB 3</td><td>Z16 depth + RGB8 colour framesets, aligned depth→colour in the SDK</td><td><code>perception/realsense.py</code> binds librealsense's C API with ctypes; no <code>pyrealsense2</code>, no numpy. Needs the SDK's shared library: <code>realsense2.dll</code> on Windows, <code>brew install librealsense</code> on macOS.</td></tr>
+    <tr><td>Camera → laptop, USB 3</td><td>Z16 depth + RGB8 colour framesets, aligned depth→colour in the SDK</td><td><code>perceptronics/realsense.py</code> binds librealsense's C API with ctypes; no <code>pyrealsense2</code>, no numpy. Needs the SDK's shared library: <code>realsense2.dll</code> on Windows, <code>brew install librealsense</code> on macOS.</td></tr>
     <tr><td>Laptop → controller, Robot-API <code>:80</code></td><td>HTTP JSON: robot/safety/control mode, power on, brake release, load, play</td><td>PolyScope X replaced the e-Series Dashboard (29999) with this REST API. Every mutating call answers <strong>403 in Local mode</strong>.</td></tr>
     <tr><td>Laptop → controller, Primary <code>:30001</code></td><td>URScript text; the controller runs it immediately</td><td>Motion goes here as one <code>def … end</code> program with a done-marker; <code>urctl</code> holds the socket until it lands. Off by default on PolyScope X: enable under Settings → Security → Services, and it needs Remote mode.</td></tr>
     <tr><td>Controller → laptop, RTDE <code>:30004</code></td><td>Structured telemetry: joints, TCP pose, speed, force, safety bits</td><td>What the cockpit's status chips and the doctor read. Also a Services toggle on PolyScope X.</td></tr>
@@ -191,11 +191,11 @@
   <div class="step"><div class="num">3</div><div class="body"><h3>Measure the object</h3>
     <p>Per segment: area, bbox, centroid, depth median, metric extent, orientation, and the <strong>3D point in the colour-camera frame</strong> (<code>point_m</code>) from the colour intrinsics and the aligned depth. A grasp hint (top-down, across the minor axis) rides along for the next step.</p></div></div>
   <div class="step"><div class="num">4</div><div class="body"><h3>Hand-eye: camera frame → flange → base</h3>
-    <p>The flange pose comes live from the controller (<code>ur_flange_pose</code>: TCP pose, active TCP offset, and the controller's own <code>pose_trans(tcp, pose_inv(offset))</code>, cross-checked against the host's arithmetic). The camera-in-flange transform is the bracket's nominal seed for the print in use (<code>PERCEPTION_BRACKET=eseries|ur20</code>), or a real calibration via <code>PERCEPTION_T_FLANGE_CAMERA</code>.</p>
+    <p>The flange pose comes live from the controller (<code>ur_flange_pose</code>: TCP pose, active TCP offset, and the controller's own <code>pose_trans(tcp, pose_inv(offset))</code>, cross-checked against the host's arithmetic). The camera-in-flange transform is the bracket's nominal seed for the print in use (<code>PERCEPTRONICS_BRACKET=eseries|ur20</code>), or a real calibration via <code>PERCEPTRONICS_T_FLANGE_CAMERA</code>.</p>
 <pre>p_base = T_base_flange · T_flange_depth · T_depth_color · p_color
 
 T_base_flange    live, from the controller (get_actual_tcp_pose + get_tcp_offset)
-T_flange_depth   bracket seed (eseries / ur20) or PERCEPTION_T_FLANGE_CAMERA
+T_flange_depth   bracket seed (eseries / ur20) or PERCEPTRONICS_T_FLANGE_CAMERA
 T_depth_color    the SDK's extrinsics, read at open (~15 mm along x on a D435)
 p_color          the segment's point_m</pre></div></div>
   <div class="step"><div class="num">5</div><div class="body"><h3>Approach pose, then one <code>movel</code></h3>
@@ -209,7 +209,7 @@ p_color          the segment's point_m</pre></div></div>
   <h2 class="chapter-title">The pilot's seat</h2>
   <p>Three things, all on the laptop, all reading the same cell profile: a <strong>cockpit</strong> in the browser, a <strong>doctor</strong> in the terminal, and an <strong>MCP server</strong> that hands the whole cell to an agent.</p>
 
-  <h3>The cockpit — <code>perception --cell ur20 gui</code></h3>
+  <h3>The cockpit — <code>perceptronics --cell ur20 gui</code></h3>
   <div class="cards">
     <div class="card"><h3>Colour + Depth</h3><p>Live 848×480 with hover-to-measure on the depth panel (metres under the cursor), click or drag to segment on the colour panel, near/far range with auto-fit.</p></div>
     <div class="card"><h3>Object + Robot</h3><p>The segment's features; <em>Locate in base</em> shows every intermediate frame and the approach pose; <em>Move TCP to approach</em> asks for confirmation, then sends one <code>movel</code>.</p></div>
@@ -217,20 +217,20 @@ p_color          the segment's point_m</pre></div></div>
   </div>
   <p style="margin-top:1em">The header chips summarise the camera (kind, USB link, fps) and the robot (mode · safety · control). Everything a button does is one call into the same tool registry an agent uses, and lands in the Events log with its outcome and any safety verdict — so a person watching the browser and an agent reading <code>cam_events</code> see the same history.</p>
 
-  <h3>The doctor — <code>perception --cell ur20 doctor</code></h3>
+  <h3>The doctor — <code>perceptronics --cell ur20 doctor</code></h3>
   <p>A pre-flight checklist for the four things that fail independently: the SDK, the camera, the network path, and the controller's state. Every failed check carries its fix in words. Add <code>--stream</code> to open the camera and judge real frames (black colour, sparse depth, fps); <code>--json</code> for machines. The cockpit's <em>Doctor</em> button runs the same report with the live stream. Sample output, exactly the shape it prints (this run: dev Mac, no camera plugged in, no robot):</p>
 <pre>[--  ] host: Darwin 25.6.0 arm64, python 3.13.5
 [--  ] cell: ur20 → {'UR_CELL': 'ur20', 'UR_PLATFORM': 'polyscopex', 'UR_ROBOT_API_PORT': '80', ...}
 <span class="ok">[ok  ]</span> sdk: librealsense 2.58.4 at /opt/homebrew/lib/librealsense2.dylib
 <span class="bad">[FAIL]</span> camera: no RealSense device enumerated
        fix: plug the D435 into a USB 3 port with a short cable (≤ 2 m, no hub); on macOS run under sudo; ...
-[--  ] cockpit: no cockpit at http://127.0.0.1:7621 (start one: perception gui)
+[--  ] cockpit: no cockpit at http://127.0.0.1:7621 (start one: perceptronics gui)
 <span class="bad">[FAIL]</span> robot.host: UR_HOST is empty
-       fix: set the controller IP in the cell file (perception/cells/&lt;cell&gt;.env) or UR_HOST
+       fix: set the controller IP in the cell file (perceptronics/cells/&lt;cell&gt;.env) or UR_HOST
 verdict: NOT READY</pre>
   <p>Verdicts: <strong>READY</strong> (everything, including motion), <strong>STATE ONLY (motion gated)</strong> (state reads work; a Local-mode or protective-stop check failed), <strong>NOT READY</strong>. The doctor also spots a <em>platform mismatch</em> — cell says PolyScope X but only the e-Series Dashboard port answers — and tells you which <code>UR_PLATFORM</code> to set.</p>
 
-  <h3>The keys — <code>perception-mcp</code></h3>
+  <h3>The keys — <code>perceptronics-mcp</code></h3>
   <p>One MCP server (stdio, stdlib JSON-RPC, zero deps) serving two tool families. The robot tools are the full <code>urctl</code> registry, driving the controller directly through the safety envelope + audit log. The camera and cell tools go <em>through the running cockpit</em>, because one process must own the USB camera and the cockpit is it. When no cockpit is up, the <code>cam_*</code> tools answer with an in-band error that says how to start one; the robot tools keep working.</p>
   <div class="tblwrap"><table>
     <tr><th>Tool</th><th>Does</th></tr>
@@ -246,7 +246,7 @@ verdict: NOT READY</pre>
   <p>Claude Code picks the server up from <code>.mcp.json</code> at the repo root; the cell comes from <code>UR_CELL</code> in the shell (or add <code>"--cell", "ur20"</code> to <code>args</code>):</p>
 <pre>{
   "mcpServers": {
-    "cell": { "command": "uv", "args": ["run", "perception-mcp"], "env": {} }
+    "cell": { "command": "uv", "args": ["run", "perceptronics-mcp"], "env": {} }
   }
 }</pre>
 </section>
@@ -261,18 +261,18 @@ verdict: NOT READY</pre>
     <tr><td><code>scripts\setup-windows.ps1 -Cell ur20</code></td><td>Windows: install uv, fetch + run the RealSense SDK installer, set <code>REALSENSE_LIB</code>, <code>uv sync</code>, then the doctor. Idempotent.</td></tr>
     <tr><td><code>scripts\cockpit.ps1 -Cell ur20</code></td><td>Windows: the cockpit for that cell. <code>-DryRun</code> validates + audits robot actions without sending; <code>-Doctor</code> runs only the checklist.</td></tr>
     <tr><td><code>scripts/cockpit.sh ur20</code></td><td>macOS/Linux equivalent (re-runs itself under sudo on macOS for a real camera). <code>make cockpit CELL=ur20</code> is the same.</td></tr>
-    <tr><td><code>uv run perception --cell ur20 doctor --stream</code></td><td>Pre-flight incl. opening the camera. <code>make doctor CELL=ur20</code>.</td></tr>
-    <tr><td><code>uv run perception --cell ur20 gui</code></td><td>The cockpit on <code>http://127.0.0.1:7621</code> (loopback only; <code>--bind 0.0.0.0</code> for a cell LAN, no auth).</td></tr>
-    <tr><td><code>uv run perception-mcp --cell ur20</code></td><td>The MCP server over stdio (<code>make mcp CELL=ur20</code>). <code>--dry-run</code> for a safe rehearsal.</td></tr>
-    <tr><td><code>uv run perception cells</code></td><td>Lists the shipped cell profiles and what each sets.</td></tr>
+    <tr><td><code>uv run perceptronics --cell ur20 doctor --stream</code></td><td>Pre-flight incl. opening the camera. <code>make doctor CELL=ur20</code>.</td></tr>
+    <tr><td><code>uv run perceptronics --cell ur20 gui</code></td><td>The cockpit on <code>http://127.0.0.1:7621</code> (loopback only; <code>--bind 0.0.0.0</code> for a cell LAN, no auth).</td></tr>
+    <tr><td><code>uv run perceptronics-mcp --cell ur20</code></td><td>The MCP server over stdio (<code>make mcp CELL=ur20</code>). <code>--dry-run</code> for a safe rehearsal.</td></tr>
+    <tr><td><code>uv run perceptronics cells</code></td><td>Lists the shipped cell profiles and what each sets.</td></tr>
     <tr><td><code>make simx-up</code> · <code>HOST_ARCH=arm64 make simx-up</code></td><td>The PolyScope X simulator (web UI on <code>localhost:8000</code>); arm64 variant for Apple Silicon.</td></tr>
     <tr><td><code>make simx-state</code> · <code>make simx-bring-up</code></td><td><code>urctl state</code> / <code>bring-up</code> against the sim with the right env set.</td></tr>
   </table></div>
   <h3>Cell profiles</h3>
-  <p>A cell is a <code>KEY=VALUE</code> file in <code>perception/cells/</code> holding the environment the toolkit already reads. <code>--cell</code> (or <code>UR_CELL</code>) loads it; <strong>a variable already set in the shell wins</strong>, and only <code>UR_*</code>, <code>PERCEPTION_*</code>, <code>REALSENSE_*</code> keys are accepted.</p>
+  <p>A cell is a <code>KEY=VALUE</code> file in <code>perceptronics/cells/</code> holding the environment the toolkit already reads. <code>--cell</code> (or <code>UR_CELL</code>) loads it; <strong>a variable already set in the shell wins</strong>, and only <code>UR_*</code>, <code>PERCEPTRONICS_*</code>, <code>REALSENSE_*</code> keys are accepted.</p>
   <div class="tblwrap"><table>
     <tr><th>Cell</th><th>Robot</th><th>Ports</th><th>Camera / bracket</th></tr>
-    <tr><td><code>sim</code></td><td>PolyScope X container on this machine, <code>UR_HOST=localhost</code></td><td>Robot-API 8000 · Primary 31001 · RTDE 31004</td><td><code>PERCEPTION_FAKE=1</code> (synthetic scene) · <code>eseries</code></td></tr>
+    <tr><td><code>sim</code></td><td>PolyScope X container on this machine, <code>UR_HOST=localhost</code></td><td>Robot-API 8000 · Primary 31001 · RTDE 31004</td><td><code>PERCEPTRONICS_FAKE=1</code> (synthetic scene) · <code>eseries</code></td></tr>
     <tr><td><code>ur3</code></td><td>UR3e, <code>UR_HOST=</code> <span class="tag no">fill in</span></td><td>80 · 30001 · 30004</td><td>D435 · <code>eseries</code> print</td></tr>
     <tr><td><code>ur20</code></td><td>UR20, <code>UR_HOST=</code> <span class="tag no">fill in</span></td><td>80 · 30001 · 30004</td><td>D435 · <code>ur20</code> print</td></tr>
   </table></div>
@@ -314,11 +314,11 @@ verdict: NOT READY</pre>
   <div class="note"><strong>Two pendant steps with no network equivalent</strong> (they apply to the real robots too): <br>1. <strong>Remote control mode</strong> — a toggle on the Safety screen. Every mutating Robot-API call (power on, brake release, load, play) returns 403 in Local, and on PolyScope X Primary URScript is <em>silently ignored</em> in Local (verified 2026-09-04 on the sim). State reads work in Local. <br>2. <strong>Services</strong> — hamburger → Settings → Security → Services: enable <em>Primary Client Interface</em> and <em>RTDE</em> (admin password). Off by default.</div>
   <p>UR's published default passwords (first use forces a change): admin <code>easybot</code>, operational mode <code>operator</code>.</p>
   <h3>The synthetic camera</h3>
-  <p><code>--fake</code> or <code>PERCEPTION_FAKE=1</code> replaces the RealSense with a deterministic scene — three coloured disks on a wall at ~1.2 m, plausible D435 intrinsics, identity depth→colour extrinsics, a slow wobble so long-polls always have a new frame. The whole cockpit, the doctor's <code>--stream</code> check, the MCP tools and the test suite run on it with no hardware.</p>
+  <p><code>--fake</code> or <code>PERCEPTRONICS_FAKE=1</code> replaces the RealSense with a deterministic scene — three coloured disks on a wall at ~1.2 m, plausible D435 intrinsics, identity depth→colour extrinsics, a slow wobble so long-polls always have a new frame. The whole cockpit, the doctor's <code>--stream</code> check, the MCP tools and the test suite run on it with no hardware.</p>
   <h3>The <code>sim</code> cell ties them together</h3>
 <pre><span class="p">$</span> HOST_ARCH=arm64 make simx-up          <span class="c"># then in Chrome: Remote mode + Services toggles</span>
-<span class="p">$</span> uv run perception --cell sim doctor  <span class="c"># expect: stream ok, robot reachable, control REMOTE</span>
-<span class="p">$</span> uv run perception --cell sim gui     <span class="c"># synthetic camera + the sim: Bring up → jog → click → Locate → Move</span></pre>
+<span class="p">$</span> uv run perceptronics --cell sim doctor  <span class="c"># expect: stream ok, robot reachable, control REMOTE</span>
+<span class="p">$</span> uv run perceptronics --cell sim gui     <span class="c"># synthetic camera + the sim: Bring up → jog → click → Locate → Move</span></pre>
   <p>Docker note for the dev Mac: the e-Series URSim image does not boot under Docker Desktop's Rosetta or QEMU emulation here, which is one reason the perception work targets PolyScope X (native arm64 image).</p>
 </section>
 
@@ -330,7 +330,7 @@ verdict: NOT READY</pre>
   <ol>
     <li>Clone the repo. In PowerShell: <code>powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1 -Cell sim</code>. It installs <code>uv</code> (winget <code>astral-sh.uv</code>, or the official script), downloads <code>RealSense.SDK-WIN10-2.58.4.*.exe</code> from the librealsense GitHub release and runs it (click through; you need the SDK, not just the Viewer), sets <code>REALSENSE_LIB</code> to <code>C:\Program Files (x86)\Intel RealSense SDK 2.0\bin\x64\realsense2.dll</code>, runs <code>uv sync</code>, then the doctor. <span class="tag no">not yet run on the laptop</span></li>
     <li>Plug the D435 into a <strong>USB 3 port</strong> with a short cable (≤ 2 m, no hub). Re-run <code>scripts\cockpit.ps1 -Doctor -Stream</code>: expect <code>sdk</code>, <code>camera</code> and <code>stream</code> to pass.</li>
-    <li>Put the controller's IP into the cell file: <code>perception\cells\ur3.env</code> or <code>ur20.env</code>, <code>UR_HOST=…</code> (pendant: Settings → System → Network). Or export <code>UR_HOST</code> in the shell — the shell wins.</li>
+    <li>Put the controller's IP into the cell file: <code>perceptronics\cells\ur3.env</code> or <code>ur20.env</code>, <code>UR_HOST=…</code> (pendant: Settings → System → Network). Or export <code>UR_HOST</code> in the shell — the shell wins.</li>
   </ol>
   <h3>On the pendant (once per robot)</h3>
   <ul>
@@ -355,17 +355,17 @@ verdict: NOT READY</pre>
     <tr><td>Flange pattern</td><td>ISO-50 only, Ø63 × 6 disc, 4× M6</td><td>ISO-50 + ISO-80 on a Ø96 plate, engages the Ø50 pilot</td></tr>
     <tr><td>Camera clocking</td><td>on +Y, the tool-I/O connector side (<code>ARM_ANGLE_DEG = 90</code>)</td><td>clocked <strong>45°</strong> off the M8 socket (it sits only 17.6 mm behind the face), 5 mm further out</td></tr>
     <tr><td>Nominal depth origin in the flange frame</td><td><strong>(17.5, 66.5, 1.7) mm</strong>, axes x_cam = −X, y_cam = −Y, z_cam = +Z</td><td><strong>(62.9, 38.2, 1.7) mm</strong>, the same axes rotated −45° about Z</td></tr>
-    <tr><td>Selected by</td><td><code>PERCEPTION_BRACKET=eseries</code> (cells <code>sim</code>, <code>ur3</code>)</td><td><code>PERCEPTION_BRACKET=ur20</code> (cell <code>ur20</code>)</td></tr>
+    <tr><td>Selected by</td><td><code>PERCEPTRONICS_BRACKET=eseries</code> (cells <code>sim</code>, <code>ur3</code>)</td><td><code>PERCEPTRONICS_BRACKET=ur20</code> (cell <code>ur20</code>)</td></tr>
     <tr><td>Mass, printed</td><td>≈ 27 g (29.7 cm³)</td><td>≈ 40 g (44.2 cm³)</td></tr>
   </table></div>
-  <p>These seeds come straight from the CAD (<code>out/build_info.json</code>; a unit test holds the code to it) and are <strong>not a calibration</strong>: a printed part will not hold ±1°, and 1° at 0.5 m is ~9 mm. A hand-eye calibration replaces the seed via <code>PERCEPTION_T_FLANGE_CAMERA="[x, y, z, rx, ry, rz]"</code> (depth frame in the flange frame, metres + UR rotation vector); the cockpit's <em>hand-eye</em> row and the doctor say which is active. The active TCP offset is read live from the controller, so tool changes need no code — but if the tool is not at the flange, author any saved programs with script nodes, not MoveJ/Waypoint nodes (PolyScope's MoveJ IK goes through the active TCP).</p>
+  <p>These seeds come straight from the CAD (<code>out/build_info.json</code>; a unit test holds the code to it) and are <strong>not a calibration</strong>: a printed part will not hold ±1°, and 1° at 0.5 m is ~9 mm. A hand-eye calibration replaces the seed via <code>PERCEPTRONICS_T_FLANGE_CAMERA="[x, y, z, rx, ry, rz]"</code> (depth frame in the flange frame, metres + UR rotation vector); the cockpit's <em>hand-eye</em> row and the doctor say which is active. The active TCP offset is read live from the controller, so tool changes need no code — but if the tool is not at the flange, author any saved programs with script nodes, not MoveJ/Waypoint nodes (PolyScope's MoveJ IK goes through the active TCP).</p>
 </section>
 
 <!-- ============================================================ 7. troubleshooting -->
 <section class="spread" id="trouble">
   <div class="chapter-no">chapter 7</div>
   <h2 class="chapter-title">Troubleshooting</h2>
-  <p>Start with <code>perception --cell &lt;cell&gt; doctor --stream</code>; most of this table is what its <code>fix:</code> lines say.</p>
+  <p>Start with <code>perceptronics --cell &lt;cell&gt; doctor --stream</code>; most of this table is what its <code>fix:</code> lines say.</p>
   <div class="tblwrap"><table>
     <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
     <tr><td><code>librealsense2 not found</code> on Windows</td><td>SDK not installed, or the DLL isn't where the loader looks</td><td>Run the SDK installer; set <code>REALSENSE_LIB</code> to <code>C:\Program Files (x86)\Intel RealSense SDK 2.0\bin\x64\realsense2.dll</code> (the setup script does)</td></tr>
@@ -380,7 +380,7 @@ verdict: NOT READY</pre>
     <tr><td>A move is refused instantly with a <code>velocity</code> / <code>tcp_velocity</code> violation</td><td>Above the envelope caps (~2.09 rad/s joints, 1.0 m/s TCP)</td><td>Lower the speed; the jog pad's own cap is 0.25 m/s</td></tr>
     <tr><td>Doctor: <code>robot.reach</code> says platform mismatch</td><td>Cell says <code>polyscopex</code> but only port 29999 answers (or vice versa)</td><td>Set <code>UR_PLATFORM</code> as the fix line says</td></tr>
     <tr><td>PolyScope X sim: Services toggles revert</td><td>Image 10.14 (firewall <code>ethCB0</code> 404)</td><td>Stay on 10.13.0 (pinned in <code>docker-compose.yml</code>)</td></tr>
-    <tr><td><code>cam_*</code> MCP tools answer "no cockpit at …"</td><td>The cockpit isn't running (it owns the camera; the MCP server talks to it)</td><td>Start <code>perception --cell &lt;cell&gt; gui</code>; or set <code>PERCEPTION_COCKPIT_URL</code></td></tr>
+    <tr><td><code>cam_*</code> MCP tools answer "no cockpit at …"</td><td>The cockpit isn't running (it owns the camera; the MCP server talks to it)</td><td>Start <code>perceptronics --cell &lt;cell&gt; gui</code>; or set <code>PERCEPTRONICS_COCKPIT_URL</code></td></tr>
   </table></div>
 </section>
 
@@ -397,7 +397,7 @@ verdict: NOT READY</pre>
     <tr><td>UR3e / UR20 (real arms)</td><td><span class="tag no">not run yet</span> — IPs not known</td></tr>
     <tr><td>Bracket Rev B.2</td><td><span class="tag no">not printed</span></td></tr>
     <tr><td>Hand-eye</td><td><span class="tag no">uncalibrated</span> — bracket nominal seed in use</td></tr>
-    <tr><td>Stack on the controller's GPU (AI Accelerator)</td><td><span class="tag no">not attempted</span> — perception container builds for linux/arm64 only</td></tr>
+    <tr><td>Stack on the controller's GPU (AI Accelerator)</td><td><span class="tag no">not attempted</span> — perceptronics container builds for linux/arm64 only</td></tr>
   </table></div>
   <h3>Field log</h3>
   <ul class="log">
@@ -425,6 +425,8 @@ verdict: NOT READY</pre>
     <li><b>2026-09-26</b> — <b>The camera inside PolyScope X.</b> A URCap X Application Node (<code>urcap/realsense-pilot</code>) embeds the cockpit's colour feed in PolyScope 10's own UI: hover reads depth, a click segments, locates through the hand-eye and shows the base point, approach pose and reach; Move hands the pose to PolyScope's inverse kinematics + auto-move screen or to the cockpit over Primary. Plain JavaScript against SDK 6.5.65 (the 10.13 pairing) with the behavior worker speaking threads.js's protocol directly, packaged and installed by <code>scripts/urcapx.py</code> without npm; the cockpit grew <code>--cors</code> and <code>GET /api/color.png</code> for it. Packaging, the install protocol (against a Robot-API look-alike), the worker (under node) and the cockpit side are tested; the SDK's Robot-API install path answers 403 outside Remote mode (from inside the container too), but the endpoint System Manager itself uses (<code>urservice/api/v1/urcaps</code>, field <code>urcapxFile</code>) took the package in Local mode — 201, listed, deletable — so the installer uses that. Then, in headless Chromium on the sim: the node loads under Application, the feed runs from the CORS-enabled fake cockpit, hover reads depth, a click segments and calls locate, and the cockpit URL persists in the node across a reload. Locate and the two Move buttons still need a cockpit with a robot behind it.</li>
     <li><b>2026-09-27</b> — <b>Reach from the controller, and the pilot on PolyScope 5.</b> Every click on the UR3e cell read <i>OUT OF REACH</i>: the reach check was a 0.5 m sphere from the base origin, and the parts sit 0.27 m below the base. The controller's own IK (<code>get_inverse_kin_has_solution</code>, verified on PolyScope 5.25.1) solves flanges 0.505–0.533 m out that the sphere rejected, and agreed with an independent UR3e IK on every test pose; <code>locate</code> and every absolute move now ask it (sphere only as the no-answer fallback) and <code>locate</code> returns the controller's <code>joint_target</code>. With the Hand-E the flange is ≥ 150 mm over a part at a pick, where all four blocks are reachable; the cell's 75 mm flange standoff (set on 09-23, before the gripper) is not, for the two far ones. In the PolyScope X node, <b>Move (PolyScope)</b> handed PolyScope's IK a pose under the <i>real</i> controller's 220 mm training TCP while the sim's TCP is the flange — 17 cm past reach on every click, and that IK never answers an unsolvable pose; it now targets PolyScope's own TCP (verified in the 10.13 sim: IK solves, the hold-to-move screen opens), and a saved <code>:7621</code> is completed to a URL instead of being fetched relative to PolyScope. New: <code>urcap/realsense-pilot-ps5</code>, the same pilot as a PolyScope 5 Installation node (Java 8 Swing, built by <code>urcap/urcap5.py</code> against the URCap API bundles in the URSim image) <span class="tag no">not yet loaded in PolyScope</span> — the e-Series sim cannot run on the Mac Studio (Rosetta traps Xvfb, QEMU kills URControl), so the first load is on the robot or in CI's URSim.</li>
     <li><b>2026-09-27</b> — <b>A narrated pick, a stale hand-eye, and the scan as the instrument.</b> The HD Pro C920 room view was hunting for focus every other second (sharpness 156 → 134) once a warm lamp went in behind it; <code>perception/uvc.py</code> turns autofocus off over a UVC <code>SET_CUR</code> to the camera terminal (libusb, no root, never the D435) and both webcams now hold at focus 0. <code>pick-cycle</code> captions each step in plain words (THINKING / DOING) and the assembler keeps each caption up long enough to read. The recorded run found four blocks; two were past the arm's working reach, and both reachable grasps closed on nothing: the tilted (28.5°) survey and a near-vertical look disagreed by 26–28 mm, and the fingers landed 2–5 cm off in the webcams — the 09-25 orbit solve no longer holds <span class="tag no">re-calibrate before picking</span>. The grasp is now straight down (the table is flat and parallel to the base), leaning out only when the controller's IK needs it. The cockpit streams the flange pose over RTDE into every frame (identical to the controller's own flange); the page became a minimal ship's-computer terminal whose main instrument is the depth as a base-frame point cloud — orbit, zoom, pan, snap-isometric, click to centre, a light column over every object, and the feed's target box re-projected through the live pose so it stays on the part as the wrist moves.</li>
+    <li><b>2026-09-28</b> — <b>Tell the Pick node the part's size.</b> The PolyScope 5 <b>RealSense Pick</b> node (0.4.0) takes the part's rough size as it lies — length × width, optionally height, ± a tolerance (default 25 %, never under 5 mm) — and the detector considers only candidates that size instead of the fixed foam-block gate (≤ 70 × 60 mm), so a bigger part is findable and a smaller or merged look-alike is not. Height is measured against the table in a ring around each candidate (a sticker with a block's footprint reads "too flat"); a grip depth that would reach the table is refused at teach time; the teach screen draws the ruled-out candidates grey with what they measured and why; a run that sees only the wrong sizes stops with its own reason (status −7). Still colour-segmented: the part must read white. <span class="tag no">synthetic scenes only — not yet run on the UR3e</span></li>
+    <li><b>2026-09-29</b> — <b>Perceptronic.</b> Both URCaps renamed from "RealSense Pilot" to <b>Perceptronic</b> and re-owned by Nick personally (PolyScope 5 bundle <code>com.nickarmenta.perceptronic</code>, vendor Nick Armenta; PolyScope X <code>nickarmenta/perceptronic</code>) — a different bundle identity, so the old URCap is removed from a robot that had it. One mark everywhere: a P with a lens in its bowl (<code>urcap/perceptronic.svg</code>; the Java draws the same glyph — toolbar badge, screen headers, a faint watermark on every live picture). New in 0.6.0: <b>the P button</b> in PolyScope's header, a toolbar contribution like Robotiq's gripper button, that drops the live picture down over any screen and reads the Installation node's saved address. The toolbar API is in PolyScope 5.4's URCap API already (checked in the jars), so it needs no compatibility guard; CI's Felix check now requires the toolbar service registered on every PolyScope 5. <span class="tag no">built and unit-tested; the button's size and the popup on a real pendant are still owed</span></li>
   </ul>
   <h3>Open questions</h3>
   <ul>
@@ -437,7 +439,7 @@ verdict: NOT READY</pre>
   <div class="note"><strong>Keeping this document current.</strong> It lives in <code>docs/realsense-cell.html</code> and ships with the PR. When something is learned on hardware: append a dated line to the field log, flip the row in the status table, and correct the section it belongs to (a new symptom goes in Troubleshooting with its fix; a new command goes in Interfaces). Anything not yet seen on real hardware stays marked <span class="tag no">unverified</span>.</div>
 </section>
 
-<footer>UR-utils · <a href="index.html">the sandbox</a> · <a href="realsense.md">docs/realsense.md</a> · <a href="harness.md">docs/harness.md</a></footer>
+<footer>perceptronics · <a href="index.html">the sandbox</a> · <a href="realsense.md">docs/realsense.md</a> · <a href="harness.md">docs/harness.md</a></footer>
 </div>
 </body>
 </html>

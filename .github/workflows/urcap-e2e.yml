@@ -10,13 +10,13 @@ on:
   pull_request:
     paths:
       - "urcap/**"
-      - "perception/webapp.py"
+      - "perceptronics/webapp.py"
       - ".github/workflows/urcap-e2e.yml"
   push:
     branches: [main]
     paths:
       - "urcap/**"
-      - "perception/webapp.py"
+      - "perceptronics/webapp.py"
       - ".github/workflows/urcap-e2e.yml"
   workflow_dispatch:
 

@@ -106,7 +106,7 @@ Frame: origin = centre of the flange face, +Z = away from the flange (tool direc
 | Radial extent / lowest point | 79 from the flange axis (`ur20`: 84) / z = −19.05 | `radial_extent`, `lowest_z` |
 | Bracket bbox / volume / mass | `eseries`: 63 × 86 × 25 mm · **29.7 cm³** · 37 g solid PPA-CF (1.25 g/cm³), ≈ 27 g printed per §5; `ur20`: 110 × 110 × 25 · 44.2 cm³ · 55 g solid, ≈ 40 g printed. Rev B was 67.3 / 63.3 cm³: **−56 % / −30 %** | `out/build_info.json` → `export.variants` |
 
-**Nominal camera pose (hand-eye seed).** Camera axes in flange axes: `x_cam = −X`, `y_cam = −Y` (image-down points at the mounting wall), `z_cam = +Z`; camera-left is +X. Depth origin (left imager) = **(17.5, 66.5, 1.7) mm** in the flange frame for the `eseries` print. (`ur20` print, 45° and 5 mm further out: (62.9, 38.2, 1.7) — `build_info.json` → `export.variants.ur20.derived`.) These are `perception.handeye.BRACKET_SEEDS` (`PERCEPTION_BRACKET=eseries|ur20` picks one; `tests/test_handeye.py` holds them to `build_info.json`); calibrate to finish — a printed part will not hold ±1°.
+**Nominal camera pose (hand-eye seed).** Camera axes in flange axes: `x_cam = −X`, `y_cam = −Y` (image-down points at the mounting wall), `z_cam = +Z`; camera-left is +X. Depth origin (left imager) = **(17.5, 66.5, 1.7) mm** in the flange frame for the `eseries` print. (`ur20` print, 45° and 5 mm further out: (62.9, 38.2, 1.7) — `build_info.json` → `export.variants.ur20.derived`.) These are `perceptronics.handeye.BRACKET_SEEDS` (`PERCEPTRONICS_BRACKET=eseries|ur20` picks one; `tests/test_handeye.py` holds them to `build_info.json`); calibrate to finish — a printed part will not hold ±1°.
 
 ## 4. Hardware (BOM)
 
@@ -152,7 +152,7 @@ Countersunk heads are the whole point: the wrist-side face of the wall is 3 mm f
 - [ ] 1/4-20 engages ≤ the measured thread depth; M3 ≤ 3 mm (depth gauge first)
 - [ ] Flat heads flush or below the wrist-side face; wall clears the wrist through a full wrist-3 rotation
 - [ ] USB-C plug seats with the cable running along −Z; no contact (A1)
-- [ ] `perception rs-info` sees the camera; `perception gui` shows the tool where §6.5 predicts
+- [ ] `perceptronics rs-info` sees the camera; `perceptronics gui` shows the tool where §6.5 predicts
 - [ ] Hand-eye calibration result vs. the nominal (17.5, 66.5, 1.7) mm / axis map in §3
 - [ ] Tool-I/O plug seats with the wall in place (e-Series: 10.6 mm predicted clearance)
 - [ ] Payload updated on the pendant

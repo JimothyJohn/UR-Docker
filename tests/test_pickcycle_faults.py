@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from perception.pickcycle import Block, CockpitError, PickCycle, add_pick_cycle_args
+from perceptronics.pickcycle import Block, CockpitError, PickCycle, add_pick_cycle_args
 from tests.test_pickcycle import H, K, W, scene
 from tests.test_urctl import FakeController
 from urctl.config import RobotConfig
@@ -180,7 +180,7 @@ def test_bail_out_stops_the_program_first_then_opens_then_backs_off(rig):
 
 
 def test_interrupt_during_the_run_reaches_the_bail_out(monkeypatch, tmp_path):
-    from perception import pickcycle as pc
+    from perceptronics import pickcycle as pc
 
     calls = []
     monkeypatch.setattr(pc.PickCycle, "run", lambda self, **kw: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -264,3 +264,38 @@ def test_blocks_hugging_the_base_column_are_skipped_by_default(rig):
     assert "too close" in (cycle._out_of_band(near) or "")
     ok = Block(0, [0.16, 0.16, -0.25], 0.0, 0.045, 0.028, (0, 0), 500)  # 0.23 m out
     assert cycle._out_of_band(ok) is None
+
+
+class NoGripperRouteCockpit(FakeCockpit):
+    """A cockpit that predates POST /api/robot/gripper (answers 404 "no route")."""
+
+    def post(self, path, body=None):
+        self.posts.append((path, body or {}))
+        if path == "/api/robot/gripper":
+            return {"ok": False, "error": f"no route {path}"}
+        return super().post(path, body)
+
+
+def test_gripper_fallback_drives_the_cockpits_robot_without_uv(monkeypatch, tmp_path):
+    """Regression (2026-09-28): the fallback shelled out to `uv run urctl gripper`, so
+    any install without uv on PATH (the pip-installed Jetson image) couldn't grip."""
+    import urctl.transport as tr
+
+    fake = FakeController().install(monkeypatch)
+    fake.gripper_object = 140
+    hosts: list[str] = []
+
+    def collect(host, port, payload, **kw):
+        hosts.append(host)
+        return fake._primary_collect(host, port, payload, **kw)
+
+    monkeypatch.setattr(tr, "send_and_collect", collect)
+    monkeypatch.setenv("PATH", str(tmp_path))  # no uv, no urctl script
+    cycle = PickCycle(NoGripperRouteCockpit(), say_fn=lambda ev: None)
+
+    r = cycle._gripper("close")
+
+    assert r["ok"] and r["object_detected"], r
+    assert hosts and set(hosts) == {"fake-ur.invalid"}  # the robot the cockpit is linked to
+    assert any("SET POS 255" in b for b in fake.gripper_sends)
+    assert any("SET FOR 80" in b for b in fake.gripper_sends)  # the cycle's force, not the CLI's 100
