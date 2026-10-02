@@ -24,6 +24,10 @@
 - 2026-09-26 — `perceptronics calibrate` (orbit hand-eye) is built and tested on the fake cell; **run it once on the UR3e** (`--dry-run` first), then delete `scripts/pilot/orbit_cal*.py` + `wiggle.py`. `record.py`/`show.py`/`assemble.py` stay as the timelapse tooling. `place.py`'s lesson carries: a place spot needs the same clearance check as a pick.
 - 2026-09-28 — **Pick node teach screen: redesign to ≤ 3 simple stages** with minimal clicks and input and plenty of visual feedback (Nick's operator-UI rule: minimal clicks and input, at most 3 simple stages, plenty of visual feedback). 0.4.0's seven-button part-size row is the opposite; don't ship it as is.
 
+## Repo (GitHub settings; Nick, by hand)
+
+- 2026-10-01 — **Detach from the fork network.** GitHub still lists `JimothyJohn/perceptronics` as a fork of `Olympus-Controls/UR-utils`, and "Leave fork network" refuses while this repo has a child fork. (1) As `nickarmenta`, delete `nickarmenta/UR-Docker` (Settings → Danger Zone → Delete this repository) — checked 2026-10-01: its two branches (`main`, `feature/realsense-desktop-client`) hold no commit `dev` lacks, no open PRs, no releases, issues disabled. (2) As `JimothyJohn`, `perceptronics` → Settings → General → Danger Zone → **Leave fork network**. (3) Confirm with `gh repo view JimothyJohn/perceptronics --json isFork` (want `false`), then check Dependabot, the `dev` protection rule and auto-merge still work. Local side is done: one remote, `origin`; the three stray PRs on Olympus (#21, #25, #26) are closed.
+
 ## Open questions for Nick
 
 - 2026-09-30 — **"Closer look: sharper angle, a bit farther"** — I read it as: keep the part out from behind the gripper. On the UR3e's hand-eye the open fingertip sits 9° off the camera's axis, 0.15 m out, so a part aimed at the middle of the picture was half hidden. Now the part is held 12° off-axis on the side away from the gripper, from 0.30 m (was centred, 0.25 m). If you meant a more oblique view of the part itself, say so.

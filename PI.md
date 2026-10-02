@@ -93,7 +93,7 @@ stops resolving when the deploy finishes.
 
 - Session-start audit. Nick edits `TODO.md` by hand in this tree — an `M TODO.md` you
   didn't make is his; leave it, stage by path.
-- Fresh branch off `fork/dev`; fixes to `deploy/pi/` are expected.
+- Fresh branch off `origin/dev`; fixes to `deploy/pi/` are expected.
 - `env -u UR_CELL python3 -m pytest tests/test_deploy_pi.py -q` green before you start.
 
 ### 1. Preflight
