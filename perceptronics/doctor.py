@@ -38,6 +38,9 @@ from .handeye import ENV_BRACKET, ENV_T_FLANGE_CAMERA, HandEye
 
 PROBE_TIMEOUT_S = 2.0
 STREAM_FRAMES = 15
+# How long the doctor waits for a cockpit that answers but hasn't opened its camera yet
+# (a service restarted a moment ago). The open itself takes about 2 s on a Pi 5.
+COCKPIT_OPEN_WAIT_S = 15.0
 
 
 @dataclass
@@ -197,6 +200,12 @@ def check_devices(report: Report, library: str | None = None) -> list[dict]:
             )
         )
         return []
+    _add_device_checks(report, devices)
+    return devices
+
+
+def _add_device_checks(report: Report, devices: list[dict], held_by: str = "") -> None:
+    """One ``camera`` line per device; ``held_by`` names the cockpit that reported it."""
     for d in devices:
         usb = str(d.get("usb_type") or "?")
         fw = d.get("firmware") or "?"
@@ -205,7 +214,8 @@ def check_devices(report: Report, library: str | None = None) -> list[dict]:
             Check(
                 "camera",
                 not slow,
-                f"{d.get('name')} sn {d.get('serial')} fw {fw} usb {usb}",
+                f"{d.get('name')} sn {d.get('serial')} fw {fw} usb {usb}"
+                + (f" (streaming in the cockpit at {held_by})" if held_by else ""),
                 fix=(
                     "USB 2 link: the stream negotiates the fastest mode both sensors share "
                     "(640×480 @ 15 on a D435 — no 848×480 colour there); a direct USB 3 port (blue), "
@@ -215,7 +225,6 @@ def check_devices(report: Report, library: str | None = None) -> list[dict]:
                 data=dict(d),
             )
         )
-    return devices
 
 
 def check_stream(report: Report, camera, frames: int = STREAM_FRAMES) -> None:
@@ -551,7 +560,8 @@ def approach_check(active_offset, env=None) -> Check:
     )
 
 
-def check_cockpit(report: Report, url: str) -> None:
+def cockpit_info(url: str) -> dict | None:
+    """The running cockpit's ``/api/info``, or ``None`` when nothing answers at ``url``."""
     import json
     import urllib.request
 
@@ -559,6 +569,30 @@ def check_cockpit(report: Report, url: str) -> None:
         with urllib.request.urlopen(url.rstrip("/") + "/api/info", timeout=PROBE_TIMEOUT_S) as r:
             info = json.loads(r.read())
     except Exception:
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def cockpit_camera(info: dict | None) -> dict | None:
+    """The RealSense a running cockpit has open, as its device-info dict. One process
+    owns the USB camera: while the cockpit streams, a second open answers ``failed to
+    set power state`` (RS2_USB_STATUS_BUSY), so the cockpit's own report is the only
+    truthful source for the ``camera`` line."""
+    cam = (info or {}).get("camera") or {}
+    device = cam.get("device")
+    if cam.get("kind") == "realsense" and cam.get("open") is True and isinstance(device, dict) and device:
+        return device
+    return None
+
+
+def _cockpit_is_opening(info: dict | None) -> bool:
+    """A cockpit with a RealSense it has not opened yet and no error from trying."""
+    cam = (info or {}).get("camera") or {}
+    return cam.get("kind") == "realsense" and not cam.get("open") and not (info or {}).get("last_error")
+
+
+def check_cockpit(report: Report, url: str, info: dict | None) -> None:
+    if info is None:
         report.add(
             Check("cockpit", None, f"no cockpit at {url} (start one: perceptronics gui)", severity="info")
         )
@@ -603,12 +637,24 @@ def run_doctor(
     report = Report()
     check_host(report, env)
     fake = str(env.get("PERCEPTRONICS_FAKE", "")).strip().lower() in ("1", "true", "yes", "on")
+    info = cockpit_info(cockpit_url) if cockpit_url else None
+    deadline = time.monotonic() + COCKPIT_OPEN_WAIT_S
+    while _cockpit_is_opening(info) and time.monotonic() < deadline:
+        time.sleep(0.25)
+        info = cockpit_info(cockpit_url) or info
+    held = cockpit_camera(info)
     if camera and not fake:
         if check_sdk(report, library):
-            devices = check_devices(report, library)
-            if stream and devices:
-                cam = camera_factory() if camera_factory else _default_camera(perceptronics_config, library)
-                check_stream(report, cam)
+            if held:
+                # --stream can't open it either; the cockpit line carries its fps and seq.
+                _add_device_checks(report, [held], held_by=cockpit_url or "")
+            else:
+                devices = check_devices(report, library)
+                if stream and devices:
+                    cam = (
+                        camera_factory() if camera_factory else _default_camera(perceptronics_config, library)
+                    )
+                    check_stream(report, cam)
     elif camera and fake:
         report.add(
             Check(
@@ -626,7 +672,7 @@ def run_doctor(
             )
             check_stream(report, cam)
     if cockpit_url:
-        check_cockpit(report, cockpit_url)
+        check_cockpit(report, cockpit_url, info)
     if robot:
         cfg = robot_config or RobotConfig.from_env()
         cfg = RobotConfig(**{**cfg.__dict__, "timeout": min(cfg.timeout, 5.0)})
