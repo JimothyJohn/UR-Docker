@@ -207,3 +207,92 @@ def test_approach_check_names_the_tool_offset_every_move_runs_with():
     assert flange.ok is None and flange.severity == "warn" and "fingertip" in flange.fix
     bad = approach_check([0] * 6, {"PERCEPTRONICS_TIP_M": "-1"})
     assert bad.ok is False and bad.severity == "critical"
+
+
+# ----- the camera a running cockpit owns (first Pi deploy, 2026-10-02) ----------------
+
+
+@pytest.fixture
+def cockpit_info():
+    """A real HTTP server answering ``/api/info`` with whatever the test puts in
+    ``info`` — the running cockpit, as the doctor sees it."""
+    import json
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    info: dict = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps(info).encode()
+            self.send_response(200 if self.path == "/api/info" else 404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield info, f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+
+
+D435 = {"name": "RealSense D435", "serial": "832112072004", "firmware": "5.12.7.100", "usb_type": "3.2"}
+
+
+def _camera_is_busy(monkeypatch):
+    """What librealsense answers a second process while the cockpit streams."""
+    from perceptronics import doctor, realsense
+
+    def busy(library=None):
+        raise realsense.RealSenseError("rs2_create_device(info_list, index:0): failed to set power state")
+
+    monkeypatch.setattr(doctor, "check_sdk", lambda report, library=None: True)
+    monkeypatch.setattr(realsense, "list_devices", busy)
+
+
+def test_camera_held_by_the_running_cockpit_is_not_a_failure(cockpit_info, monkeypatch):
+    info, url = cockpit_info
+    info.update(camera={"kind": "realsense", "open": True, "device": D435}, fps=29.97, seq=480)
+    _camera_is_busy(monkeypatch)
+    report = run_doctor(robot=False, cockpit_url=url, env={})
+    cam = _by_name(report.as_dict())["camera"]
+    assert cam["ok"] is True
+    assert "832112072004" in cam["detail"] and "usb 3.2" in cam["detail"] and "cockpit" in cam["detail"]
+    assert report.ok
+
+
+def test_cockpit_camera_on_usb2_still_warns(cockpit_info, monkeypatch):
+    info, url = cockpit_info
+    info.update(camera={"kind": "realsense", "open": True, "device": {**D435, "usb_type": "2.1"}})
+    _camera_is_busy(monkeypatch)
+    cam = _by_name(run_doctor(robot=False, cockpit_url=url, env={}).as_dict())["camera"]
+    assert cam["ok"] is False and cam["severity"] == "warn" and "USB 2" in cam["fix"]
+
+
+@pytest.mark.parametrize(
+    "camera",
+    [
+        {"kind": "realsense", "open": False, "device": D435},  # the cockpit lost it
+        {"kind": "realsense", "open": True, "device": None},
+        {"kind": "synthetic", "open": True, "device": D435},  # a --fake cockpit owns no camera
+        {},
+    ],
+)
+def test_camera_the_cockpit_does_not_hold_is_still_checked(cockpit_info, monkeypatch, camera):
+    info, url = cockpit_info
+    info.update(camera=camera)
+    _camera_is_busy(monkeypatch)
+    report = run_doctor(robot=False, cockpit_url=url, env={})
+    cam = _by_name(report.as_dict())["camera"]
+    assert cam["ok"] is False and "failed to set power state" in cam["detail"]
+    assert not report.ok
+
+
+def test_camera_is_checked_directly_when_no_cockpit_answers(monkeypatch):
+    _camera_is_busy(monkeypatch)
+    report = run_doctor(robot=False, cockpit_url=f"http://127.0.0.1:{_closed_port()}", env={})
+    assert _by_name(report.as_dict())["camera"]["ok"] is False
