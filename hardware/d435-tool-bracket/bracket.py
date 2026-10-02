@@ -2,7 +2,7 @@
 assembly renders. Everything dimensional lives in the PARAMS block; the spec
 (README.md next to this file) quotes the same numbers, so keep them in step.
 
-    uv run --with cadquery --with matplotlib python hardware/d435-tool-bracket/bracket.py
+    python3 hardware/d435-tool-bracket/bracket.py
 
 Design (Rev B): a sandwich *adapter plate* that carries BOTH the ISO 9409-1-50
 (UR3e/5e/10e/16e) and the ISO 9409-1-80 (UR20/UR30) bolt patterns as through

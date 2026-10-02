@@ -110,7 +110,7 @@ services:
   # Built for the Jetson Orin that will sit next to the robot (linux/arm64) and
   # for amd64 dev boxes. `docker compose --profile perceptronics up -d`. Needs USB:
   # privileged + /dev/bus/usb (Docker Desktop on macOS cannot pass USB through —
-  # on a Mac run `sudo uv run perceptronics gui` natively instead). No auth: cell
+  # on a Mac run `sudo python3 -m perceptronics gui` natively instead). No auth: cell
   # network only. Captures persist in ./captures on the host.
   perceptronics:
     profiles: ["perceptronics"]

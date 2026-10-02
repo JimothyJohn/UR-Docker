@@ -277,8 +277,8 @@ class NoGripperRouteCockpit(FakeCockpit):
 
 
 def test_gripper_fallback_drives_the_cockpits_robot_without_uv(monkeypatch, tmp_path):
-    """Regression (2026-09-28): the fallback shelled out to `uv run urctl gripper`, so
-    any install without uv on PATH (the pip-installed Jetson image) couldn't grip."""
+    """Regression (2026-09-28): the fallback shelled out to `python3 -m urctl gripper`, so
+    any install without it on PATH (the pip-installed Jetson image) couldn't grip."""
     import urctl.transport as tr
 
     fake = FakeController().install(monkeypatch)
@@ -290,7 +290,7 @@ def test_gripper_fallback_drives_the_cockpits_robot_without_uv(monkeypatch, tmp_
         return fake._primary_collect(host, port, payload, **kw)
 
     monkeypatch.setattr(tr, "send_and_collect", collect)
-    monkeypatch.setenv("PATH", str(tmp_path))  # no uv, no urctl script
+    monkeypatch.setenv("PATH", str(tmp_path))  # no urctl script
     cycle = PickCycle(NoGripperRouteCockpit(), say_fn=lambda ev: None)
 
     r = cycle._gripper("close")

@@ -1,14 +1,15 @@
-// Perceptronic Pick — Program Node behavior (the web worker PolyScope X loads for the
+// 3D Pick — Program Node behavior (the web worker PolyScope X loads for the
 // program node declared in contribution.json). Same hand-written threads.js protocol as
 // perceptronic-node.worker.js (`registerProgramBehavior(b)` is `expose(b)`); the shape
 // of every answer is what PolyScope's own serializers read back (web-app main.js,
 // 10.13): a code generator answers `{type: "$$ScriptBuilder", script, currentIndent}`
 // — PolyScope rebuilds `new ScriptBuilder(script, currentIndent)`, and `append`s it: the
-// lines at the builder's indent, the children after them `currentIndent` levels deeper,
-// so the after-children builder carries the negative indent that closes those blocks.
+// lines at the builder's indent, the children after them `currentIndent` levels deeper.
+// The node has no children (0.5.0: one move sequence, from the survey to the clamp), so the
+// whole script is the before-children builder at indent 0 and the after-children one is empty.
 // The application context arrives as `{type: "$$ApplicationContext", contributions:
 // {contributionList: [...]}}` — the Perceptronic application node (cockpit URL, pick
-// areas, tip, reach) is the entry of our type.
+// areas, tip, the robot's model) is the entry of our type.
 
 importScripts("pickscript.js");
 
@@ -30,16 +31,18 @@ function fresh() {
   return {
     type: NODE_TYPE,
     version: NODE_VERSION,
-    allowsChildren: true,
+    allowsChildren: false,
     parameters: {
       nodeId: P.newNodeId(),
       points: [],
       selectedPoint: 0,
       orderFirst: "LR",
       orderRows: "FB",
-      gripper: "robotiq",
+      shape: "box",
+      gripCheck: true,
+      gripLongSide: false,
+      closeLook: true,
       popupOnFail: true,
-      perPointRoutine: false,
       pickPort: P.DEFAULT_PICK_PORT,
       values: P.defaults(),
       foundVariable: null,
@@ -54,12 +57,10 @@ const behaviors = {
   programNodeLabel: async (node) => {
     const p = (node && node.parameters) || {};
     const st = P.settings(p, null);
-    const v = st.values;
-    const l = Math.max(v.partLengthMm, v.partWidthMm), w = Math.min(v.partLengthMm, v.partWidthMm);
     const np = st.points.length;
-    // PolyScope prefixes the tree row with the node's title itself ("Perceptronic Pick: …")
+    // PolyScope prefixes the tree row with the node's title itself ("3D Pick: …")
     return [
-      { type: "primary", value: `${P.num(l)}×${P.num(w)}×${P.num(v.partHeightMm)} mm` },
+      { type: "primary", value: P.partWords(st) },
       { type: "secondary", value: `${np} picture${np === 1 ? "" : "s"} · ${P.orderText(st.orderFirst, st.orderRows)}` },
     ];
   },
@@ -76,13 +77,9 @@ const behaviors = {
     return builder(sc.before, sc.childDepth);
   },
 
-  generateCodeAfterChildren: async (node, context, applicationContext) => {
-    const st = P.settings((node && node.parameters) || {}, appNodeOf(applicationContext), null);
-    const sc = P.script(st);
-    return builder(sc.after, -sc.childDepth);
-  },
+  generateCodeAfterChildren: async () => ({ type: "$$ScriptBuilder", script: "", currentIndent: 0 }),
 
-  allowsChild: async () => true,
+  allowsChild: async () => false,
 
   upgradeNode: async (loaded) => {
     const base = fresh();
@@ -91,7 +88,7 @@ const behaviors = {
       ...base,
       ...(loaded || {}),
       version: NODE_VERSION,
-      allowsChildren: true,
+      allowsChildren: false,
       parameters: {
         ...base.parameters,
         ...p,

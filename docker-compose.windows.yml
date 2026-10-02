@@ -1,0 +1,59 @@
+# The RGB-D cockpit on a Windows 11 laptop with Docker Desktop (WSL 2 engine).
+# Don't run this by hand the first time: scripts\docker-windows.ps1 shares the
+# RealSense with WSL (usbipd-win), sets the variables below and waits for the
+# picture. docs/windows-docker.md is the walk-through.
+#
+#   powershell -ExecutionPolicy Bypass -File scripts\docker-windows.ps1
+#
+# A file of its own (not a profile in docker-compose.yml) so the coworker's
+# `docker compose -f docker-compose.windows.yml ...` never touches the simulators,
+# and under its own project name so the two can run side by side.
+name: perceptronics-windows
+services:
+  cockpit:
+    build:
+      context: .
+      dockerfile: Dockerfile.perceptronics
+    image: perceptronics/perceptronics:local
+    # COCKPIT_ARGS: extra `perceptronics-gui` flags (the script's -NoRobot / -DryRun).
+    command: perceptronics-gui --bind 0.0.0.0 --port 7621 --pick-port 7622 --no-browser ${COCKPIT_ARGS:-}
+    # USB: usbipd-win attaches the camera to the WSL 2 kernel Docker Desktop's
+    # containers run on; it shows up under /dev/bus/usb there. Privileged because
+    # librealsense claims the interfaces over libusb (same as the Jetson service).
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      # snapshots + the hand-eye file (captures\calibration\handeye_<cell>.json)
+      - ./captures:/app/captures
+      # your own cell files: deploy\windows\<name>.env -> UR_CELL=/cells/<name>.env
+      - ./deploy/windows:/cells:ro
+    ports:
+      # 7621 the cockpit (browser, URCap "Cockpit" field), 7622 the pick server the
+      # Perceptronic Pick node's URScript connects to. Neither has any auth, so they
+      # are published on loopback unless PERCEPTRONICS_PUBLISH says otherwise
+      # (the script's -Lan: 0.0.0.0 + a firewall rule for the local subnet only).
+      - "${PERCEPTRONICS_PUBLISH:-127.0.0.1}:7621:7621"
+      - "${PERCEPTRONICS_PUBLISH:-127.0.0.1}:7622:7622"
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Passed through only when set in the shell that runs compose; an unset or
+      # empty one leaves the cell file's value alone (perceptronics/cell.py).
+      - UR_CELL
+      - UR_HOST
+      - PERCEPTRONICS_FAKE
+      - PERCEPTRONICS_RS_SERIAL
+      - PERCEPTRONICS_CORS
+      - PERCEPTRONICS_SEGMENT_BACKEND
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7621/api/info', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped

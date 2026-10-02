@@ -84,6 +84,7 @@ def test_index_and_info(server):
     base, app, _ = server
     status, ctype, body = get(base, "/")
     assert status == 200 and "text/html" in ctype and b"RGB-D cockpit" in body
+    assert b'id="alarm"' in body and b"NOT ANSWERING" in body  # a lost link is named on the page itself
     status, _, body = get(base, "/api/info")
     info = json.loads(body)
     assert status == 200 and info["ok"] and info["camera"]["kind"] == "synthetic"
@@ -748,3 +749,31 @@ def test_robot_approach_cycle_endpoint_runs_from_the_segment(robot_server):
     for bad in ({"reference": "wrist"}, {"hold_s": "long"}, {"clearance_m": 3}, {"velocity": 0}):
         code, j = post(base, "/api/robot/approach_cycle", bad)
         assert code == 400, (bad, j)
+
+
+def test_a_frozen_camera_reads_zero_fps_and_fails_the_doctor(server):
+    """The D435 dropped out mid-run (2026-09-27): frames froze at one seq while fps still read
+    ~30, because the rate was only ever recomputed when a frame arrived. A stream with no
+    frame for 2 s is 0 fps, /api/info says how old the picture is, and the doctor fails it."""
+    base, app, _ = server
+    app.stop()  # the pump stops delivering; the last picture stays up, as with a dropped camera
+    assert app.latest()[1] is not None and app.frames_read > 1
+    old = time.monotonic() - 10.0
+    with app._cond:
+        app._fps_window = [old + 0.03 * i for i in range(30)]  # 30 Hz, ten seconds ago
+        app._latest_t = time.time() - 10.0
+    assert app.fps() == 0.0
+    info = json.loads(get(base, "/api/info")[2])
+    assert info["fps"] == 0.0 and info["stalled"] is True and 9.0 < info["frame_age_s"] < 15.0
+    doctor = json.loads(get(base, "/api/doctor")[2])
+    stream = next(c for c in doctor["checks"] if c["name"] == "stream")
+    assert stream["ok"] is False and "no new frame for" in stream["detail"]
+
+
+def test_a_live_camera_is_not_stalled(server):
+    base, app, _ = server
+    deadline = time.monotonic() + 5
+    while app.frames_read < 5 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    info = json.loads(get(base, "/api/info")[2])
+    assert info["stalled"] is False and info["frame_age_s"] < 2.0 and info["fps"] > 0

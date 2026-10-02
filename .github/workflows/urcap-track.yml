@@ -49,9 +49,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-*.txt
 
       - name: Re-resolve the newest PolyScope X release
         id: track
@@ -80,9 +82,9 @@ jobs:
         id: unit
         if: steps.go.outputs.test == 'true'
         run: |
-          uv sync --locked
+          python -m pip install --require-hashes -r requirements-dev.txt
           set +e
-          uv run pytest -q tests/test_urcap.py tests/test_urcap_track.py 2>&1 | tail -25 > unit-tail.txt
+          python -m pytest -q tests/test_urcap.py tests/test_urcap_track.py 2>&1 | tail -25 > unit-tail.txt
           unit=${PIPESTATUS[0]}
           python3 urcap/track.py compat 2> compat-problems.txt
           compat=$?
@@ -91,14 +93,14 @@ jobs:
 
       - name: Install the headless browser
         if: steps.go.outputs.test == 'true'
-        run: uv run --with playwright==1.63.0 playwright install --with-deps chromium
+        run: python -m pip install playwright==1.63.0 && python -m playwright install --with-deps chromium
 
       - name: The URCap in the pinned simulator (install, load, click)
         id: e2e
         if: steps.go.outputs.test == 'true'
         run: |
           set +e
-          uv run --with playwright==1.63.0 python urcap/e2e.py --artifacts e2e-artifacts --report e2e.json
+          python urcap/e2e.py --artifacts e2e-artifacts --report e2e.json
           echo "status=$?" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -189,7 +191,7 @@ jobs:
             fi
             [ -f track-report.md ] && cat track-report.md
             echo
-            echo "Locally: \`python3 urcap/track.py update && python3 urcap/track.py compat && uv run --with playwright==1.63.0 python urcap/e2e.py\`; patch urcap/perceptronic/ until all three pass (\`make urcap-package\` + commit dist/ after a source change)."
+            echo "Locally: \`python3 urcap/track.py update && python3 urcap/track.py compat && python urcap/e2e.py\`; patch urcap/perceptronic/ until all three pass (\`make urcap-package\` + commit dist/ after a source change)."
           } > issue-body.md
           existing=$(gh issue list --repo "$REPO" --label urcap-attention --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then

@@ -27,6 +27,7 @@ class Box:
     width: float
     height: float
     theta: float = 0.0  # heading of the long side in base XY, rad
+    round: bool = False  # an upright cylinder instead: ``length`` is its diameter
 
 
 def camera_looking_down(x: float, y: float, z: float, yaw: float = 0.0) -> Transform:
@@ -70,8 +71,9 @@ def render_depth(
                 t = (table_z - o[2]) / d[2]
                 if t > 0:
                     best = t
-            for T_inv, half in locals_:
-                t = _slab(T_inv.apply(o), T_inv.rotate(d), half)
+            for (T_inv, half), b in zip(locals_, boxes, strict=True):
+                hit = _can if b.round else _slab
+                t = hit(T_inv.apply(o), T_inv.rotate(d), half)
                 if t is not None and t < best:
                     best = t
             if math.isfinite(best):
@@ -233,3 +235,31 @@ class BoxSceneCamera:
             "device": {"serial": "BOXES"},
             "intrinsics": dict(self.K),
         }
+
+
+def _can(o: Sequence[float], d: Sequence[float], half: Sequence[float]) -> float | None:
+    """The nearest hit on an upright cylinder of radius ``half[0]``, ``±half[2]`` tall."""
+    r, hz = half[0], half[2]
+    t0, t1 = -math.inf, math.inf
+    a = d[0] * d[0] + d[1] * d[1]
+    if a < 1e-18:
+        if o[0] * o[0] + o[1] * o[1] > r * r:
+            return None
+    else:
+        b = o[0] * d[0] + o[1] * d[1]
+        disc = b * b - a * (o[0] * o[0] + o[1] * o[1] - r * r)
+        if disc < 0:
+            return None
+        root = math.sqrt(disc)
+        t0, t1 = (-b - root) / a, (-b + root) / a
+    if abs(d[2]) < 1e-12:
+        if abs(o[2]) > hz:
+            return None
+    else:
+        za, zb = (-hz - o[2]) / d[2], (hz - o[2]) / d[2]
+        if za > zb:
+            za, zb = zb, za
+        t0, t1 = max(t0, za), min(t1, zb)
+    if t0 > t1:
+        return None
+    return t0 if t0 > 0 else None

@@ -36,17 +36,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-*.txt
 
       - name: Install (locked) + the headless browser
         run: |
-          uv sync --locked
-          uv run --with playwright==1.63.0 playwright install --with-deps chromium
+          python -m pip install --require-hashes -r requirements-dev.txt
+          python -m pip install playwright==1.63.0 && python -m playwright install --with-deps chromium
 
       - name: The URCap in the pinned simulator
-        run: uv run --with playwright==1.63.0 python urcap/e2e.py --artifacts e2e-artifacts --report e2e-artifacts/e2e.json
+        run: python urcap/e2e.py --artifacts e2e-artifacts --report e2e-artifacts/e2e.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

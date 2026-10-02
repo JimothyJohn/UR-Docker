@@ -285,7 +285,7 @@ def test_log_errors_flag_a_stack_frame_in_our_package_with_its_exception():
         "12:00:01 INFO something\n"
         "com.ur.urcap.api.domain.AuthorizationException: Method not supported from URCaps\n"
         "\tat com.ur.polyscope.Guard.check(Guard.java:10)\n"
-        "\tat com.nickarmenta.perceptronic.PilotView.buildUI(PilotView.java:42)\n"
+        "\tat io.advin.perceptronic.PilotView.buildUI(PilotView.java:42)\n"
     )
     errors = m.log_errors(log)
     assert errors[0].startswith("com.ur.urcap.api.domain.AuthorizationException")

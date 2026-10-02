@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT / "urcap"))
 import urcap5  # noqa: E402
 
 SRC = ROOT / "urcap" / "perceptronic-ps5"
-JAVA = SRC / "src" / "com" / "nickarmenta" / "perceptronic"
+JAVA = SRC / "src" / "io" / "advin" / "perceptronic"
 PROPS = urcap5.read_properties((SRC / "bundle.properties").read_text(encoding="utf-8"))
 PLAN = urcap5.compat_plan(PROPS)
 DIST = ROOT / "urcap" / "dist" / urcap5.dist_name(PROPS)
@@ -55,7 +55,7 @@ def test_version_key_refuses_what_is_not_a_version(bad):
 
 def test_the_committed_plan_builds_on_polyscope_5_4_and_guards_5_8_api():
     assert PLAN["floor"] == "5.4"
-    assert PLAN["since"] == {"5.8": ["com/nickarmenta/perceptronic/TeachPosition2.java"]}
+    assert PLAN["since"] == {"5.8": ["io/advin/perceptronic/TeachPosition2.java"]}
     assert PLAN["optional"] == ["com.ur.urcap.api.domain.value.robotposition"]
     # PolyScope 5.4 ships the API as polyscope-urcap/api-1.7.0.jar (com.ur.urcap:api:1.7.0);
     # 5.10+ refuse a URCap whose pom names a newer API than they carry.
@@ -96,7 +96,7 @@ def test_the_floor_compiles_everything_but_the_guarded_code():
 
 
 def test_a_since_group_naming_a_missing_file_is_refused():
-    plan = {**PLAN, "since": {"5.8": ["com/nickarmenta/perceptronic/Gone.java"]}}
+    plan = {**PLAN, "since": {"5.8": ["io/advin/perceptronic/Gone.java"]}}
     with pytest.raises(urcap5.Urcap5Error, match="Gone.java"):
         urcap5.sources_for(SRC, plan)
 
@@ -113,7 +113,7 @@ def test_nothing_but_the_guard_names_the_guarded_class():
         assert "robotposition" not in f.read_text(encoding="utf-8"), f.name
     text = (JAVA / "TeachPosition.java").read_text(encoding="utf-8")
     assert not re.search(r"new TeachPosition2|TeachPosition2\.class|TeachPosition2\s+\w+\s*[=;(]", text)
-    assert '"com.nickarmenta.perceptronic.TeachPosition2"' in text
+    assert '"io.advin.perceptronic.TeachPosition2"' in text
 
 
 # -- the API jars out of an image --------------------------------------------------------------
@@ -312,7 +312,7 @@ def test_the_embedded_pom_names_the_floors_api():
     bundle = urcap5.read_bundle(DIST)
     assert "<artifactId>api</artifactId>" in bundle["pom"]
     assert f"<version>{PROPS['urcap.api.version']}</version>" in bundle["pom"]
-    assert "com/nickarmenta/perceptronic/TeachPosition2.class" in bundle["names"]
+    assert "io/advin/perceptronic/TeachPosition2.class" in bundle["names"]
 
 
 @pytest.mark.parametrize(
@@ -399,7 +399,7 @@ STUBS_5_8 = {
 
 # A pendant that answers the move screen at once: joints Q, the TCP at TCP under offset OFF.
 DRIVER = r"""
-package com.nickarmenta.perceptronic;
+package io.advin.perceptronic;
 
 import com.ur.urcap.api.domain.userinteraction.*;
 import com.ur.urcap.api.domain.value.Pose;
@@ -487,7 +487,7 @@ def _run_teach(tmp_path: Path, stubs: dict[str, str], extra: tuple[str, ...], *a
     for rel, text in stubs.items():
         (src / rel).parent.mkdir(parents=True, exist_ok=True)
         (src / rel).write_text(text, encoding="utf-8")
-    pkg = src / "com" / "nickarmenta" / "perceptronic"
+    pkg = src / "io" / "advin" / "perceptronic"
     pkg.mkdir(parents=True, exist_ok=True)
     (pkg / "Driver.java").write_text(DRIVER, encoding="utf-8")
     for name in ("TeachPosition.java", "PoseMath.java", "Json.java", *extra):
@@ -510,7 +510,7 @@ def _run_teach(tmp_path: Path, stubs: dict[str, str], extra: tuple[str, ...], *a
         capture_output=True,
     )
     r = subprocess.run(
-        ["java", "-cp", str(out), "com.nickarmenta.perceptronic.Driver", *args],
+        ["java", "-cp", str(out), "io.advin.perceptronic.Driver", *args],
         check=True,
         capture_output=True,
         text=True,
@@ -568,7 +568,7 @@ def test_callback2_on_the_classpath_without_teachposition2_falls_back(tmp_path):
 # -- PoseMath.flange: the nominal DH table, the same as perceptronics/armfk.py -------------------
 
 FK = r"""
-package com.nickarmenta.perceptronic;
+package io.advin.perceptronic;
 import java.util.*;
 public class Fk {
     public static void main(String[] a) {
@@ -594,7 +594,7 @@ def fk(tmp_path_factory):
     if not JAVAC:
         pytest.skip("needs a JDK")
     root = tmp_path_factory.mktemp("fk")
-    pkg = root / "src" / "com" / "nickarmenta" / "perceptronic"
+    pkg = root / "src" / "io" / "advin" / "perceptronic"
     pkg.mkdir(parents=True)
     (pkg / "Fk.java").write_text(FK, encoding="utf-8")
     for name in ("PoseMath.java", "Json.java"):
@@ -617,7 +617,7 @@ def fk(tmp_path_factory):
 
     def run(model: str, qs: list[list[float]]):
         r = subprocess.run(
-            ["java", "-cp", str(root / "c"), "com.nickarmenta.perceptronic.Fk", model, *map(_csv, qs)],
+            ["java", "-cp", str(root / "c"), "io.advin.perceptronic.Fk", model, *map(_csv, qs)],
             check=True,
             capture_output=True,
             text=True,

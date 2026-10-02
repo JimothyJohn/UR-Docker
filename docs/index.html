@@ -85,6 +85,61 @@
 
   .links { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 0; padding: 0; list-style: none; }
 
+  /* the Windows guide: written for someone who has never opened a terminal — bigger, plainer */
+  .guide p, .guide li { font-size: 17px; line-height: 1.7; color: var(--phos-hi); }
+  .guide .aside { font-size: 15px; color: var(--phos-mid); }
+  h3 { font-family: var(--tty); font-weight: 400; font-size: 30px; line-height: 1.05; margin: 0 0 10px; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--phos-hi); }
+  .need { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 0 0 8px; padding: 0; list-style: none; }
+  .need li { border: 1px solid var(--phos-ghost); padding: 12px 14px; }
+  .need b { display: block; font-weight: 400; color: var(--amber); text-transform: uppercase; letter-spacing: .1em; font-size: 13px; }
+  .steps { list-style: none; margin: 26px 0 0; padding: 0; counter-reset: step; }
+  .steps > li { counter-increment: step; position: relative; padding: 22px 0 22px 86px; border-top: 1px solid var(--phos-ghost); }
+  .steps > li::before { content: counter(step); position: absolute; left: 0; top: 18px; width: 62px; height: 62px; border: 1px solid var(--phos);
+    font-family: var(--tty); font-size: 52px; line-height: 60px; text-align: center; color: var(--phos-hi); text-shadow: var(--glow); box-shadow: inset 0 0 14px rgba(124,247,162,.14); }
+  .steps ol { margin: 0 0 1em; padding-left: 1.5em; }
+  .steps ol li { margin: 0 0 .45em; padding-left: .2em; }
+  .steps ol li::marker { color: var(--phos-mid); }
+  .ui { color: var(--void); background: var(--phos); padding: 0 6px; white-space: nowrap; }             /* a thing you click */
+  kbd { font: inherit; color: var(--phos-hi); border: 1px solid var(--phos-mid); border-bottom-width: 3px; padding: 0 7px; white-space: nowrap; }
+  .file { color: var(--amber); white-space: nowrap; }                                                      /* a file or folder name */
+  .big { font-size: 17px; padding: 16px 22px; border-color: var(--phos); color: var(--phos-hi); box-shadow: 0 0 14px rgba(124,247,162,.22); }
+  .ok { border-left: 2px solid var(--phos); padding: 6px 0 6px 14px; margin: 0 0 1em; }
+  .ok b { font-weight: 400; color: var(--phos); text-transform: uppercase; letter-spacing: .1em; font-size: 13px; display: block; }
+  .warn { border-left: 2px solid var(--amber); padding: 6px 0 6px 14px; margin: 0 0 1em; }
+  .warn b { font-weight: 400; color: var(--amber); text-transform: uppercase; letter-spacing: .1em; font-size: 13px; display: block; }
+
+  /* small drawings of what Windows shows, so the words can be matched to the screen */
+  .shots { display: flex; flex-wrap: wrap; gap: 14px; margin: 4px 0 1.2em; }
+  .shot { flex: 0 1 300px; border: 1px solid var(--phos-dim); background: #010302; font-size: 13px; line-height: 1.5; color: var(--phos-hi); }
+  .shot .bar { padding: 4px 10px; color: var(--phos-mid); border-bottom: 1px solid var(--phos-ghost); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+  .shot .in { padding: 10px 12px; }
+  .shot .row { padding: 2px 8px; color: var(--phos-mid); }
+  .shot .row.hit { color: var(--void); background: var(--phos); }
+  .shot .hit-t { color: var(--amber); border-bottom: 1px solid var(--amber); }
+  .shot .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  .shot .btn { border: 1px solid var(--phos-dim); padding: 1px 10px; color: var(--phos-mid); }
+  .shot .btn.hit { border-color: var(--amber); color: var(--amber); }
+  .shot.blue { border-color: #4a7dff; }
+  .shot.blue .bar { color: #9db8ff; border-color: #24407f; }
+  .shot .cap { padding: 5px 10px; border-top: 1px solid var(--phos-ghost); color: var(--phos-mid); font-size: 11.5px; }
+
+  /* troubleshooting chart + the fixes it points to */
+  .flow { overflow-x: auto; margin: 6px 0 26px; border: 1px solid var(--phos-ghost); background: #010302; }
+  .flow svg { display: block; min-width: 1040px; width: 100%; height: auto; font-family: var(--mono); }
+  .flow a { border: 0; }
+  .flow a:hover rect, .flow a:focus rect { stroke: var(--phos-hi); fill: rgba(124,247,162,.12); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0 0 12px; padding: 0; list-style: none; font-size: 13px; color: var(--phos-mid); }
+  .legend i { display: inline-block; width: 22px; height: 11px; margin-right: 7px; border: 1px solid; vertical-align: -1px; }
+  .fixes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr)); gap: 14px; }
+  .fix { border: 1px solid var(--phos-ghost); padding: 16px 18px 6px; scroll-margin-top: 16px; }
+  .fix:target { border-color: var(--amber); box-shadow: 0 0 18px rgba(255,194,71,.22); }
+  .fix h4 { margin: 0 0 8px; font-weight: 400; font-size: 16px; color: var(--amber); letter-spacing: .06em; text-transform: uppercase; }
+  .fix h4 span { color: var(--phos-mid); margin-right: 8px; }
+  .fix p, .fix li { font-size: 15.5px; }
+  .fix ol { margin: 0 0 1em; padding-left: 1.4em; }
+  .fix .back { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; }
+
   footer { padding: 40px 0 56px; font-size: 12px; color: var(--phos-dim); text-transform: uppercase; letter-spacing: .1em; }
 
   @media (max-width: 900px) {
@@ -95,6 +150,8 @@
     .wrap { padding: 0 16px; }
     .panel { padding: 22px 16px 18px; }
     pre { font-size: 12.5px; padding: 12px 14px; }
+    .steps > li { padding-left: 0; padding-top: 86px; }
+    .big { font-size: 15px; padding: 14px 14px; }
   }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } h1 .cur { animation: none; } }
 </style>
@@ -109,8 +166,9 @@
         Docker, and <code>urctl</code> — one Python tool that drives the simulator and a real
         robot the same way.</p>
       <div class="keys">
-        <a class="key" href="#start">Get started</a>
-        <a class="key" href="https://github.com/Olympus-Controls/UR-utils">GitHub</a>
+        <a class="key" href="#windows">Windows: start here</a>
+        <a class="key" href="#start">Developers</a>
+        <a class="key" href="https://github.com/JimothyJohn/perceptronics">GitHub</a>
       </div>
     </div>
     <div id="scanStage" class="corners">
@@ -120,42 +178,350 @@
     </div>
   </section>
 
+  <section class="panel corners guide" id="windows">
+    <div class="tag"><b>01</b><span>WINDOWS</span><span class="r">NO EXPERIENCE NEEDED</span></div>
+    <h2>Set it up on Windows</h2>
+    <p>Follow the five steps in order. You will <strong>not</strong> type any commands and you do not
+      need to know what "git" or "Python" are — you click a download button and double-click two
+      files. If anything on your screen does not match what a step says, stop and go to
+      <a href="#trouble">Troubleshooting</a>.</p>
+    <ul class="need">
+      <li><b>A computer</b>Windows 10 or Windows 11.</li>
+      <li><b>Internet</b>Connected for the whole setup.</li>
+      <li><b>Time</b>About 15 minutes, once.</li>
+      <li><b>Robot and camera</b>Not needed. Practice mode works with neither.</li>
+    </ul>
+    <p class="aside">How to read this page: <span class="ui">a green block</span> is something you
+      click, <kbd>a key</kbd> is a key on your keyboard, and <span class="file">amber text</span> is
+      the name of a file or folder.</p>
+
+    <ol class="steps">
+      <li>
+        <h3>Download it</h3>
+        <p><a class="key big" href="https://github.com/JimothyJohn/perceptronics/archive/refs/heads/main.zip">Download Perceptronics (ZIP)</a></p>
+        <ol>
+          <li>Click the button above, once.</li>
+          <li>Wait until your browser says the download is finished (a small box at the top right or
+            the bottom of the browser window). If it asks <span class="ui">Keep</span> or
+            <span class="ui">Save</span>, click it.</li>
+        </ol>
+        <div class="ok"><b>You should now have</b>A file named <span class="file">perceptronics-main</span>
+          in your <span class="file">Downloads</span> folder. Its icon is a folder with a zipper on it.</div>
+      </li>
+
+      <li>
+        <h3>Unzip it</h3>
+        <p>The download is a "ZIP": many files packed into one. It has to be unpacked before
+          anything in it works. <strong>This is the step people skip.</strong></p>
+        <ol>
+          <li>Hold the <kbd>Windows</kbd> key (the one with the four squares, bottom left of the
+            keyboard) and press <kbd>E</kbd>. A window called File Explorer opens.</li>
+          <li>On the left side of that window, click <span class="ui">Downloads</span>.</li>
+          <li>Find <span class="file">perceptronics-main</span>. Click it <strong>once with the right
+            mouse button</strong>. A menu appears.</li>
+          <li>In the menu, click <span class="ui">Extract All…</span></li>
+          <li>A box appears. Change nothing. Click <span class="ui">Extract</span>.</li>
+          <li>A new window opens showing a folder also named <span class="file">perceptronics-main</span>.
+            Double-click it to open it.</li>
+        </ol>
+        <div class="shots" aria-hidden="true">
+          <div class="shot"><div class="bar">Right-click menu</div><div class="in">
+            <div class="row">Open</div><div class="row">Open in new window</div>
+            <div class="row hit">Extract All…</div><div class="row">Pin to Start</div><div class="row">Share</div>
+          </div><div class="cap">Click the highlighted line</div></div>
+          <div class="shot"><div class="bar">perceptronics-main</div><div class="in">
+            <div class="row">docs</div><div class="row">scripts</div><div class="row">urctl</div>
+            <div class="row">README</div><div class="row hit">Windows-Setup</div><div class="row hit">Windows-Start</div>
+          </div><div class="cap">The right folder has these two files in it</div></div>
+        </div>
+        <div class="ok"><b>You should now see</b>A long list of files and folders that includes
+          <span class="file">Windows-Setup</span> and <span class="file">Windows-Start</span>. Leave this
+          window open — you need it for the next two steps.</div>
+      </li>
+
+      <li>
+        <h3>Run the setup — once</h3>
+        <ol>
+          <li>Double-click <span class="file">Windows-Setup</span>.</li>
+          <li>Windows may show a warning because the file came from the internet. This is expected.
+            <br>If you see a blue box saying <em>"Windows protected your PC"</em>: click the small
+            underlined words <span class="ui">More info</span>, then click
+            <span class="ui">Run anyway</span>.
+            <br>If you see a box saying <em>"The publisher could not be verified"</em>: click
+            <span class="ui">Run</span>.</li>
+          <li>A black window with white text opens and asks one question:
+            <em>Will an Intel RealSense camera be plugged into THIS computer?</em>
+            Press <kbd>N</kbd> if you just want to try it, or if you are not sure.
+            Press <kbd>Y</kbd> only if you have that camera.</li>
+          <li>Wait. Text scrolls by; that is normal. Do not close the window. It takes 2 to 10 minutes.</li>
+          <li><strong>Only if you pressed Y:</strong> Windows asks <em>"Do you want to allow this app
+            to make changes to your device?"</em> — click <span class="ui">Yes</span>. An installer
+            window opens: keep clicking <span class="ui">Next</span>, accept the agreement, click
+            <span class="ui">Install</span>, then <span class="ui">Finish</span>. Change no settings.</li>
+        </ol>
+        <div class="shots" aria-hidden="true">
+          <div class="shot blue"><div class="bar">Windows protected your PC</div><div class="in">
+            Microsoft Defender SmartScreen prevented an unrecognized app from starting.
+            <span class="hit-t">More info</span>
+            <div class="btns"><span class="btn hit">Run anyway</span><span class="btn">Don't run</span></div>
+          </div><div class="cap">1: More info · 2: Run anyway</div></div>
+          <div class="shot"><div class="bar">Perceptronics - Setup</div><div class="in">
+            ==========================<br>&nbsp;SETUP FINISHED.<br>&nbsp;Next: close this window and<br>&nbsp;double-click Windows-Start<br>==========================<br>Press any key to continue . . .
+          </div><div class="cap">What a good setup ends with</div></div>
+        </div>
+        <div class="ok"><b>You should now see</b>The words <strong>SETUP FINISHED</strong> near the
+          bottom of the black window. Press any key to close it.</div>
+        <div class="warn"><b>Looks wrong but is fine</b>Lines saying <em>[FAIL]</em> or
+          <em>verdict: NOT READY</em> just above SETUP FINISHED. They only mean no robot is connected yet.</div>
+        <p class="aside">If it says <strong>SETUP DID NOT FINISH</strong> instead, go to
+          <a href="#trouble">Troubleshooting</a>. Running setup again is always safe.</p>
+      </li>
+
+      <li>
+        <h3>Start it</h3>
+        <p>This is the only step you repeat. Every time you want to use Perceptronics, do this.</p>
+        <ol>
+          <li>In the same folder, double-click <span class="file">Windows-Start</span>. (If the blue
+            warning appears again, do the same as before: <span class="ui">More info</span>, then
+            <span class="ui">Run anyway</span>.)</li>
+          <li>A black window asks for a <em>cell name</em>. Type nothing. Just press
+            <kbd>Enter</kbd>. That starts practice mode.</li>
+          <li>After a few seconds your web browser opens by itself.</li>
+        </ol>
+        <div class="ok"><b>You should now see</b>A dark page with a green 3-D picture of a table
+          with blocks on it. Hold the left mouse button on the picture and move the mouse to look
+          around.</div>
+        <div class="warn"><b>Keep the black window open</b>The black window <em>is</em> the program.
+          The page in your browser stops working the moment that window is closed. You can shrink it
+          with the <span class="ui">–</span> button at its top right.</div>
+        <p class="aside">Messages on the page that the robot is unreachable or not connected are
+          correct in practice mode: there is no robot.</p>
+      </li>
+
+      <li>
+        <h3>Stop it</h3>
+        <ol>
+          <li>Close the browser tab.</li>
+          <li>Click the black window, then click the <span class="ui">X</span> at its top right.</li>
+        </ol>
+        <p>To use it again later: open <span class="file">Downloads</span>, open
+          <span class="file">perceptronics-main</span>, and do step 4. You never repeat steps 1 to 3
+          on this computer.</p>
+      </li>
+    </ol>
+
+    <h3 style="margin-top:26px">With a real robot or camera</h3>
+    <p>Get three things from the person who installed your robot before you start: the <strong>cell
+      name</strong> to type in step 4 instead of pressing Enter alone (for example
+      <span class="file">ur3</span>), confirmation that this computer is on the robot's network, and
+      a check that the robot's tablet is switched to <strong>Remote</strong>. Plug the camera into a
+      <strong>blue</strong> USB socket using the cable that came with it, then run step 3 again and
+      answer <kbd>Y</kbd>.</p>
+  </section>
+
+  <section class="panel corners guide" id="trouble">
+    <div class="tag"><b>02</b><span>TROUBLESHOOTING</span><span class="r">FOLLOW THE ARROWS</span></div>
+    <h2>Something went wrong</h2>
+    <p>Start at the top of the chart. Answer each question. <strong>Yes</strong> takes you down to the
+      next question. <strong>No</strong> takes you right: find the line that matches what you see,
+      and click the box beside it for the full fix.</p>
+    <ul class="legend" aria-hidden="true">
+      <li><i style="border-color:#7CF7A2"></i>A question</li>
+      <li><i style="border-color:#FFC247"></i>What you see</li>
+      <li><i style="border-color:#D9FFE6;background:rgba(124,247,162,.12)"></i>What to do (click it)</li>
+    </ul>
+    <div class="flow" id="flow" role="img" aria-label="Troubleshooting flow chart. Every branch is also written out in the numbered fixes below."></div>
+
+    <div class="fixes">
+      <div class="fix" id="fix-download"><h4><span>A</span>The download</h4>
+        <ol>
+          <li>Click the download button in step 1 again and watch the top right and the bottom of
+            the browser window. If it asks <span class="ui">Keep</span> or <span class="ui">Save</span>, click it.</li>
+          <li>To find the file: hold <kbd>Windows</kbd>, press <kbd>E</kbd>, click
+            <span class="ui">Downloads</span> on the left. The newest file is at the top.</li>
+          <li>If you downloaded more than once you will see <span class="file">perceptronics-main (1)</span>
+            and so on. Any of them works; use the newest.</li>
+        </ol>
+        <p>On a work computer the download can be blocked outright. If the button does nothing at
+          all, that is a question for your IT department.</p></div>
+
+      <div class="fix" id="fix-unzip"><h4><span>B</span>Unzipping</h4>
+        <ol>
+          <li>If the black window said <em>"still inside the ZIP"</em>, you double-clicked the ZIP
+            instead of unpacking it. Close everything.</li>
+          <li>In <span class="file">Downloads</span>, right-click the
+            <span class="file">perceptronics-main</span> with the <strong>zipper</strong> icon and click
+            <span class="ui">Extract All…</span>, then <span class="ui">Extract</span>.</li>
+          <li>No <span class="ui">Extract All…</span> in the menu? Click
+            <span class="ui">Show more options</span> at the bottom of the menu first. Or click the
+            file once and use <span class="ui">Extract all</span> in the bar at the top of the window.</li>
+          <li>If you open the new folder and see only one folder inside it, also called
+            <span class="file">perceptronics-main</span>, open that one too. The two files are one level deeper.</li>
+        </ol>
+        <p>Never move <span class="file">Windows-Setup</span> or <span class="file">Windows-Start</span>
+          out of their folder (to the Desktop, say). They only work next to the other files.</p></div>
+
+      <div class="fix" id="fix-blocked"><h4><span>C</span>Windows won't run the file</h4>
+        <ol>
+          <li><em>"Windows protected your PC"</em> (blue): click <span class="ui">More info</span>,
+            then <span class="ui">Run anyway</span>. There is no Run button until you click More info.</li>
+          <li><em>"The publisher could not be verified"</em>: click <span class="ui">Run</span>.</li>
+          <li>It opened as a page of text in Notepad: close Notepad. Right-click the file and click
+            <span class="ui">Open</span> — not Edit.</li>
+          <li><em>"This app has been blocked by your system administrator"</em>: your company does
+            not allow it on this computer. Only IT can change that.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-internet"><h4><span>D</span>Setup can't reach the internet</h4>
+        <p>Red text containing <em>Unable to connect</em>, <em>could not be resolved</em> or
+          <em>timed out</em> means a download failed.</p>
+        <ol>
+          <li>Open any website in your browser to check the internet works.</li>
+          <li>If you are on a company network or VPN, try a home network or a phone hotspot —
+            company networks often block these downloads.</li>
+          <li>Double-click <span class="file">Windows-Setup</span> again. It continues where it stopped.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-admin"><h4><span>E</span>Permission and passwords</h4>
+        <ol>
+          <li>If you clicked <span class="ui">No</span> on <em>"Do you want to allow this app to
+            make changes?"</em>, run <span class="file">Windows-Setup</span> again and click
+            <span class="ui">Yes</span>.</li>
+          <li>If Windows asks for an administrator password you do not have: run
+            <span class="file">Windows-Setup</span> again and press <kbd>N</kbd> at the camera
+            question. Practice mode needs no permission. For a real camera, ask IT to install the
+            <em>Intel RealSense SDK 2.0</em>.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-sdk"><h4><span>F</span>The camera installer</h4>
+        <ol>
+          <li>The setup pauses while a separate installer window is open. It can hide behind other
+            windows: look for a new icon flashing on the taskbar at the bottom of the screen.</li>
+          <li>Click <span class="ui">Next</span>, accept the agreement, <span class="ui">Install</span>,
+            <span class="ui">Finish</span>. Do not change where it installs.</li>
+          <li>A yellow warning mentioning <em>realsense2.dll</em> means it was installed somewhere
+            unusual. Uninstall <em>Intel RealSense SDK 2.0</em> from Windows Settings → Apps, then run
+            <span class="file">Windows-Setup</span> again without changing the install location.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-again"><h4><span>G</span>Setup did not finish, no clear reason</h4>
+        <ol>
+          <li>Restart the computer.</li>
+          <li>Double-click <span class="file">Windows-Setup</span> again. It is safe to run as many
+            times as you like.</li>
+          <li>Still not finished? Go to <a href="#fix-help">Getting help</a>.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-python"><h4><span>H</span>Start says setup is missing</h4>
+        <ol>
+          <li><em>"Setup has not been run yet"</em>: do step 3, then come back.</li>
+          <li>The same message although setup said SETUP FINISHED: Windows has not noticed the new
+            software yet. Restart the computer and double-click <span class="file">Windows-Start</span> again.</li>
+          <li>Still the same after a restart: run <span class="file">Windows-Setup</span> once more.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-browser"><h4><span>I</span>The page doesn't appear</h4>
+        <ol>
+          <li>Check the black window is still open. If it is gone, start again and leave it open.</li>
+          <li>Open your browser yourself (Edge or Chrome). Click the long bar at the very top where
+            website addresses go, type <span class="file">localhost:7621</span> and press <kbd>Enter</kbd>.</li>
+          <li><em>"Can't reach this page"</em> or <em>"refused to connect"</em> with the black
+            window open: wait ten seconds and press <kbd>F5</kbd> to reload.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-port"><h4><span>J</span>It is already running</h4>
+        <p><em>"Only one usage of each socket address"</em> or <em>"address already in use"</em>
+          means Perceptronics was started twice.</p>
+        <ol>
+          <li>Close every black window.</li>
+          <li>Double-click <span class="file">Windows-Start</span> <strong>once</strong>.</li>
+          <li>If it still says so, restart the computer and start once.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-practice"><h4><span>K</span>"Robot unreachable" in practice mode</h4>
+        <p>Nothing is wrong. Practice mode has a pretend camera and no robot, so the page reports
+          that it cannot find one. Everything you can do with the picture still works.</p></div>
+
+      <div class="fix" id="fix-cell"><h4><span>L</span>"Unknown cell"</h4>
+        <ol>
+          <li>The cell name was mistyped. Close the black window and start again.</li>
+          <li>Press <kbd>Enter</kbd> alone for practice mode, or type the name exactly as your robot
+            installer gave it to you — small letters, no spaces.</li>
+          <li>If you typed a real cell name but still see the practice picture of blocks, you pressed
+            Enter before typing. Start again.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-camera"><h4><span>M</span>The real camera shows nothing</h4>
+        <ol>
+          <li><em>"librealsense2 not found"</em>: the camera software is missing. Run
+            <span class="file">Windows-Setup</span> again and press <kbd>Y</kbd>.</li>
+          <li>Unplug the camera. Plug it into a <strong>blue</strong> USB socket on the computer
+            itself — not a hub, not the keyboard — using the cable that came with the camera.</li>
+          <li>Close every other program that uses a camera: Intel RealSense Viewer, Teams, Zoom, the
+            Windows Camera app. Only one program can use the camera at a time.</li>
+          <li>Close the black window and double-click <span class="file">Windows-Start</span> again.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-network"><h4><span>N</span>The real robot is unreachable</h4>
+        <ol>
+          <li>Check the network cable between this computer and the robot (or its switch) is
+            plugged in at both ends and the little lights beside the socket are on.</li>
+          <li>Check the robot is powered on and its tablet shows its normal screen.</li>
+          <li>Still unreachable: the robot's address in the cell settings is the installer's job.
+            Tell them the exact words on screen.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-remote"><h4><span>O</span>The robot doesn't move</h4>
+        <ol>
+          <li>On the robot's tablet, look at the top right corner. If it says <em>Local</em>, tap it
+            and choose <span class="ui">Remote</span>. This can only be done at the robot.</li>
+          <li><em>"OUT OF REACH"</em> on the page: the object is too far away for the arm. Move it
+            closer to the robot's base and try again.</li>
+        </ol></div>
+
+      <div class="fix" id="fix-help"><h4><span>P</span>Getting help</h4>
+        <p>Do not close the black window. Take a photo of it with your phone, showing the last
+          lines of text, and send it to the person who gave you this page — or
+          <a href="https://github.com/JimothyJohn/perceptronics/issues/new">open an issue</a> and
+          attach the photo. Say which step number you were on.</p></div>
+    </div>
+  </section>
+
   <section class="panel corners" id="start">
-    <div class="tag"><b>01</b><span>QUICK START</span></div>
+    <div class="tag"><b>03</b><span>DEVELOPERS</span><span class="r">QUICK START</span></div>
     <h2>Start the simulator</h2>
     <p>You need Docker and Python ≥ 3.10.</p>
-    <div class="term"><pre><span class="p">&gt; </span>git clone https://github.com/Olympus-Controls/UR-utils &amp;&amp; cd UR-utils
+    <div class="term"><pre><span class="p">&gt; </span>git clone https://github.com/JimothyJohn/perceptronics &amp;&amp; cd perceptronics
 <span class="p">&gt; </span>docker compose up -d       <span class="c"># pendant: http://localhost:6080/vnc.html</span>
-<span class="p">&gt; </span>uv sync
-<span class="p">&gt; </span>uv run urctl bring-up      <span class="c"># power on + release brakes</span>
-<span class="p">&gt; </span>uv run urctl state</pre></div>
+<span class="p">&gt; </span>python3 -m urctl bring-up      <span class="c"># power on + release brakes</span>
+<span class="p">&gt; </span>python3 -m urctl state</pre></div>
     <p class="aside">On Apple Silicon, run the PolyScope X sim instead: <code>HOST_ARCH=arm64 make simx-up</code>.</p>
   </section>
 
   <section class="panel corners" id="use">
-    <div class="tag"><b>02</b><span>USE IT</span></div>
+    <div class="tag"><b>04</b><span>USE IT</span></div>
     <h2>Move it</h2>
-    <div class="term"><pre><span class="p">&gt; </span>urctl move-joints 0 -1.57 0 -1.57 0 0      <span class="c"># joint move (radians)</span>
-<span class="p">&gt; </span>urctl move-tcp 0 0.05 0 0 0 0 --relative   <span class="c"># tool +50 mm in base Y</span>
-<span class="p">&gt; </span>urctl --host 10.0.0.5 state                <span class="c"># a real robot</span>
-<span class="p">&gt; </span>urctl-mcp --host 10.0.0.5                  <span class="c"># the same commands as MCP tools</span></pre></div>
+    <div class="term"><pre><span class="p">&gt; </span>python3 -m urctl move-joints 0 -1.57 0 -1.57 0 0      <span class="c"># joint move (radians)</span>
+<span class="p">&gt; </span>python3 -m urctl move-tcp 0 0.05 0 0 0 0 --relative   <span class="c"># tool +50 mm in base Y</span>
+<span class="p">&gt; </span>python3 -m urctl --host 10.0.0.5 state                <span class="c"># a real robot</span>
+<span class="p">&gt; </span>python3 -m urctl.mcp_server --host 10.0.0.5                  <span class="c"># the same commands as MCP tools</span></pre></div>
     <p>Every move is checked by a safety envelope before it is sent and is written to an audit log.
       On a real robot, set the pendant to <strong>Remote</strong> first.</p>
   </section>
 
   <section class="panel corners" id="camera">
-    <div class="tag"><b>03</b><span>CAMERA</span><span class="r">OPTIONAL</span></div>
+    <div class="tag"><b>05</b><span>CAMERA</span><span class="r">OPTIONAL</span></div>
     <h2>Click to pick</h2>
     <p>A RealSense D435 on the tool flange turns a click on the camera image into a robot move.</p>
-    <div class="term"><pre><span class="p">&gt; </span>uv run perceptronics --fake gui    <span class="c"># no camera needed</span></pre></div>
+    <div class="term"><pre><span class="p">&gt; </span>python3 -m perceptronics gui --fake    <span class="c"># no camera needed</span></pre></div>
   </section>
 
   <section class="panel corners" id="more">
-    <div class="tag"><b>04</b><span>MORE</span></div>
+    <div class="tag"><b>06</b><span>MORE</span></div>
     <ul class="links">
-      <li><a href="https://github.com/Olympus-Controls/UR-utils#readme">README</a></li>
-      <li><a href="https://github.com/Olympus-Controls/UR-utils/blob/main/CLAUDE.md">CLAUDE.md</a></li>
-      <li><a href="https://github.com/Olympus-Controls/UR-utils/blob/main/docs/realsense.md">Camera</a></li>
+      <li><a href="https://github.com/JimothyJohn/perceptronics#readme">README</a></li>
+      <li><a href="https://github.com/JimothyJohn/perceptronics/blob/main/CLAUDE.md">CLAUDE.md</a></li>
+      <li><a href="https://github.com/JimothyJohn/perceptronics/blob/main/docs/realsense.md">Camera</a></li>
       <li><a href="realsense-cell.html">Demo walkthrough</a></li>
     </ul>
   </section>
@@ -181,6 +547,81 @@
     });
     t.appendChild(b);
   }
+
+  // ---- the troubleshooting chart: questions down the left, "what you see" -> "what to do" to the right ----
+  // One row per step of the Windows guide; add a branch as [what you see, what to do, fix card id].
+  const FLOW = [
+    { step: 'STEP 1', q: ['Is perceptronics-main in your', 'Downloads folder?'], b: [
+      [['Nothing happened when I clicked', 'the download button'], ['Look for Keep / Save at the top right', 'or bottom of the browser, and click it'], 'fix-download'],
+      [['It downloaded but I cannot find it'], ['Windows key + E, then click Downloads', 'on the left. Newest file is at the top'], 'fix-download'] ] },
+    { step: 'STEP 2', q: ['After Extract All, do you see', 'Windows-Setup in the folder?'], b: [
+      [['Black window says the file is', '"still inside the ZIP"'], ['Right-click the ZIP, Extract All…, Extract.', 'Then use the NEW folder'], 'fix-unzip'],
+      [['There is no "Extract All…"', 'in the right-click menu'], ['Click "Show more options" first, or use', '"Extract all" in the bar at the top'], 'fix-unzip'],
+      [['I only see one folder inside'], ['Open it. The files are one level deeper'], 'fix-unzip'] ] },
+    { step: 'STEP 3', q: ['Did a black window open and', 'ask the camera question?'], b: [
+      [['Blue box: "Windows protected', 'your PC"'], ['Click "More info", then "Run anyway"'], 'fix-blocked'],
+      [['"The publisher could not', 'be verified"'], ['Click "Run"'], 'fix-blocked'],
+      [['It opened as text in Notepad'], ['Close it. Right-click the file, click Open'], 'fix-blocked'],
+      [['"Blocked by your system', 'administrator"'], ['A company rule. Only your IT department', 'can allow it'], 'fix-blocked'] ] },
+    { step: 'STEP 3', q: ['Does the black window end', 'with SETUP FINISHED?'], b: [
+      [['Red text: "Unable to connect",', '"could not be resolved", "timed out"'], ['Check the internet (try a hotspot),', 'then run Windows-Setup again'], 'fix-internet'],
+      [['I clicked No on "allow this app', 'to make changes?"'], ['Run Windows-Setup again and click Yes'], 'fix-admin'],
+      [['It wants an administrator', 'password I do not have'], ['Run Windows-Setup again, press N at the', 'camera question. Or ask IT'], 'fix-admin'],
+      [['Nothing is happening; an installer', 'window is open somewhere'], ['Find it on the taskbar. Next, accept,', 'Install, Finish'], 'fix-sdk'],
+      [['SETUP DID NOT FINISH and none', 'of the above'], ['Restart the computer, run Windows-Setup', 'again. Then: Getting help'], 'fix-again'] ] },
+    { step: 'STEP 4', q: ['Does your browser show the', 'green picture of the table?'], b: [
+      [['"Setup has not been run yet"'], ['Do step 3 first'], 'fix-python'],
+      [['The same, but setup did finish'], ['Restart the computer, then double-click', 'Windows-Start again'], 'fix-python'],
+      [['No browser opened, or "can\'t', 'reach this page"'], ['Keep the black window open. In the browser', 'address bar type localhost:7621, Enter'], 'fix-browser'],
+      [['"Only one usage of each socket', 'address" / "already in use"'], ['It is running twice. Close every black', 'window, then start once'], 'fix-port'],
+      [['"unknown cell"'], ['Start again. Press Enter alone, or type', 'the cell name exactly'], 'fix-cell'],
+      [['Picture is fine, but it says the', 'robot is unreachable'], ['Normal in practice mode: there is', 'no robot. Nothing to fix'], 'fix-practice'] ] },
+    { step: 'REAL CAMERA ONLY', q: ['Do you see live video', 'from the camera?'], b: [
+      [['"librealsense2 not found"'], ['Run Windows-Setup again and press Y'], 'fix-camera'],
+      [['Black, frozen, or no picture'], ['Re-plug into a BLUE USB socket on the PC', 'with the camera\'s own cable'], 'fix-camera'],
+      [['It worked, then stopped'], ['Close Teams, Zoom, Camera, RealSense', 'Viewer. Re-plug. Start again'], 'fix-camera'],
+      [['I still see the practice blocks'], ['You pressed Enter before typing the', 'cell name. Start again'], 'fix-cell'] ] },
+    { step: 'REAL ROBOT ONLY', q: ['Does the robot move when', 'you ask it to?'], b: [
+      [['The page says the robot is', 'unreachable'], ['Check the network cable and that the', 'robot is on. Then call the installer'], 'fix-network'],
+      [['Everything looks right but the', 'arm stays still'], ['On the robot\'s tablet, top right:', 'switch Local to Remote'], 'fix-remote'],
+      [['"OUT OF REACH"'], ['The object is too far. Move it closer', 'to the robot'], 'fix-remote'] ] },
+  ];
+  (function drawFlow() {
+    const host = $('flow'); if (!host) return;
+    const W = 1120, CX = 170, HW = 150, HH = 40, BUS = 348, SX = 368, SW = 300, FX = 700, FW = 404, LH = 17, GAP = 10, ROWGAP = 40;
+    const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const lines = (arr, x, cy, fill, anchor) => arr.map((t, i) =>
+      `<text x="${x}" y="${cy + (i - (arr.length - 1) / 2) * LH + 4.5}" fill="${fill}" font-size="12.5"${anchor ? ` text-anchor="${anchor}"` : ''}>${esc(t)}</text>`).join('');
+    const PH = '#7CF7A2', HI = '#D9FFE6', MID = '#3FA768', AM = '#FFC247';
+    let y = 20, o = '';
+    o += `<rect x="${CX - 70}" y="${y}" width="140" height="30" fill="${PH}"/><text x="${CX}" y="${y + 20}" text-anchor="middle" font-size="13" fill="#020403" letter-spacing="2">START HERE</text>`;
+    let prev = y + 30; y += 30 + ROWGAP;
+    for (const r of FLOW) {
+      const hs = r.b.map(([s, f]) => 18 + Math.max(s.length, f.length) * LH);
+      const tot = hs.reduce((a, h) => a + h, 0) + GAP * (hs.length - 1), rowH = Math.max(2 * HH, tot), cy = y + rowH / 2;
+      o += `<path d="M${CX} ${prev}V${cy - HH - 2}" stroke="${PH}" marker-end="url(#ah)"/>`;
+      if (prev > 60) o += `<text x="${CX + 10}" y="${prev + 17}" font-size="12" fill="${PH}" letter-spacing="2">YES</text>`;
+      o += `<text x="${CX - HW}" y="${cy - HH - 8}" font-size="11" fill="${MID}" letter-spacing="2">${r.step}</text>`;
+      o += `<path d="M${CX - HW} ${cy}l20 ${-HH}h${2 * HW - 40}l20 ${HH}l-20 ${HH}h${-(2 * HW - 40)}z" fill="rgba(124,247,162,.06)" stroke="${PH}"/>` + lines(r.q, CX, cy, HI, 'middle');
+      o += `<path d="M${CX + HW} ${cy}H${BUS}" stroke="${AM}"/><text x="${CX + HW + 5}" y="${cy - 6}" font-size="12" fill="${AM}" letter-spacing="2">NO</text>`;
+      let by = y + (rowH - tot) / 2; const first = by + hs[0] / 2; let lastc = first;
+      r.b.forEach(([s, f, id], i) => {
+        const h = hs[i], c = by + h / 2; lastc = c;
+        o += `<path d="M${BUS} ${c}H${SX - 2}" stroke="${AM}" marker-end="url(#aa)"/>`;
+        o += `<rect x="${SX}" y="${by}" width="${SW}" height="${h}" fill="rgba(255,194,71,.05)" stroke="${AM}"/>` + lines(s, SX + 12, c, AM);
+        o += `<path d="M${SX + SW} ${c}H${FX - 2}" stroke="${HI}" marker-end="url(#ai)"/>`;
+        o += `<a href="#${id}"><rect x="${FX}" y="${by}" width="${FW}" height="${h}" fill="rgba(124,247,162,.07)" stroke="${HI}"/>` + lines(f, FX + 12, c, HI) + `</a>`;
+        by += h + GAP;
+      });
+      o += `<path d="M${BUS} ${Math.min(first, cy)}V${Math.max(lastc, cy)}" stroke="${AM}"/>`;
+      prev = cy + HH; y += rowH + ROWGAP;
+    }
+    o += `<path d="M${CX} ${prev}V${y - 2}" stroke="${PH}" marker-end="url(#ah)"/><text x="${CX + 10}" y="${prev + 17}" font-size="12" fill="${PH}" letter-spacing="2">YES</text>`;
+    o += `<rect x="${CX - 110}" y="${y}" width="220" height="34" fill="${PH}"/><text x="${CX}" y="${y + 22}" text-anchor="middle" font-size="13" fill="#020403" letter-spacing="2">IT WORKS. YOU ARE DONE</text>`;
+    o += `<a href="#fix-help"><rect x="${FX}" y="${y}" width="${FW}" height="34" fill="rgba(124,247,162,.07)" stroke="${HI}"/>` + lines(['Nothing here matches? Getting help'], FX + 12, y + 17, HI) + `</a>`;
+    const H = y + 34 + 20, mk = (id, c) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`;
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" fill="none" stroke-width="1.2"><defs>${mk('ah', PH)}${mk('aa', AM)}${mk('ai', HI)}</defs>${o}</svg>`;
+  })();
 
   // ---- the scan: a synthetic cell in the base frame (metres, z up) --------------------------
   const cv = $('scan'), ctx = cv.getContext('2d');

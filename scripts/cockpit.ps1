@@ -15,11 +15,20 @@ param(
 )
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
-if ($Doctor) {
-    $a = @("run", "perceptronics", "--cell", $Cell, "doctor"); if ($Stream) { $a += "--stream" }
-    & uv @a; exit $LASTEXITCODE
+. "$PSScriptRoot\_python.ps1"
+Update-PathFromRegistry   # a Python installed a moment ago is not on this shell's PATH yet
+$python = Find-Python
+if (-not $python) {
+    Write-Host "Setup has not been run yet (no Python 3.10+ was found)." -ForegroundColor Red
+    Write-Host "Run Windows-Setup (scripts\setup-windows.ps1) first." -ForegroundColor Yellow
+    exit 1
 }
-$a = @("run", "perceptronics", "--cell", $Cell, "gui", "--port", "$Port")
+if ($Doctor) {
+    $a = @("-m", "perceptronics", "--cell", $Cell, "doctor"); if ($Stream) { $a += "--stream" }
+    Invoke-Python $python $a; exit $LASTEXITCODE
+}
+$a = @("-m", "perceptronics", "--cell", $Cell, "gui", "--port", "$Port")
 if ($DryRun) { $a += "--robot-dry-run" }
 if ($Fake) { $a += "--fake" }
-& uv @a
+Invoke-Python $python $a
+exit $LASTEXITCODE

@@ -21,4 +21,6 @@ ip="$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || true)"
 
 echo "cell $cell · robot ${robot:-?} · this Mac ${ip:-?} (${iface:-?})"
 echo "In the pendant's Perceptronic node, set Cockpit to:  http://${ip:-<this-mac-ip>}:7621"
-exec sudo .venv/bin/perceptronics --cell "$cell" gui --rs-lean --bind 0.0.0.0 --cors "$cors"
+py="${PYTHON:-}"
+if [ -z "$py" ]; then py=".venv/bin/python"; [ -x "$py" ] || py="$(command -v python3)"; fi
+exec sudo "$py" -m perceptronics --cell "$cell" gui --rs-lean --bind 0.0.0.0 --cors "$cors"

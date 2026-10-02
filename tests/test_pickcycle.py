@@ -15,6 +15,7 @@ from perceptronics.frame import Frame
 from perceptronics.pickcycle import (
     Block,
     Cockpit,
+    CockpitError,
     PickCycle,
     grasp_rotation,
     grasp_yaw_deg,
@@ -229,3 +230,47 @@ def test_grasp_rotation_points_down_and_leans_outward(top, lean):
     # the heading stays the flange's: X projected, not spun
     x0 = Transform.from_pose(TILTED).rotate((1, 0, 0))
     assert sum(p * q for p, q in zip(x, x0, strict=True)) > 0.8
+
+
+def test_direct_dry_run_surveys_from_the_real_flange_not_the_stand_in(cockpit, monkeypatch):
+    """`pick-cycle --dry-run` without --via-cockpit built a dry-run Robot, whose flange is a
+    stand-in (0.5 m out and up): every surveyed block position was fiction (2026-09-27).
+    A dry run sends nothing, but it still reads where the arm really is."""
+    from urctl import stateframe
+    from urctl.robot import Robot
+
+    real = [0.30, -0.10, 0.25, 0.0, math.pi, 0.0]
+    monkeypatch.setattr(
+        stateframe,
+        "read_flange_state",
+        lambda *a, **k: {
+            "flange": real,
+            "tcp": real,
+            "tcp_offset": [0.0] * 6,
+            "joints": [0.0] * 6,
+            "flange_source": "fk",
+            "consistency_m": 0.0,
+        },
+    )
+    robot = Robot(RobotConfig(host="fake-ur.invalid"), dry_run=True)
+    cycle = PickCycle(cockpit, robot=robot, dry_run=True, say_fn=lambda ev: None)
+    assert cycle._flange() == real
+    # ... and the Robot's default dry-run answer (what a robot-less cockpit shows) is unchanged
+    assert robot.get_flange_pose()["flange"] == [0.5, 0.0, 0.5, 0.0, math.pi, 0.0]
+
+
+def test_direct_dry_run_with_no_controller_fails_instead_of_inventing_a_pose(cockpit, monkeypatch):
+    from urctl import stateframe
+    from urctl.robot import Robot
+
+    def refuse(*a, **k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(stateframe, "read_flange_state", refuse)
+    robot = Robot(RobotConfig(host="fake-ur.invalid"), dry_run=True)
+    sent = []
+    monkeypatch.setattr(robot.primary, "run_and_capture", lambda *a, **k: sent.append(a) or [])
+    cycle = PickCycle(cockpit, robot=robot, dry_run=True, say_fn=lambda ev: None)
+    with pytest.raises(CockpitError, match="connection refused"):
+        cycle._flange()
+    assert sent == []  # a dry run never falls back to the Primary script

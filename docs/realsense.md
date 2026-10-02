@@ -16,7 +16,7 @@ perceptronics --segment-backend sam gui     # Segment Anything instead of region
 | Option | Status | Notes |
 | --- | --- | --- |
 | **Jetson Orin next to the robot** (target) | designed for; container in `Dockerfile.perceptronics` | Camera on the tool flange (`hardware/d435-tool-bracket/`), USB back to the Jetson, this package runs as a service there (`compose --profile perceptronics`). The Jetson also runs `urctl` against the controller over the network, so one box owns perception *and* motion. |
-| **Laptop (this Mac)** | works with the lean open | `brew install librealsense`; the SDK needs **root to claim the USB interface on macOS** (libusb has to detach Apple's UVC driver): `sudo .venv/bin/perceptronics --cell ur3 gui --rs-lean`. The default open loses the claim race to Apple's UVC daemon (*Troubleshooting*); the **lean open** (`--rs-lean`) streamed on 2026-09-25 — the first open still errors once, the cockpit's back-off re-opens and the stream then holds. Launch from a local Terminal: the extra webcam views go through TCC, which silently denies SSH sessions. |
+| **Laptop (this Mac)** | works with the lean open | `brew install librealsense`; the SDK needs **root to claim the USB interface on macOS** (libusb has to detach Apple's UVC driver): `sudo python3 -m perceptronics --cell ur3 gui --rs-lean`. The default open loses the claim race to Apple's UVC daemon (*Troubleshooting*); the **lean open** (`--rs-lean`) streamed on 2026-09-25 — the first open still errors once, the cockpit's back-off re-opens and the stream then holds. Launch from a local Terminal: the extra webcam views go through TCC, which silently denies SSH sessions. |
 | **On the UR controller itself** | not attempted | The CB is a Debian box with USB, so librealsense *could* be built there, but it shares the CPU with URControl's real-time loop, UR re-images it on update, and there is no supported way to ship a service with the robot. The URSim container cannot see USB at all (Docker Desktop on macOS has no USB passthrough). Deferred; the Jetson makes it unnecessary. |
 
 ## How it works
@@ -55,7 +55,7 @@ The temporal filter is what steadies a static scene; it lags on moving objects
 by a few frames, which is the trade. `tests/test_realsense_hw.py::
 test_filtered_depth_is_steadier_than_raw` measures per-pixel temporal noise in
 a centre patch, raw vs default, on the attached camera
-(`sudo uv run pytest -m realsense -q -s` prints both numbers).
+(`sudo python3 -m pytest -m realsense -q -s` prints both numbers).
 
 What no filter fixes: anything under ~28 cm returns nothing; dark matte,
 shiny, or transparent surfaces defeat stereo; direct sunlight washes out the
@@ -72,7 +72,7 @@ and colourises it in the browser. Hover measures; click posts `/api/segment`.
 | Backend | Select | What it does |
 | --- | --- | --- |
 | `stub` (default) | — | Region growing from the click by colour similarity **and depth continuity** (a neighbour joins only if its depth is within 2 cm). Pure Python, ~10 ms. Also `nearest_object` — RealSenseTrainer's "closest thing" rule. |
-| `sam` | `--segment-backend sam` / `PERCEPTRONICS_SEGMENT_BACKEND=sam`, `uv sync --extra sam` | Segment Anything (`facebook/sam-vit-base` via transformers) with the click as the point prompt; CUDA on the Jetson, `mps` on a Mac. First run downloads ~375 MB. Not exercised in CI. |
+| `sam` | `--segment-backend sam` / `PERCEPTRONICS_SEGMENT_BACKEND=sam`, `python3 -m pip install -e ".[sam]"` | Segment Anything (`facebook/sam-vit-base` via transformers) with the click as the point prompt; CUDA on the Jetson, `mps` on a Mac. First run downloads ~375 MB. Not exercised in CI. |
 
 `extract_features(mask, frame)` returns, per object: area, bbox, centroid,
 mean colour, depth median/min/max, **3D centroid in the camera frame**, metric
@@ -110,7 +110,7 @@ Backends (`--segment-backend`, `$PERCEPTRONICS_SEGMENT_BACKEND`):
 | backend | what it does | box prompt |
 | --- | --- | --- |
 | `stub` (default) | colour + depth region growing, pure Python | grows from the box centre (or the click) and clips to the box |
-| `sam` | Segment Anything via `transformers` (`uv sync --extra sam`) | native SAM box prompt, single-mask decode |
+| `sam` | Segment Anything via `transformers` (`python3 -m pip install -e ".[sam]"`) | native SAM box prompt, single-mask decode |
 
 SAM checkpoint (`--sam-model`, `$PERCEPTRONICS_SAM_MODEL`, any `SamModel`-loadable
 id): `facebook/sam-vit-base` by default; `Zigeng/SlimSAM-uniform-50` is the
@@ -211,7 +211,7 @@ host/platform/ports and the bracket print (`PERCEPTRONICS_BRACKET=eseries|ur20`,
 which picks the hand-eye seed — `perceptronics.handeye.BRACKET_SEEDS`). A variable
 already set in the shell wins over the file. The real cells ship with `UR_HOST`
 empty: fill in the controller IP once. `perceptronics cells` prints them;
-`eval "$(uv run perceptronics cells --export ur20)"` puts the same variables in
+`eval "$(python3 -m perceptronics cells --export ur20)"` puts the same variables in
 your shell so plain `urctl` commands target the cell too.
 
 **Doctor** (`perceptronics --cell ur20 doctor [--stream] [--no-robot] [--json]`,
@@ -246,12 +246,12 @@ and the command to start one, and the robot tools keep working. An unreachable
 controller is likewise reported in-band (`robot unreachable at …`), not as a
 server crash.
 
-**Windows laptop** (today's brain): `scripts\setup-windows.ps1` installs uv
-(winget `astral-sh.uv`), downloads and runs the Intel RealSense SDK 2.0
+**Windows laptop** (today's brain): `scripts\setup-windows.ps1` installs Python when none
+is found (winget `Python.Python.3.13`), downloads and runs the Intel RealSense SDK 2.0
 installer from the librealsense GitHub release (`RealSense.SDK-WIN10-<ver>.exe`
 — the default install puts `realsense2.dll` under
 `C:\Program Files (x86)\Intel RealSense SDK 2.0\bin\x64\`, and the script
-sets `REALSENSE_LIB` to it), runs `uv sync` and the doctor. Then
+sets `REALSENSE_LIB` to it) and runs the doctor. Then
 `scripts\cockpit.ps1 -Cell ur20` is the pilot's seat. No `sudo` story on
 Windows: librealsense uses the native backend there. **Not yet run on the
 laptop** as of 2026-09-12 — the first run is the verification.
@@ -335,9 +335,9 @@ paste the `env_line` into the cell file.
 the camera at about 0.3 m, then
 
 ```bash
-uv run perceptronics --cell ur3 calibrate --dry-run   # find the mark, print the 39-view plan, move nothing
-uv run perceptronics --cell ur3 calibrate             # orbit, click every view in, solve, trim; prints the env_line
-uv run perceptronics --cell ur3 calibrate --apply     # …and put it in force + save handeye_<cell>.json
+python3 -m perceptronics --cell ur3 calibrate --dry-run   # find the mark, print the 39-view plan, move nothing
+python3 -m perceptronics --cell ur3 calibrate             # orbit, click every view in, solve, trim; prints the env_line
+python3 -m perceptronics --cell ur3 calibrate --apply     # …and put it in force + save handeye_<cell>.json
 ```
 
 It drives the arm directly over Primary (`tcp=[0]*6`, 0.08 m/s; `--via-cockpit`

@@ -154,6 +154,8 @@ def build_manifest(
     ]
     if props.get("Bundle-Description"):
         headers.insert(6, ("Bundle-Description", props["Bundle-Description"]))
+    if props.get("Bundle-Copyright"):
+        headers.insert(5, ("Bundle-Copyright", props["Bundle-Copyright"]))
     return b"".join(manifest_line(k, v) for k, v in headers) + b"\r\n"
 
 
@@ -743,7 +745,19 @@ def release_check(tag: str, src: str | Path, dist_dir: str | Path) -> dict:
         raise Urcap5Error(f"{path} was not built from the current sources — run `make urcap5-package`")
     if h.get("Bundle-Category", "").lower() != "urcap" or "META-INF/MANIFEST.MF" not in bundle["names"][:2]:
         raise Urcap5Error(f"{path} would be refused by PolyScope 5's installer (category / manifest order)")
-    return {"version": version, "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    # the USB stick's auto-install file is released beside the jar: it must be the one for this jar
+    stick = dist_dir / MAGIC_NAME
+    if not stick.is_file():
+        raise Urcap5Error(f"{stick} is not committed — run `make urcap5-package` and commit it")
+    template = MAGIC_TEMPLATE.read_text(encoding="utf-8")
+    if stick.read_text(encoding="utf-8") != render_magic(template, path, props["Bundle-SymbolicName"]):
+        raise Urcap5Error(f"{stick} is not the one for {path.name} — run `make urcap5-package`")
+    return {
+        "version": version,
+        "path": str(path),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "stick": str(stick),
+    }
 
 
 # -- install --------------------------------------------------------------------------------
@@ -874,6 +888,37 @@ def compare_jars(built: Path, committed: Path, javap: str | None = None) -> list
     return problems
 
 
+MAGIC_TEMPLATE = REPO_ROOT / "scripts" / "urmagic_perceptronic.sh"
+MAGIC_NAME = "urmagic_perceptronic.sh"
+
+
+def render_magic(template: str, urcap: Path, symbolic_name: str) -> str:
+    """The USB stick's auto-install file for one built jar: scripts/urmagic_perceptronic.sh
+    with the jar's file name, sha256 and bundle id filled in (what scripts/urcap5-usb.sh
+    writes on the stick) — committed beside the jar so a stick can be made by copying two files."""
+    values = {
+        "@URCAP_FILE@": urcap.name,
+        "@URCAP_SHA256@": hashlib.sha256(urcap.read_bytes()).hexdigest(),
+        "@SYMBOLIC_NAME@": symbolic_name,
+    }
+    for key, value in values.items():
+        if key not in template:
+            raise Urcap5Error(f"{MAGIC_TEMPLATE.name} has no {key}")
+        template = template.replace(key, value)
+    return template
+
+
+def write_magic(src: str | Path, out: str | Path) -> Path:
+    props = read_properties((Path(src) / "bundle.properties").read_text(encoding="utf-8"))
+    urcap = Path(out) / dist_name(props)
+    if not urcap.is_file():
+        raise Urcap5Error(f"{urcap} is not built — run `make urcap5-package`")
+    path = Path(out) / MAGIC_NAME
+    text = render_magic(MAGIC_TEMPLATE.read_text(encoding="utf-8"), urcap, props["Bundle-SymbolicName"])
+    path.write_bytes(text.encode("utf-8"))
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="urcap5", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -887,6 +932,9 @@ def main(argv: list[str] | None = None) -> int:
     pk = sub.add_parser("package", help="build SRC into a .urcap")
     pk.add_argument("src")
     pk.add_argument("--out", default="urcap/dist")
+    mg = sub.add_parser("magic", help="write the USB stick's auto-install file for the built .urcap")
+    mg.add_argument("src")
+    mg.add_argument("--out", default="urcap/dist")
     ck = sub.add_parser("check", help="does the URCap work with the PolyScope whose API jars are in --sdk")
     ck.add_argument("--sdk", required=True, help="a directory `urcap5.py sdk` wrote")
     ck.add_argument("--src", default="urcap/perceptronic-ps5")
@@ -918,6 +966,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({k: info[k] for k in ("image", "api_version", "jars", "dir")}))
         elif args.cmd == "package":
             print(package(args.src, args.out))
+        elif args.cmd == "magic":
+            print(write_magic(args.src, args.out))
         elif args.cmd == "check":
             src = Path(args.src)
             props = read_properties((src / "bundle.properties").read_text(encoding="utf-8"))

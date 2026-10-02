@@ -25,7 +25,7 @@ def say(text):
 
 def run(*args):
     out = subprocess.run(
-        ["uv", "run", "python", f"{S}/pick.py", *map(str, args)],
+        [sys.executable, f"{S}/pick.py", *map(str, args)],
         capture_output=True,
         text=True,
         cwd=_os.path.dirname(_os.path.dirname(HERE)),  # the checkout root

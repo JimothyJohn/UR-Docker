@@ -43,7 +43,7 @@ NODE = shutil.which("node")
 
 def test_manifest_contribution_and_sources_agree():
     meta = urcapx.read_manifest((URCAP / "manifest.yaml").read_text(encoding="utf-8"))
-    assert meta["vendorID"] == "nickarmenta" and meta["urcapID"] == "perceptronic"
+    assert meta["vendorID"] == "advin" and meta["urcapID"] == "perceptronic"
     assert meta["folders"] == ["perceptronic-frontend"]
     contribution = json.loads((FRONTEND / "contribution.json").read_text(encoding="utf-8"))
     (node,) = contribution["applicationNodes"]
@@ -54,21 +54,19 @@ def test_manifest_contribution_and_sources_agree():
     assert f'const TAG = "{tag}"' in main_js and f'const NODE_TYPE = "{tag}"' in worker_js
     i18n = json.loads((FRONTEND / node["translationPath"] / "en.json").read_text(encoding="utf-8"))
     assert i18n["application"]["nodes"][tag]["title"] == "Perceptronic"
-    # the two program nodes: Perceptronic Pick and its After picture N child
-    pick, after = contribution["programNodes"]
-    assert [pick["componentTagName"], after["componentTagName"]] == [f"{tag}-pick", f"{tag}-after"]
+    # one program node: 3D Pick (0.5.0 — "After picture N" went with the node's children)
+    (pick,) = contribution["programNodes"]
+    assert pick["componentTagName"] == f"{tag}-pick"
     lib = (FRONTEND / "pickscript.js").read_text(encoding="utf-8")
-    for prog in (pick, after):
-        for key in ("presenterURI", "behaviorURI", "iconURI"):
-            assert (FRONTEND / prog[key]).is_file(), prog[key]
-        assert prog["categoryName"] == "perceptronic" and prog["translationPath"] == "assets/i18n/"
-        worker = (FRONTEND / prog["behaviorURI"]).read_text(encoding="utf-8")
-        assert 'importScripts("pickscript.js")' in worker
-        assert i18n["program"]["tree"]["nodes"][prog["componentTagName"]]
+    for key in ("presenterURI", "behaviorURI", "iconURI"):
+        assert (FRONTEND / pick[key]).is_file(), pick[key]
+    assert pick["categoryName"] == "perceptronic" and pick["translationPath"] == "assets/i18n/"
+    worker = (FRONTEND / pick["behaviorURI"]).read_text(encoding="utf-8")
+    assert 'importScripts("pickscript.js")' in worker
+    assert i18n["program"]["tree"]["nodes"] == {pick["componentTagName"]: "3D Pick"}
     pick_js = (FRONTEND / pick["presenterURI"]).read_text(encoding="utf-8")
-    assert pick["presenterURI"] == after["presenterURI"]  # one presenter file defines both elements
-    for t in (pick["componentTagName"], after["componentTagName"]):
-        assert f'"{t}"' in pick_js and f'"{t}"' in lib
+    assert f'"{pick["componentTagName"]}"' in pick_js and f'"{pick["componentTagName"]}"' in lib
+    assert f"{tag}-after" not in pick_js + lib + worker
     assert f'const APP_TYPE = "{tag}"' in lib and f'const APP_TAG = "{tag}"' in pick_js
     for key in ("smartSkills", "sidebarItems", "operatorScreens"):
         assert contribution[key] == []
@@ -88,7 +86,7 @@ def test_manifest_reader_rejects_bad_ids_and_missing_fields():
 
 def test_package_is_a_gzipped_tar_with_the_manifest_first(tmp_path):
     out = urcapx.package(URCAP, tmp_path)
-    assert out.name == "perceptronic-0.3.0.urcapx"
+    assert out.name == "perceptronic-0.6.0.urcapx"
     with tarfile.open(out, "r:gz") as tar:
         names = tar.getnames()
     assert names[0] == "manifest.yaml"
@@ -99,7 +97,6 @@ def test_package_is_a_gzipped_tar_with_the_manifest_first(tmp_path):
         "pick.js",
         "pickscript.js",
         "pick-node.worker.js",
-        "after-node.worker.js",
         "contribution.json",
         "assets/i18n/en.json",
         "assets/icons/perceptronic-pick.svg",
@@ -125,7 +122,7 @@ def test_package_is_reproducible_and_normalised(tmp_path):
     a = urcapx.package(URCAP, tmp_path / "a").read_bytes()
     b = urcapx.package(URCAP, tmp_path / "b").read_bytes()
     assert a == b
-    with tarfile.open(tmp_path / "a" / "perceptronic-0.3.0.urcapx", "r:gz") as tar:
+    with tarfile.open(tmp_path / "a" / "perceptronic-0.6.0.urcapx", "r:gz") as tar:
         infos = tar.getmembers()
     assert {(i.uid, i.gid, i.uname, i.gname) for i in infos} == {(0, 0, "", "")}
     assert len({i.mtime for i in infos}) == 1 and infos[0].mtime > 1_600_000_000
@@ -229,7 +226,7 @@ class UrserviceStub(BaseHTTPRequestHandler):
                 status=500,
             )
             return
-        ident = {"vendorID": "nickarmenta", "urcapID": "perceptronic"}
+        ident = {"vendorID": "advin", "urcapID": "perceptronic"}
         if any(it["id"] == ident for it in UrserviceStub.installed):
             self._reply(
                 {"errors": [{"code": "already_installed", "message": "urcap already installed"}]}, status=409
@@ -274,7 +271,7 @@ def test_install_posts_urcapxfile_then_409_then_replace_deletes_first(tmp_path, 
     upload = [r for r in UrserviceStub.requests if r["method"] == "POST"][-1]
     assert upload["path"] == urcapx.API_PATH
     assert upload["fields"] == [("urcapxFile", out.name)] and upload["size"] == out.stat().st_size
-    assert urcapx.is_installed(host, port, "nickarmenta", "perceptronic")
+    assert urcapx.is_installed(host, port, "advin", "perceptronic")
     # a second install is a 409 with the --replace hint, and nothing changed
     res = urcapx.install(out, host, port)
     assert not res["ok"] and res["status"] == 409 and "--replace" in res["hint"]
@@ -282,7 +279,7 @@ def test_install_posts_urcapxfile_then_409_then_replace_deletes_first(tmp_path, 
     res = urcapx.install(out, host, port, replace=True)
     assert res["ok"] and res["replaced"] is True
     assert [r["method"] for r in UrserviceStub.requests[-3:]] == ["GET", "DELETE", "POST"]
-    assert UrserviceStub.requests[-2]["path"].endswith("/nickarmenta/perceptronic")
+    assert UrserviceStub.requests[-2]["path"].endswith("/advin/perceptronic")
     assert len(UrserviceStub.installed) == 1
 
 
@@ -324,14 +321,14 @@ def test_cli_list_and_package(tmp_path, urservice, capsys):
     assert urcapx.main(["list", "--host", host, "--port", str(port)]) == 0
     assert "universal-robots/web-frontend-app  1.2.0" in capsys.readouterr().out
     assert urcapx.main(["package", str(URCAP), "--out", str(tmp_path)]) == 0
-    assert (tmp_path / "perceptronic-0.3.0.urcapx").is_file()
+    assert (tmp_path / "perceptronic-0.6.0.urcapx").is_file()
     assert (
         urcapx.main(
-            ["install", str(tmp_path / "perceptronic-0.3.0.urcapx"), "--host", host, "--port", str(port)]
+            ["install", str(tmp_path / "perceptronic-0.6.0.urcapx"), "--host", host, "--port", str(port)]
         )
         == 0
     )
-    assert urcapx.main(["delete", "nickarmenta", "perceptronic", "--host", host, "--port", str(port)]) == 0
+    assert urcapx.main(["delete", "advin", "perceptronic", "--host", host, "--port", str(port)]) == 0
     assert UrserviceStub.installed == [UrserviceStub.installed[0]] and len(UrserviceStub.installed) == 1
 
 
@@ -424,13 +421,11 @@ def test_worker_speaks_the_threads_protocol(tmp_path):
     assert [m["type"] for m in by_uid["u1"]] == ["running", "result"]
     assert by_uid["u1"][1]["complete"] is True
     fresh = {
-        "type": "nickarmenta-perceptronic",
+        "type": "advin-perceptronic",
         "version": "1.1.0",
         "cockpitUrl": "",
         "areas": [],
         "tipMm": 163,
-        "reachInnerMm": 150,
-        "reachOuterMm": 150,
         "robotModel": "",
     }
     assert by_uid["u1"][1]["payload"] == fresh
@@ -456,7 +451,7 @@ def test_presenter_parses_and_defines_the_element():
     ):
         assert member in src, member
     for route in (
-        "/api/color.png",
+        '"depth" : "color"}.png',
         "/api/point",
         "/api/segment",
         "/api/robot/locate",
@@ -467,20 +462,25 @@ def test_presenter_parses_and_defines_the_element():
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_program_node_presenter_parses_and_defines_both_elements():
+def test_program_node_presenter_parses_and_defines_its_elements():
     subprocess.run([NODE, "--check", str(FRONTEND / "pick.js")], check=True, timeout=30)
     src = (FRONTEND / "pick.js").read_text(encoding="utf-8")
     assert "customElements.define(PICK_TAG, PerceptronicPickNode)" in src
     assert "customElements.define(DIALOG_TAG, PerceptronicPickDialog)" in src
-    assert "customElements.define(AFTER_TAG, PerceptronicAfterNode)" in src
+    assert "AFTER_TAG" not in src and "PerceptronicAfterNode" not in src
     for prop in ("contributedNode", "presenterAPI", "robotSettings", "programTree", "applicationContext"):
-        assert src.count(f"set {prop}(") == 2, prop  # both row elements take every property PolyScope sets
+        assert src.count(f"set {prop}(") == 1, prop  # the row element takes every property PolyScope sets
     # the screen is a PolyScope custom dialog: it takes what PolyScope sets on one and is opened by the row
     for prop in ("inputData", "presenterApi", "afterOpen"):
         assert f"set {prop}(" in src, prop
     assert "dialogService.openCustomDialog(DIALOG_TAG" in src
-    for route in ("/api/color.png", "/api/pick/scene?opts="):
+    for route in ('"depth" : "color"}.png', "/api/pick/scene?opts="):  # the picture or the depth, one poll
         assert route in src, route
+    # nothing in the dialog scrolls, and its options are two tabs
+    assert "overflow: auto" not in src and "overflow-y" not in src and "overflow: scroll" not in src
+    assert 'data-tab="part"' in src and 'data-tab="approach"' in src
+    for gone in ("Gripper", "gripper-fields", "motion-fields", "Popup when nothing"):
+        assert gone not in src, gone
     for member in (
         "programNodeService.updateNode",
         "applicationService.getApplicationNode(APP_TAG)",

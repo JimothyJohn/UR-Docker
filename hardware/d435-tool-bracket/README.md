@@ -160,11 +160,12 @@ Countersunk heads are the whole point: the wrist-side face of the wall is 3 mm f
 ## 8. Regenerating
 
 ```bash
-# cadquery is a design-time tool, not a runtime dependency of this repo
-uv run --with cadquery --with matplotlib --with numpy python hardware/d435-tool-bracket/bracket.py            # defaults
-uv run --with cadquery --with matplotlib --with numpy python hardware/d435-tool-bracket/bracket.py SPIGOT80_OD=49.8 UR20_ARM_ANGLE_DEG=135
+# cadquery is a design-time tool, not a runtime dependency of this repo:
+#   python3 -m pip install cadquery matplotlib numpy     (+ fast-simplification for --refresh-camera-mesh)
+python3 hardware/d435-tool-bracket/bracket.py            # defaults
+python3 hardware/d435-tool-bracket/bracket.py SPIGOT80_OD=49.8 UR20_ARM_ANGLE_DEG=135
 # re-derive the vendored Intel mesh from the pinned realsense-ros commit (network + fast-simplification)
-uv run --with numpy --with fast-simplification python hardware/d435-tool-bracket/bracket.py --refresh-camera-mesh
+python3 hardware/d435-tool-bracket/bracket.py --refresh-camera-mesh
 ```
 
 Outputs land in `out/` (STL + STEP per variant, an assembly STEP per variant, the placed camera body STL, `build_info.json` with the per-variant overrides, derived numbers and the tool-connector clearance check) and `renders/`. Any `UR20_*` / `ESERIES_*` parameter can be overridden on the command line like the rest (tuples as JSON, e.g. `ESERIES_PATTERNS='["iso50","iso80"]'` brings the dual plate back). Sources for every external number are cited in `bracket.py`'s docstring and `vendor/NOTICE.md`.

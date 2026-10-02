@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "cell": {
-      "command": "uv",
-      "args": ["run", "perceptronics-mcp"],
+      "command": "python3",
+      "args": ["-m", "perceptronics.mcp_server"],
       "env": {}
     }
   }

@@ -141,9 +141,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-*.txt
 
       # pick5_e2e compiles the node's PickScript and `urcap5.py check` the whole URCap with
       # `javac --release 8`; any JDK 9+ does that.
@@ -153,18 +155,18 @@ jobs:
           java-version: "17"
 
       - name: Install (locked)
-        run: uv sync --locked
+        run: python -m pip install --require-hashes -r requirements-dev.txt
 
       - name: API check, URCap + pick e2e on PolyScope ${{ matrix.polyscope }}
         env:
           POLYSCOPE: ${{ matrix.polyscope }}
-        run: uv run python urcap/ps5_matrix.py run --version "$POLYSCOPE" --artifacts ps5-artifacts --report "ps5-artifacts/report-$POLYSCOPE.json"
+        run: python urcap/ps5_matrix.py run --version "$POLYSCOPE" --artifacts ps5-artifacts --report "ps5-artifacts/report-$POLYSCOPE.json"
 
       - name: tear down (always, with volumes)
         if: always()
         env:
           POLYSCOPE: ${{ matrix.polyscope }}
-        run: uv run python urcap/ps5_matrix.py down --version "$POLYSCOPE"
+        run: python urcap/ps5_matrix.py down --version "$POLYSCOPE"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

@@ -57,7 +57,7 @@ SDK = REPO / "target" / "ps5-matrix" / "sdk"
 JAR_NAME = "perceptronic-ps5.jar"
 IMAGE = "universalrobots/ursim_e-series"
 HUB_TAGS = f"https://hub.docker.com/v2/repositories/{IMAGE}/tags?page_size=100"
-PACKAGE = "com.nickarmenta.perceptronic"
+PACKAGE = "io.advin.perceptronic"
 # `sudo docker` where the user is not in the docker group (the Makefile passes its DOCKER).
 DOCKER = os.environ.get("DOCKER", "docker").split()
 
@@ -406,11 +406,11 @@ def fetch_tags(url: str = HUB_TAGS) -> list[str]:
 NODE_SERVICES = (
     "com.ur.urcap.api.contribution.installation.swing.SwingInstallationNodeService",
     "com.ur.urcap.api.contribution.program.swing.SwingProgramNodeService",
-    "com.ur.urcap.api.contribution.toolbar.swing.SwingToolbarService",  # the P button (0.6.0)
+    "com.ur.urcap.api.contribution.toolbar.swing.SwingToolbarService",  # the P button (since 0.6.0)
 )
 _PS_ROW = re.compile(r"^\[\s*(\d+)\]\s*\[\s*([A-Za-z]+)\s*\]\s*\[\s*(\d+)\]\s*(.*?)\s*$")
 # ... and the old identity (RealSense Pilot, Olympus Controls): the real logs in tests/fixtures
-_OURS = re.compile(r"com\.nickarmenta|perceptronic|com\.olympuscontrols|realsense-?pilot", re.I)
+_OURS = re.compile(r"io\.advin|perceptronic|com\.olympuscontrols|realsense-?pilot", re.I)
 _ERROR = re.compile(
     r"exception|\berror\b|severe|could not|failed|unresolved|omitted|refused|rejected|incompatible", re.I
 )
@@ -449,7 +449,7 @@ def missing_services(services_text: str, wanted: tuple[str, ...] = NODE_SERVICES
 
 def log_errors(log: str, package: str = PACKAGE) -> list[str]:
     """polyscope.log lines that say something went wrong with the URCap: any Java stack
-    frame inside its package (``at com.nickarmenta...``) with the exception line that
+    frame inside its package (``at io.advin...``) with the exception line that
     heads it, and any line naming the URCap together with a failure word."""
     lines = log.splitlines()
     errors: list[str] = []

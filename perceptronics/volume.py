@@ -226,7 +226,9 @@ class Part:
     """One candidate's top face, base frame: the rectangle's centre (at the top's height),
     the long side's heading in base XY, length ≥ width, the height above the surface; the
     corners in base and in picture pixels for the overlay; ``order`` (1…) once numbered;
-    ``why`` when it is not going to be picked."""
+    ``why`` when it is not going to be picked — and ``near`` when it is still nearly the
+    part (the right size but out of reach, or a little off the size): what the pendant
+    draws, so the operator sees the trouble and not every other thing on the table."""
 
     centre: Vec3
     theta: float
@@ -239,6 +241,7 @@ class Part:
     cells: int
     why: str | None = None
     order: int = 0
+    near: bool = True
     near_edge: bool = field(default=False, repr=False)
 
     # the names pickcycle / picknode already use for a block
@@ -268,6 +271,7 @@ class Part:
             "size_mm": [round(self.length_m * 1000), round(self.width_m * 1000)],
             "height_mm": round(self.height_m * 1000),
             "why": self.why,
+            "near": self.near,
         }
 
 
@@ -397,6 +401,7 @@ def find_parts(
         part.why = _why_not(part, spec, surf, reach, level_ok)
         if part.why is None and fingers is not None:
             part.why = _fingers(part, pts, fingers)
+        part.near = _near(part, spec)
         (parts if part.why is None else rejected).append(part)
     if order:
         order_parts(parts, T, surf, order)
@@ -630,12 +635,28 @@ def _why_not(
     return None
 
 
+def _near(part: Part, spec: PartSpec | None) -> bool:
+    """Nearly the part? Without a size, everything found is; a piece cut off by the picture's
+    edge is when what shows of it is no bigger than the part."""
+    if spec is None or part.why is None:
+        return True
+    if part.near_edge:
+        return part.length_m <= spec.length_m + spec.slack(spec.length_m) and (
+            part.width_m <= spec.width_m + spec.slack(spec.width_m)
+        )
+    return spec.near_miss(part.length_m, part.width_m, part.height_m)
+
+
 def _fingers(part: Part, pts: list, fingers: dict) -> str | None:
     from .pickplan import clearance
 
-    r = part.length_m + 0.08
+    fingers = dict(fingers)
+    long_way = fingers.pop("across", "short") == "long"  # the fingers close across the long side
+    r = part.length_m + 0.08 + (fingers.get("room_m") or 0.0)
     near = [p for p in pts if p is not None and math.dist(p[:2], part.centre[:2]) < r]
     rect = {"centre": list(part.centre), "theta": part.theta, "minor_m": part.width_m}
+    if long_way:
+        rect = {**rect, "theta": part.theta + math.pi / 2, "minor_m": part.length_m}
     got = clearance(rect, near, **fingers)
     if got["clear"]:
         return None

@@ -54,7 +54,7 @@ if "--go" in sys.argv:
     import subprocess
 
     out = subprocess.run(
-        ["uv", "run", "urctl", "gripper", "open"],
+        [sys.executable, "-m", "urctl", "gripper", "open"],
         capture_output=True,
         text=True,
         env={**os.environ, "UR_HOST": "192.168.3.3"},

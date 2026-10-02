@@ -317,7 +317,7 @@ def test_the_teach_time_preview_gives_hover_and_grip_in_the_active_tcp():
     assert out["polyscope_hover_pose"] == pytest.approx(out["hover_pose"], abs=1e-9)
 
 
-# -- the closer look: halfway to the block, aimed at it -------------------------------------------
+# -- the closer look: halfway to the block, the block beside the gripper in the picture -----------
 
 
 def _camera(flange, handeye):
@@ -332,8 +332,8 @@ def _camera(flange, handeye):
         [-0.2, 0.30, 0.80, 0.3, 2.9, 0.1],
     ],
 )
-def test_the_look_pose_puts_the_camera_halfway_and_aims_it_at_the_block(flange):
-    from perceptronics.picknode import LOOK_MIN_M, look_pose
+def test_the_look_pose_puts_the_camera_halfway_and_the_block_clear_of_the_gripper(flange):
+    from perceptronics.picknode import LOOK_AIM_DEG, LOOK_MIN_M, gripper_bearing, look_pose
 
     handeye = [0.0133, 0.0553, 0.0129, 0.10, -0.164, 3.119]  # the UR3e bracket's solve
     top = [0.25, 0.30, -0.26]
@@ -344,10 +344,17 @@ def test_the_look_pose_puts_the_camera_halfway_and_aims_it_at_the_block(flange):
     d1 = math.dist(after.translation, top)
     assert d1 == pytest.approx(max(LOOK_MIN_M, d0 / 2), abs=0.02) or d1 > d0 / 2  # halfway, or backed out
     assert LOOK_MIN_M - 1e-9 <= d1 <= d0 + 1e-9
-    # the block is dead centre: on the optical axis
-    axis = after.rotate((0.0, 0.0, 1.0))
-    to_block = [(top[i] - after.translation[i]) / d1 for i in range(3)]
-    assert sum(a * b for a, b in zip(axis, to_block, strict=True)) == pytest.approx(1.0, abs=1e-9)
+    # the block is LOOK_AIM_DEG off the optical axis, on the side away from the gripper: the
+    # open fingers hang in the picture, and a block in its middle is half hidden behind them
+    x, y, z = after.inverse().apply(top)
+    assert math.degrees(math.atan2(math.hypot(x, y), z)) == pytest.approx(LOOK_AIM_DEG, abs=1e-6)
+    gx, gy = gripper_bearing(handeye, TIP)
+    assert (x * gx + y * gy) / math.hypot(x, y) == pytest.approx(-1.0, abs=1e-9)
+    # ... which puts every fingertip at least 20 deg from it (it was 9 deg from the nearest)
+    for side in (0.0, 0.025, -0.025):
+        fx, fy, fz = Transform.from_pose(handeye).inverse().apply((0.0, side, TIP))
+        cos = (x * fx + y * fy + z * fz) / (math.hypot(x, y, z) * math.hypot(fx, fy, fz))
+        assert math.degrees(math.acos(cos)) > 20.0
     # on the line from where the camera was: it moved toward the block, not sideways
     away0 = [(before.translation[i] - top[i]) / d0 for i in range(3)]
     away1 = [(after.translation[i] - top[i]) / d1 for i in range(3)]
@@ -365,6 +372,27 @@ def test_a_camera_already_close_is_not_moved_nearer_than_the_d435_can_see():
     pose = look_pose(flange, top, CAMERA_AT_FLANGE, 0.05)
     assert pose is not None
     assert math.dist(Transform.from_pose(pose).translation, top) >= LOOK_MIN_M - 1e-9
+
+
+def test_a_camera_nearer_than_the_d435_can_see_backs_out_to_look():
+    """The next pick starts from wherever the last one ended — often right over the table."""
+    from perceptronics.picknode import LOOK_MIN_M, look_pose
+
+    top = [0.40, 0.0, 0.0]
+    flange = [0.40, 0.0, 0.12, 0.0, math.pi, 0.0]  # camera 0.12 m above the part: blind
+    pose = look_pose(flange, top, CAMERA_AT_FLANGE, 0.05)
+    assert pose is not None
+    assert math.dist(Transform.from_pose(pose).translation, top) >= LOOK_MIN_M - 1e-9
+
+
+def test_a_gripper_on_the_optical_axis_gives_no_side_to_aim_away_from():
+    from perceptronics.picknode import gripper_bearing, look_pose
+
+    assert gripper_bearing(CAMERA_AT_FLANGE, TIP, stroke_m=0.0) == (0.0, 0.0)
+    top = [0.40, 0.0, 0.0]
+    pose = look_pose([0.40, 0.0, 0.7, 0.0, math.pi, 0.0], top, CAMERA_AT_FLANGE, 0.05, stroke_m=0.0)
+    x, y, _ = Transform.from_pose(pose).inverse().apply(top)
+    assert math.hypot(x, y) < 1e-9  # dead centre, as before
 
 
 def test_no_look_pose_when_the_tool_would_tip_past_the_limit():
@@ -456,7 +484,13 @@ def test_the_node_teach_screen_sees_the_rejects_and_why():
     rgb, depth = TWO_SIZES[0]
     frame = (7, W, H, 3, rgb, depth, 0.001, K)
     out = detect_report(frame, pick_port=7622, handeye=True, tip_m=TIP, part=PartSpec.from_mm(54, 40, 40, 15))
-    assert out["part"] == {"length_mm": 54.0, "width_mm": 40.0, "height_mm": 40.0, "tol_pct": 15.0}
+    assert out["part"] == {
+        "length_mm": 54.0,
+        "width_mm": 40.0,
+        "height_mm": 40.0,
+        "tol_pct": 15.0,
+        "shape": "box",
+    }
     assert [b["size_mm"] for b in out["blocks"]] == [[54, 43]] and out["blocks"][0]["height_mm"] == 40
     assert [(r["size_mm"], r["why"]) for r in out["rejected"]] == [([43, 43], "too short")]
     plain = detect_report(frame, pick_port=7622, handeye=True, tip_m=TIP)

@@ -8,11 +8,10 @@ way: `--host` is the only difference.
 ## Quick start
 
 ```bash
-git clone https://github.com/Olympus-Controls/UR-utils && cd UR-utils
+git clone https://github.com/JimothyJohn/perceptronics && cd perceptronics
 docker compose up -d          # the simulator; pendant at http://localhost:6080/vnc.html
-uv sync                       # or: pip install .
-uv run urctl bring-up         # power on + release brakes
-uv run urctl state            # robot state as JSON
+python3 -m urctl bring-up     # power on + release brakes (Python 3.10+; nothing to install)
+python3 -m urctl state        # robot state as JSON
 ```
 
 The e-Series image is amd64-only. On Apple Silicon, run the PolyScope X sim
@@ -37,8 +36,8 @@ A RealSense D435 on the tool flange turns a click on the camera image into a
 robot move:
 
 ```bash
-uv run perceptronics --fake gui     # the cockpit on a synthetic scene, no camera
-uv run perceptronics --cell ur3 gui # a real cell
+python3 -m perceptronics gui --fake     # the cockpit on a synthetic scene, no camera
+python3 -m perceptronics --cell ur3 gui # a real cell
 ```
 
 ## More
@@ -51,7 +50,8 @@ uv run perceptronics --cell ur3 gui # a real cell
 ## Development
 
 ```bash
-uv run pytest -m "not integration"   # unit tests
+make install-dev                     # .venv with the pinned dev tools (pytest, ruff)
+make test                            # unit tests
 make test-integration                # against a running simulator
 make lint
 ```

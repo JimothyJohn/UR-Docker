@@ -1,9 +1,9 @@
 metadata:
-  vendorID: "nickarmenta"
+  vendorID: "advin"
   urcapID: "perceptronic"
   vendorName: "Nick Armenta"
   urcapName: "Perceptronic"
-  version: 0.3.0
+  version: 0.6.0
 artifacts:
   webArchives:
   - id: "perceptronic-frontend"

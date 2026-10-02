@@ -1,0 +1,8 @@
+# Development tools (tests, lint, build). The runtime has no dependencies.
+# requirements-dev.txt is this list resolved for every supported Python and OS, pinned
+# with hashes; Dependabot (pip) keeps both in step.
+pytest>=8
+hypothesis>=6.100
+ruff>=0.6
+build>=1.2
+hatchling>=1.25

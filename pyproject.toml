@@ -39,8 +39,9 @@ packages = ["urctl", "perceptronics"]
 [tool.hatch.build.targets.wheel.force-include]
 "scripts/urp_convert.py" = "urctl/_urp_convert.py"
 
-[dependency-groups]
-dev = ["hypothesis>=6.100", "pytest>=8", "ruff>=0.6"]
+# Development tools (pytest, hypothesis, ruff, build, hatchling) are not declared here:
+# requirements-dev.in lists them, requirements-dev.txt pins them with hashes for every
+# supported Python and OS. `python3 -m pip install --require-hashes -r requirements-dev.txt`.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -2,11 +2,13 @@
 
 DOCKER ?= sudo docker
 COMPOSE ?= $(DOCKER) compose
-# Python env + deps are managed with uv (see pyproject.toml).
-UV ?= uv
-PYTHON ?= $(UV) run python
-PYTEST ?= $(UV) run pytest
-RUFF ?= $(UV) run ruff
+# Python >= 3.10. The runtime is stdlib-only, so everything runs straight from the checkout
+# (`python3 -m perceptronics ...`, `python3 -m urctl ...`). `make install-dev` makes .venv with
+# the pinned dev tools (pytest, ruff, build); the targets below use it when it is there.
+PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
+PYTEST ?= $(PYTHON) -m pytest
+RUFF ?= $(PYTHON) -m ruff
+PLAYWRIGHT ?= 1.63.0
 
 CONTAINER := perceptronics-ursim-1
 PX_CONTAINER := perceptronics-ursim-px-1
@@ -99,10 +101,12 @@ urcap-compat:  ## The URCap against the pinned SDK: contribution-api members, ma
 	$(PYTHON) urcap/track.py compat
 
 urcap-e2e:  ## Boot target.json's simulator, install a fresh build, load + click the node headlessly.
-	$(UV) run --with playwright==1.63.0 python urcap/e2e.py
+	$(PYTHON) -m pip install -q playwright==$(PLAYWRIGHT)
+	$(PYTHON) urcap/e2e.py
 
 urcapx-matrix:  ## The e2e on the ten newest PolyScope X releases (PSX_VERSION=10.14.0 / all; images removed after each run).
-	$(UV) run --with playwright==1.63.0 python urcap/psx_matrix.py run --version $(PSX_VERSION) --rmi --artifacts target/psx-matrix
+	$(PYTHON) -m pip install -q playwright==$(PLAYWRIGHT)
+	$(PYTHON) urcap/psx_matrix.py run --version $(PSX_VERSION) --rmi --artifacts target/psx-matrix
 
 # ---- PolyScope 5 (e-Series) URCap (urcap/perceptronic-ps5, urcap/urcap5.py) --------
 URCAP5_CONTAINER ?= ur-utils-ursim-e-ur3e
@@ -111,6 +115,7 @@ urcap5-sdk:  ## The URCap API jars of the oldest supported PolyScope (+ compat.s
 
 urcap5-package:  ## Rebuild the downloadable urcap/dist/perceptronic-ps5-<ver>.urcap (JDK; commit it).
 	$(PYTHON) urcap/urcap5.py package urcap/perceptronic-ps5 --out urcap/dist
+	$(PYTHON) urcap/urcap5.py magic urcap/perceptronic-ps5 --out urcap/dist
 
 urcap5-install: urcap5-package  ## Install it in the e-Series sim container $(URCAP5_CONTAINER) (restarts it).
 	$(PYTHON) urcap/urcap5.py install urcap/dist/perceptronic-ps5-*.urcap --container $(URCAP5_CONTAINER)
@@ -219,5 +224,6 @@ regen-urps:  ## Rebuild every <name>.urp from its build.py (node tree) or siblin
 
 # ---- One-time setup ---------------------------------------------------------
 
-install-dev:  ## Create/refresh the uv venv with dev + optional extras.
-	$(UV) sync --extra vision
+install-dev:  ## Create/refresh .venv with the pinned dev tools + the vision extra (pip, hash-checked).
+	python3 -m venv .venv
+	.venv/bin/python -m pip install --require-hashes -r requirements-dev.txt -r requirements-vision.txt

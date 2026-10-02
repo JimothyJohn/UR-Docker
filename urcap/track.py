@@ -74,7 +74,7 @@ API_SURFACE: dict[str, tuple[str, ...]] = {
     "RobotInfoService": ("getRobotType",),
     "ApplicationPresenter": ("applicationNode", "applicationAPI", "robotSettings"),
     "ApplicationBehaviors": ("factory", "upgradeNode", "downgradeNode"),
-    # the Perceptronic Pick program node (pick.js + pick-node.worker.js / after-node.worker.js)
+    # the 3D Pick program node (pick.js + pick-node.worker.js)
     "ProgramPresenterAPI": (
         "programNodeService",
         "applicationService",
@@ -130,7 +130,7 @@ class Sources:
 
 
 def _get(url: str, *, accept: str | None = None) -> tuple[int, bytes]:
-    headers = {"User-Agent": "perceptronics-urcap-track (+https://github.com/Olympus-Controls/UR-utils)"}
+    headers = {"User-Agent": "perceptronics-urcap-track (+https://github.com/JimothyJohn/perceptronics)"}
     if accept:
         headers["Accept"] = accept
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")

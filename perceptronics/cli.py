@@ -246,6 +246,9 @@ def _realsense_command(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):  # legacy Windows codepages: replace, don't crash
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     try:
         cell = apply_cell(args.cell)
     except ValueError as exc:

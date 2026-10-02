@@ -19,15 +19,14 @@ urcap/
   urcapx.py                                package | install | list | delete (stdlib only)
   dist/perceptronic-<ver>.urcapx        the downloadable package (committed; see below)
   perceptronic/
-    manifest.yaml                          vendorID nickarmenta, urcapID perceptronic
+    manifest.yaml                          vendorID advin, urcapID perceptronic
     perceptronic-frontend/
-      contribution.json                    the applicationNode (tag nickarmenta-perceptronic) + two programNodes
-      main.js                              the application node's presenter (a custom element): feed, click → locate, pick areas, reach
+      contribution.json                    the applicationNode (tag advin-perceptronic) + one programNode (3D Pick)
+      main.js                              the application node's presenter (a custom element): two tabs — the feed (Picture / Depth toggle, click → locate) and the pick areas on the arm's reach
       perceptronic-node.worker.js       its behavior worker (node factory / upgrade)
       pickscript.js                        the Pick node's settings + URScript + pose math + the drawings as SVG (worker, page and tests share it)
-      pick.js                              the program nodes' presenters: the Pick row + its dialog, the After picture row
-      pick-node.worker.js                  the Pick node's behaviors (label, validator, code before/after children)
-      after-node.worker.js                 the After picture N node's behaviors
+      pick.js                              the program node's presenter: the 3D Pick row + its dialog (no scrolling; Options = Part / Approach tabs)
+      pick-node.worker.js                  the 3D Pick node's behaviors (label, validator, the whole script before "children" it does not have)
       assets/i18n/en.json                  node titles + supportive text (program.tree.nodes.<tag> for program nodes)
       assets/icons/perceptronic.svg      the P mark — a copy of ../perceptronic.svg (a test holds them equal)
       assets/icons/perceptronic-*.svg    the program nodes' toolbox icons
@@ -111,14 +110,14 @@ out of PolyScope 10.13's own bundles (`web-app/main.js`, `web-program-nodes/*`),
   leading spaces; empty lines are dropped.
 - **The application context arrives serialized:** `{type: "$$ApplicationContext",
   contributions: {contributionList: [...]}, frames: {framesList}}` — our application node
-  is the entry whose `type` / `parentType` is `nickarmenta-perceptronic` (cockpit URL,
-  areas, tip, reach margins, robot model).
+  is the entry whose `type` / `parentType` is `advin-perceptronic` (cockpit URL,
+  areas, tip, robot model).
 - **Program variables** are declared from the presenter with
   `variableService.createVariable(name, "boolean" | "integer")`; the declaration
   (`{id, name, valueType, _IDENTIFIER}`) is stored in the node, the script writes
   `global <name> = …` (what UR's Assignment node emits for a declaration).
 - **The drawings are the PolyScope 5 node's** (`Diagrams.java`: the order tiles, the part
-  in isometric with the jaws, the approach from the side, the reach map) as SVG strings
+  as a box or a cylinder, the approach from the side, the map of the arm's reach) as SVG strings
   from `pickscript.js` — pure functions, so the tests hold `orderGrid` to the Python
   detector's numbering and every drawing to well-formed, escaped SVG.
 - **Older PolyScope X (the release matrix, 2026-09-30; the floor is 10.8):** `robotPositionService.convertJointPositionsToTcpPose`
@@ -153,7 +152,7 @@ the Move buttons need a cockpit with a robot link (below).
 For the real camera: restart your cockpit with CORS, e.g.
 
 ```bash
-sudo .venv/bin/perceptronics --cell ur3 gui --rs-lean --cors http://localhost:8000
+sudo python3 -m perceptronics --cell ur3 gui --rs-lean --cors http://localhost:8000
 ```
 
 (same port as the fake one, so the node's URL doesn't change; stop `make
@@ -193,7 +192,7 @@ with the versions its JavaScript template uses (`contribution-api`, `urcap-utils
 | `python3 urcap/track.py update` | re-resolve and rewrite `target.json` + the `urcap-target` lines in README.md and this page |
 | `python3 urcap/track.py compat` (`make urcap-compat`) | every PolyScope member the node calls or implements (`track.API_SURFACE`, held to `main.js` + the worker by a test) is still in the pinned `contribution-api` typings (UR's npm feed); `manifest.yaml` validates against the SDK's manifest spec; the template still uses the `threads` the worker's hand-written protocol was verified against; the SDK's simulator is the notes' robot image by digest |
 | `python3 urcap/psx_matrix.py run --version all --rmi` (`make urcapx-matrix`) | the same e2e against the newest PolyScope X releases on Docker Hub from the URCap's floor, 10.8 (`RELEASES` / `FLOOR`; `check-tags` flags a newer one), one summary; `.github/workflows/urcapx-matrix.yml` runs it per release on changes to the URCap and weekly (not a required check) |
-| `uv run --with playwright==1.63.0 python urcap/e2e.py` (`make urcap-e2e`) | boots the pinned simulator, installs a fresh build over urservice, checks nginx serves the packaged bytes, then headlessly: node renders, goes live on a `--fake` cockpit, hover depth, click → `/api/segment`, PolyScope's `getKinematicInfo` / `getJointPositions` / FK → IK round trip, the saved cockpit URL survives a reload. About 2 min on the Mac (arm64 image); `--keep` leaves the sim up |
+| `python3 urcap/e2e.py` (`make urcap-e2e`) | boots the pinned simulator, installs a fresh build over urservice, checks nginx serves the packaged bytes, then headlessly: node renders, goes live on a `--fake` cockpit, hover depth, click → `/api/segment`, PolyScope's `getKinematicInfo` / `getJointPositions` / FK → IK round trip, the saved cockpit URL survives a reload. About 2 min on the Mac (arm64 image); `--keep` leaves the sim up |
 
 Nothing needs a login: the notes, the SDK (`UniversalRobots/PolyScopeX_URCap_SDK`),
 Docker Hub and UR's npm feed (`pkgs.dev.azure.com/polyscopex`) are public.

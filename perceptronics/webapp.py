@@ -5,9 +5,9 @@ capture into the RealSenseTrainer dataset layout.
 Zero-dependency (stdlib ``http.server``), same shape as ``urctl gui``: a
 single-file page in ``perceptronics/webui/index.html`` over a small API.
 
-    uv run perceptronics gui --fake                 # no camera: synthetic scene
-    sudo uv run perceptronics gui                   # the D435 (macOS needs root)
-    uv run perceptronics gui --bind 0.0.0.0         # serve off-box (Jetson → laptop)
+    python3 -m perceptronics gui --fake                 # no camera: synthetic scene
+    sudo python3 -m perceptronics gui                   # the D435 (macOS needs root)
+    python3 -m perceptronics gui --bind 0.0.0.0         # serve off-box (Jetson → laptop)
 
 API:
 
@@ -119,6 +119,7 @@ DEFAULT_PORT = 7621
 DEFAULT_SNAPSHOT_DIR = "captures/snapshots"
 REOPEN_DELAY_S = 1.0
 REOPEN_MAX_DELAY_S = 30.0
+STALL_AFTER_S = 2.0  # no new frame for this long: the stream is stalled, its rate is 0
 EVENT_LOG_SIZE = 500
 
 
@@ -156,6 +157,14 @@ class EventLog:
     @property
     def seq(self) -> int:
         return self._seq
+
+
+def recent_rate(stamps: list[float]) -> float:
+    """Events per second among the monotonic ``stamps`` of the last :data:`STALL_AFTER_S`
+    seconds — 0 when they have stopped coming."""
+    now = time.monotonic()
+    w = [t for t in stamps if now - t <= STALL_AFTER_S]
+    return (len(w) - 1) / (w[-1] - w[0]) if len(w) > 1 and w[-1] > w[0] else 0.0
 
 
 def reopen_delay(failures: int) -> float:
@@ -256,8 +265,7 @@ class ViewPump:
                 self._cond.notify_all()
 
     def fps(self) -> float:
-        w = self._fps_window
-        return (len(w) - 1) / (w[-1] - w[0]) if len(w) > 1 and w[-1] > w[0] else 0.0
+        return recent_rate(self._fps_window)
 
     def latest(self) -> tuple[int, bytes | None]:
         with self._cond:
@@ -426,8 +434,20 @@ class ViewerApp:
     # -- frames ----------------------------------------------------------------------
 
     def fps(self) -> float:
-        w = self._fps_window
-        return (len(w) - 1) / (w[-1] - w[0]) if len(w) > 1 and w[-1] > w[0] else 0.0
+        """Frames per second over the last 2 s — 0 once the frames stop. The window is only
+        trimmed when a frame arrives, so a camera that dropped out would otherwise keep
+        its last rate for ever."""
+        return recent_rate(self._fps_window)
+
+    def frame_age_s(self) -> float | None:
+        """Seconds since the newest frame arrived (None before the first)."""
+        t = self._latest_t
+        return max(0.0, time.time() - t) if t else None
+
+    def stalled(self) -> bool:
+        """Frames were flowing and have stopped: the picture on screen is old."""
+        age = self.frame_age_s()
+        return self.frames_read > 0 and age is not None and age > STALL_AFTER_S
 
     def latest(self) -> tuple[int, RgbdFrame | None]:
         with self._cond:
@@ -934,6 +954,18 @@ class ViewerApp:
         color = frame.color if frame.color.channels == 3 else frame.color.to_rgb()
         return seq, encode_png(color.width, color.height, 3, color.data)
 
+    def depth_png(self, after: int | None, timeout_s: float) -> tuple[int, bytes | None]:
+        """The depth image as a heatmap PNG (``GET /api/depth.png``): the same long-poll as
+        :meth:`color_png`, for the URCap's picture/heatmap toggle. Aligned to the colour
+        image and half its size each way (a pixel loop in Python: a quarter of the work).
+        The ramp spans what the frame holds (:func:`heatmap_range`): a 30 mm part on a
+        table 0.4 m away is a few percent of a fixed 0.15–1 m ramp — one colour."""
+        seq, frame = self.wait_frame(after, timeout_s) if after is not None else self.latest()
+        if frame is None:
+            return seq, None
+        near, far = heatmap_range(frame)
+        return seq, colourise_depth_png(frame, near, far, step=2)
+
     # -- the robot program's pick server (perceptronics.picknode) ------------------------
 
     def pick_frame(self, after: int, timeout_s: float = 2.0) -> tuple | None:
@@ -1044,6 +1076,8 @@ class ViewerApp:
             "segment_backends": list(SEGMENT_BACKENDS),
             "seq": seq,
             "fps": round(self.fps(), 2),
+            "frame_age_s": None if self.frame_age_s() is None else round(self.frame_age_s(), 2),
+            "stalled": self.stalled(),
             "frames_read": self.frames_read,
             "uptime_s": round(time.time() - self.started_at, 1) if self.started_at else 0.0,
             "last_error": self.last_error,
@@ -1257,7 +1291,8 @@ class ViewerApp:
         )
         seq, frame = self.latest()
         fps = self.fps()
-        stalled = frame is None or (fps < 1.0 and self.frames_read > 0)
+        age = self.frame_age_s()
+        stalled = frame is None or self.stalled() or (fps < 1.0 and self.frames_read > 0)
         report.checks.insert(
             1,
             Check(
@@ -1265,6 +1300,7 @@ class ViewerApp:
                 not stalled and self.last_error is None,
                 f"{self.camera.describe().get('kind')} camera: {fps:.1f} fps, seq {seq}, "
                 f"{self.frames_read} frames read"
+                + (f"; no new frame for {age:.0f} s" if self.stalled() and age is not None else "")
                 + (f"; last error: {self.last_error}" if self.last_error else ""),
                 fix=self.last_error or "no frames yet — wait for the camera to open, or check the USB link",
             ),
@@ -1616,14 +1652,15 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "approach_mm must be 0..300"}, status=400)
                 return
             self._guarded(lambda: self.app.pick_scene(opts, approach))
-        elif route == "/api/color.png":
+        elif route in ("/api/color.png", "/api/depth.png"):
             try:
                 after = int(qs["after"][0]) if "after" in qs else None
                 timeout_ms = min(10000, max(0, int(qs.get("timeout_ms", ["1500"])[0])))
             except ValueError:
                 self._send_json({"ok": False, "error": "after/timeout_ms must be integers"}, status=400)
                 return
-            seq, png = self.app.color_png(after, timeout_ms / 1000.0)
+            image = self.app.color_png if route == "/api/color.png" else self.app.depth_png
+            seq, png = image(after, timeout_ms / 1000.0)
             if png is None:
                 self._send_json(
                     {"ok": False, "error": "no frame yet", "last_error": self.app.last_error}, status=503
@@ -1784,10 +1821,42 @@ def _depth_palette() -> list[bytes]:
 _PALETTE = _depth_palette()
 
 
-def colourise_depth_png(frame: RgbdFrame, near_m: float | None = None, far_m: float | None = None) -> bytes:
+HEATMAP_NEAR_M, HEATMAP_FAR_M = 0.15, 1.0
+HEATMAP_STEP_M = 0.01  # the ramp's ends move in steps: frame-to-frame noise does not shimmer it
+HEATMAP_MIN_SPAN_M = 0.05
+
+
+def heatmap_range(frame: RgbdFrame) -> tuple[float, float]:
+    """The near and far ends of the heatmap's ramp for this frame: the 2nd and 98th
+    percentile of its valid depths (a flying pixel does not stretch it), rounded outward to
+    :data:`HEATMAP_STEP_M`, at least :data:`HEATMAP_MIN_SPAN_M` apart. A frame with no
+    depth gets the fixed 0.15–1.0 m."""
+    w, h, data, scale = frame.depth.width, frame.depth.height, frame.depth.data, frame.depth.scale_m
+    vals = []
+    for y in range(0, h, 8):
+        for k in range(2 * y * w, 2 * (y + 1) * w, 16):
+            raw = data[k] | (data[k + 1] << 8)
+            if raw:
+                vals.append(raw)
+    if len(vals) < 20:
+        return HEATMAP_NEAR_M, HEATMAP_FAR_M
+    vals.sort()
+    near = vals[len(vals) * 2 // 100] * scale
+    far = vals[min(len(vals) - 1, len(vals) * 98 // 100)] * scale
+    near = math.floor(near / HEATMAP_STEP_M) * HEATMAP_STEP_M
+    far = math.ceil(far / HEATMAP_STEP_M) * HEATMAP_STEP_M
+    if far - near < HEATMAP_MIN_SPAN_M:
+        far = near + HEATMAP_MIN_SPAN_M
+    return near, far
+
+
+def colourise_depth_png(
+    frame: RgbdFrame, near_m: float | None = None, far_m: float | None = None, step: int = 1
+) -> bytes:
     """The depth image as an 8-bit RGB PNG a human (or a vision model) can read:
     near→far runs through the same turbo-like ramp the page uses, invalid
-    depth is black. Range defaults to the frame's own valid min/max."""
+    depth is black. Range defaults to the frame's own valid min/max. ``step`` > 1
+    keeps every ``step``-th pixel each way (a smaller, cheaper picture)."""
     stats = frame.depth.stats()
     near = near_m if near_m is not None else (stats["min_m"] or 0.2)
     far = far_m if far_m is not None else (stats["max_m"] or near + 1.0)
@@ -1798,6 +1867,17 @@ def colourise_depth_png(frame: RgbdFrame, near_m: float | None = None, far_m: fl
     black = b"\x00\x00\x00"
     pal = _PALETTE
     rows = bytearray()
+    if step > 1:
+        w, h, data = frame.depth.width, frame.depth.height, frame.depth.data
+        for y in range(0, h, step):
+            for k in range(2 * y * w, 2 * (y + 1) * w, 2 * step):
+                raw = data[k] | (data[k + 1] << 8)
+                if not raw:
+                    rows += black
+                    continue
+                t = (raw * scale - near) / span
+                rows += pal[0 if t <= 0 else (255 if t >= 1 else int(t * 255))]
+        return encode_png(len(range(0, w, step)), len(range(0, h, step)), 3, bytes(rows))
     for raw in frame.depth.values():
         if not raw:
             rows += black

@@ -1544,7 +1544,7 @@ def platform_hint(exc: BaseException) -> str:
             return (
                 "librealsense could not claim the camera's USB interface. On macOS the SDK needs root to "
                 "detach the built-in UVC driver: re-run under `sudo` "
-                "(e.g. `sudo uv run perceptronics rs-info`). "
+                "(e.g. `sudo python3 -m perceptronics rs-info`). "
                 "Also make sure no other app (browser, FaceTime, realsense-viewer) has the camera open."
             )
         return (

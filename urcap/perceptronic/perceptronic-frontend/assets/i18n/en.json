@@ -1,17 +1,16 @@
 {
   "application": {
     "nodes": {
-      "nickarmenta-perceptronic": {
+      "advin-perceptronic": {
         "title": "Perceptronic",
-        "supportiveText": "Wrist camera feed — click a point to send the arm there; the pick areas and reach for the Pick node"
+        "supportiveText": "Wrist camera feed — click a point to send the arm there; the pick areas for the 3D Pick node, on a map of the arm's reach"
       }
     }
   },
   "program": {
     "tree": {
       "nodes": {
-        "nickarmenta-perceptronic-pick": "Perceptronic Pick",
-        "nickarmenta-perceptronic-after": "After picture"
+        "advin-perceptronic-pick": "3D Pick"
       }
     }
   }

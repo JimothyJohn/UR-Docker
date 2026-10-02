@@ -10,8 +10,13 @@ The dimensions are **as the part lies on the table**: length and width are its
 footprint, height is how far its top is above the table. The table is flat and
 parallel to the base XY plane, so the top face is the face the camera measures.
 
+A **cylinder** (``shape=cyl``) stands on its end: its top face is a disc, so length and
+width are both its diameter and it has no long side — the grasp keeps the wrist where it
+is instead of turning to one.
+
 Text form (the node's request token, the teach screen's query): ``60x40`` or
-``60x40x30`` in millimetres, ``tol`` in percent — ``part=60x40x30 tol=25``.
+``60x40x30`` in millimetres, ``tol`` in percent — ``part=60x40x30 tol=25``; a cylinder is
+``part=40x40x30 shape=cyl``.
 """
 
 from __future__ import annotations
@@ -28,6 +33,9 @@ MIN_SLACK_M = 0.005  # extents from a 4 px grid at 0.3-0.5 m, heights from D435 
 _NUM = r"\d{1,4}(?:\.\d{1,3})?"
 PART_RX = re.compile(rf"\bpart=({_NUM})[xX]({_NUM})(?:[xX]({_NUM}))?(?![\w.])")
 TOL_RX = re.compile(rf"\btol=({_NUM})(?![\w.])")
+SHAPES = ("box", "cyl")
+SHAPE_RX = re.compile(r"\bshape=([A-Za-z]{1,8})(?=\s|$)")
+NEAR_MISS_SLACKS = 2.5  # a candidate this many tolerances off is "nearly the part": worth showing
 
 
 @dataclass(frozen=True)
@@ -36,6 +44,7 @@ class PartSpec:
     width_m: float
     height_m: float | None = None  # top above the surface; None: not checked
     tol: float = DEFAULT_TOL_PCT / 100.0
+    shape: str = "box"  # "cyl": an upright cylinder, length = width = its diameter
 
     def __post_init__(self) -> None:
         dims = [self.length_m, self.width_m] + ([self.height_m] if self.height_m is not None else [])
@@ -45,16 +54,31 @@ class PartSpec:
             raise ValueError(f"part dimensions must be {MIN_DIM_MM:.0f}..{MAX_DIM_MM:.0f} mm")
         if not (MIN_TOL_PCT / 100 <= self.tol <= MAX_TOL_PCT / 100):
             raise ValueError(f"tolerance must be {MIN_TOL_PCT:.0f}..{MAX_TOL_PCT:.0f} %")
+        if self.shape not in SHAPES:
+            raise ValueError(f"shape must be one of {SHAPES}")
         if self.width_m > self.length_m:
             a, b = self.width_m, self.length_m
             object.__setattr__(self, "length_m", a)
             object.__setattr__(self, "width_m", b)
+        if self.shape == "cyl" and abs(self.length_m - self.width_m) > 1e-9:
+            raise ValueError("a cylinder's length and width are both its diameter")
 
     @classmethod
     def from_mm(
-        cls, length: float, width: float, height: float | None = None, tol_pct: float = DEFAULT_TOL_PCT
+        cls,
+        length: float,
+        width: float,
+        height: float | None = None,
+        tol_pct: float = DEFAULT_TOL_PCT,
+        shape: str = "box",
     ):
-        return cls(length / 1000.0, width / 1000.0, None if not height else height / 1000.0, tol_pct / 100.0)
+        return cls(
+            length / 1000.0, width / 1000.0, None if not height else height / 1000.0, tol_pct / 100.0, shape
+        )
+
+    @property
+    def is_round(self) -> bool:
+        return self.shape == "cyl"
 
     def slack(self, dim_m: float) -> float:
         return max(self.tol * dim_m, MIN_SLACK_M)
@@ -84,10 +108,28 @@ class PartSpec:
                 return "too flat"
         return None
 
+    def near_miss(self, major_m: float, minor_m: float, height_m: float | None) -> bool:
+        """Is a candidate that is *not* this part still close enough to be worth showing the
+        operator — every measurement within :data:`NEAR_MISS_SLACKS` tolerances, a side
+        that is two or three parts' worth counting too (parts touching)?"""
+        k = NEAR_MISS_SLACKS
+
+        def close(got: float, want: float, multiples: bool) -> bool:
+            if abs(got - want) <= k * self.slack(want):
+                return True
+            return multiples and any(abs(got - n * want) <= self.slack(n * want) for n in (2, 3))
+
+        if not close(major_m, self.length_m, True) or not close(minor_m, self.width_m, True):
+            return False
+        if self.height_m is not None and height_m is not None:
+            return close(height_m, self.height_m, False)
+        return True
+
     def token(self) -> str:
         """``part=60x40x30 tol=25`` — what the node sends and :func:`parse` reads back."""
         dims = [self.length_m, self.width_m] + ([self.height_m] if self.height_m is not None else [])
-        return "part=" + "x".join(_num(d * 1000) for d in dims) + f" tol={_num(self.tol * 100)}"
+        shape = " shape=cyl" if self.is_round else ""
+        return "part=" + "x".join(_num(d * 1000) for d in dims) + f" tol={_num(self.tol * 100)}" + shape
 
     def as_dict(self) -> dict:
         return {
@@ -95,6 +137,7 @@ class PartSpec:
             "width_mm": round(self.width_m * 1000, 1),
             "height_mm": None if self.height_m is None else round(self.height_m * 1000, 1),
             "tol_pct": round(self.tol * 100, 1),
+            "shape": self.shape,
         }
 
 
@@ -123,7 +166,13 @@ def parse(text: str) -> PartSpec | None:
         if not t:
             raise ValueError("tol must be a percentage, e.g. tol=25")
         tol = float(t.group(1))
-    return PartSpec.from_mm(*dims, tol_pct=tol)
+    shape = "box"
+    if re.search(r"\bshape=", text):
+        m = SHAPE_RX.search(text)
+        if not m or m.group(1).lower() not in SHAPES:
+            raise ValueError(f"shape must be one of {SHAPES}, e.g. shape=cyl")
+        shape = m.group(1).lower()
+    return PartSpec.from_mm(*dims, tol_pct=tol, shape=shape)
 
 
 _DIMS_EXACT = re.compile(rf"({_NUM})[xX]({_NUM})(?:[xX]({_NUM}))?")

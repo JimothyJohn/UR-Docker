@@ -1,31 +1,30 @@
-// Perceptronic Pick — the program node's settings, the URScript it contributes and the
-// pose math both its presenter and its behavior worker need. One file for both: the
-// worker `importScripts` it, the page loads it with a <script> tag, tests run it under
-// node. It is the PolyScope X port of the PolyScope 5 node's PickScript.java
+// 3D Pick — the program node's settings, the URScript it contributes and the pose math
+// both its presenter and its behavior worker need. One file for both: the worker
+// `importScripts` it, the page loads it with a <script> tag, tests run it under node. It is
+// the PolyScope X port of the PolyScope 5 node's PickScript.java
 // (urcap/perceptronic-ps5/src/.../PickScript.java): the same settings table, the same
 // request options (`tokens`: what the pick server's `parse_options` reads) and the same
 // script — so the cockpit's pick server (`:7622`, protocol 2) serves both robots.
 //
-// One run of the node picks one part, inside the operator's program (Local mode, no
-// Primary client): force the TCP to the flange, open the gripper fully, ask NEXT (a part
-// already seen, or the picture point to look from), movej there + FIND, the close look
-// (LOOK/REFINE, leaned 0/12/24° while the controller's IK can't solve approach + grip +
-// lift), the approach with the fingertips `approachMm` over the top, down to the grip,
-// close, lift. The result variable is True only after a held lift; the children — the
-// routine after the pick — run with the operator's TCP back. With the gripper set to
-// "my nodes" the children run at the grip instead.
+// One run of the node is one move sequence with no children that positions the tool on one
+// part and touches nothing else: the node does not drive the gripper (0.6.0, Nick
+// 2026-10-01) — the program opens it before the node and closes it after. Inside the
+// operator's program (Local mode, no Primary client): force the TCP to the flange, ask NEXT
+// (a part already seen, or the picture point to survey from), movej there + FIND, the closer
+// look unless it is switched off (LOOK/REFINE, leaned 0/12/24° while the controller's IK
+// can't solve approach + grip), the approach with the fingertips `approachMm` over the top,
+// and down to the grip. The result variable is True once the tool is there. Speeds have no
+// settings.
 (function (root) {
   "use strict";
 
-  const APP_TYPE = "nickarmenta-perceptronic";
-  const PICK_TYPE = "nickarmenta-perceptronic-pick";
-  const AFTER_TYPE = "nickarmenta-perceptronic-after";
-  const VERSION = "0.3.0";
+  const APP_TYPE = "advin-perceptronic";
+  const PICK_TYPE = "advin-perceptronic-pick";
+  const VERSION = "0.6.0";
   const DEFAULT_PICK_PORT = 7622;
   const DEFAULT_COCKPIT_PORT = 7621;
   const DEFAULT_TIP_MM = 163; // Hand-E 157 mm + 6 mm adapter
   const SOCKET = "rs_pick";
-  const RQ_SOCKET = "rs_rq";
   const MAX_POINTS = 12;
   const MAX_AREAS = 8;
   const ORDERS = ["LR", "RL", "FB", "BF"];
@@ -33,7 +32,12 @@
     ["LR", "FB"], ["RL", "FB"], ["LR", "BF"], ["RL", "BF"],
     ["FB", "LR"], ["FB", "RL"], ["BF", "LR"], ["BF", "RL"],
   ];
-  const GRIPPERS = ["robotiq", "digital", "children"];
+  const SHAPES = ["box", "cyl"];
+  const SPEED = 0.6; // of the node's own joint / linear limits
+  const SETTLE_S = 0.2; // before each picture
+  const MAX_ATTEMPTS = 3; // grasps per run
+  const LOOK_STROKE_MM = 50; // how wide the open fingers are taken to be when the closer look keeps the part clear of them
+  const KEEP_OUT_M = 0.15; // past the base's outer radius: perceptronics.volume.REACH_MARGIN_M
   const FOUND_VARIABLE = "rs_pick_found";
   const LOC_VARIABLE = "rs_pick_loc";
 
@@ -48,7 +52,7 @@
     [-7, "something is in view, but nothing the size of the part"],
     [-8, "no answer from the camera computer within 10 s"],
     [-9, "the camera computer did not understand the request (update it?)"],
-    [-10, "the only parts in view are out of reach"],
+    [-10, "the only parts in view are out of the arm's reach"],
     [-11, "no room for the open fingers beside any part"],
     [-12, "the parts in view are outside the pick area"],
     [-13, "the only part in view is cut off by the edge of the picture"],
@@ -60,28 +64,12 @@
     ["partWidthMm", "part", "Width", "mm", 30, 5, 500, 1, "the fingers close across it"],
     ["partHeightMm", "part", "Height", "mm", 30, 5, 500, 1, "top above the table"],
     ["partTolPct", "part", "Tolerance", "%", 25, 5, 100, 5, "how far off still counts"],
-    ["approachMm", "approach", "Approach", "mm", 25, 5, 200, 5, "fingertips over the top, fully open"],
+    ["approachMm", "approach", "Approach", "mm", 25, 5, 200, 5, "fingertips over the top"],
     ["gripBelowTopMm", "approach", "Grip depth", "mm", 15, 0, 60, 1, "fingertips below the top to grip"],
-    ["liftMm", "approach", "Lift", "mm", 60, 5, 300, 5, "straight up after the grip"],
-    ["lookMm", "approach", "Close look", "mm", 90, 40, 400, 10, "camera over the top, if no better pose"],
-    ["strokeMm", "gripper", "Open width", "mm", 50, 10, 300, 1, "the fingers' full opening (Hand-E: 50)"],
-    ["gripperForcePct", "gripper", "Grip force", "%", 40, 0, 100, 5, "Robotiq force"],
-    ["gripperSpeedPct", "gripper", "Finger speed", "%", 100, 1, 100, 5, "Robotiq speed"],
-    ["gripperDo", "gripper", "Digital output", "", 0, 0, 7, 1, "the output that closes the gripper"],
-    ["gripperWaitS", "gripper", "Close time", "s", 0.5, 0, 5, 0.1, "how long a digital-output gripper takes"],
-    ["speedPct", "motion", "Speed", "%", 60, 10, 100, 10, "of the node's travel speed"],
-    ["settleS", "motion", "Settle", "s", 0.2, 0, 2, 0.05, "before each picture: sharp vs fast"],
-    ["maxAttempts", "motion", "Grasps per run", "", 3, 1, 10, 1, "tries before the node gives up"],
+    ["fingerRoomMm", "approach", "Finger room", "mm", 20, 0, 100, 5, "clear space on each side of the part"],
   ].map(([key, section, label, unit, def, min, max, step, help]) => ({ key, section, label, unit, def, min, max, step, help }));
   const BY_KEY = {};
   NUMBERS.forEach((n) => { BY_KEY[n.key] = n; });
-
-  // The gripper card's fields, per gripper (the rest of the numbers sit on their own cards).
-  const GRIPPER_FIELDS = {
-    robotiq: ["strokeMm", "gripperForcePct", "gripperSpeedPct"],
-    digital: ["strokeMm", "gripperDo", "gripperWaitS"],
-    children: ["strokeMm"],
-  };
 
   // -- numbers ----------------------------------------------------------------------------
 
@@ -132,16 +120,6 @@
     if (t === "UR10" || t === "UR12") return [0.095, 1.3];
     if (t === "UR16") return [0.095, 0.9];
     return null;
-  }
-
-  /** The pick ring {min, max} in m from the base axis, or null when the model is unknown;
-   * max 0 = no outer limit (the margins ate the reach). */
-  function reachLimits(model, innerMm, outerMm) {
-    const r = modelReach(model);
-    if (!r) return null;
-    const min = r[0] + Number(innerMm || 0) / 1000;
-    const max = Math.max(0, r[1] - Number(outerMm || 0) / 1000);
-    return max > min ? { min, max } : { min, max: 0 };
   }
 
   // -- pose math (UR pose = [x, y, z, rx, ry, rz], rotation vector; 4x4 row-major) -----------
@@ -229,7 +207,7 @@
     return (Math.acos(Math.min(1, Math.abs(R[2][2]))) * 180) / Math.PI;
   }
 
-  // -- the application node (cockpit URL, areas, reach) ---------------------------------------
+  // -- the application node (cockpit URL, areas, the robot's model) ---------------------------
 
   /** The saved Cockpit field as an absolute base URL (the presenter's page host completes
    * shorthand: ":7621" → http://<pageHost>:7621, "host" → http://host:7621). */
@@ -271,13 +249,14 @@
   // -- the settings one run of the node needs ----------------------------------------------------
 
   /** Everything the script needs, from the program node's parameters and the application
-   * node (cockpit URL, areas, tip, reach, robot model). */
+   * node (cockpit URL, areas, tip, robot model). */
   function settings(params, app, pageHost) {
     const p = params || {};
     const a = app || {};
     const base = cockpitBase(a.cockpitUrl, pageHost);
     const areas = areasOf(a);
-    const reach = reachLimits(a.robotModel, a.reachInnerMm, a.reachOuterMm);
+    // the arm by name: the pick server asks its kinematics which parts are in reach
+    const arm = String(a.robotModel || "").trim();
     const points = (Array.isArray(p.points) ? p.points : []).map((pt) => {
       const idx = pt && Number.isInteger(pt.area) ? pt.area : -1;
       const area = idx >= 0 && idx < areas.length ? areas[idx] : null;
@@ -299,10 +278,12 @@
       values: values(p.values),
       orderFirst: p.orderFirst || "LR",
       orderRows: p.orderRows || "FB",
-      gripper: p.gripper || "robotiq",
+      shape: p.shape === "cyl" ? "cyl" : "box",
+      gripCheck: p.gripCheck !== false,
+      gripLongSide: p.gripLongSide === true,
+      closeLook: p.closeLook !== false,
+      arm: /^[A-Za-z0-9]{1,8}$/.test(arm) ? arm : "",
       popupOnFail: p.popupOnFail !== false,
-      reachMinM: reach ? reach.min : 0,
-      reachMaxM: reach ? reach.max : 0,
       foundVariable: (p.foundVariable && p.foundVariable.name) || FOUND_VARIABLE,
       locVariable: (p.locVariable && p.locVariable.name) || LOC_VARIABLE,
     };
@@ -313,11 +294,21 @@
   const words = (o) => (o === "LR" ? "left to right" : o === "RL" ? "right to left" : o === "FB" ? "front to back" : "back to front");
   const orderText = (first, rows) => `${words(first)}, rows ${words(rows)}`;
   const n = (s, key) => s.values[key];
+  const round = (s) => s.shape === "cyl";
+  /** The footprint's long side (a cylinder: its diameter). */
+  const longSide = (s) => (round(s) ? n(s, "partLengthMm") : Math.max(n(s, "partLengthMm"), n(s, "partWidthMm")));
+  /** The side the fingers close across (a cylinder: its diameter). */
+  const shortSide = (s) => (round(s) ? n(s, "partLengthMm") : Math.min(n(s, "partLengthMm"), n(s, "partWidthMm")));
+  /** ASCII (it goes into the script). */
   function partText(s) {
-    const l = Math.max(n(s, "partLengthMm"), n(s, "partWidthMm")), w = Math.min(n(s, "partLengthMm"), n(s, "partWidthMm"));
-    return `${num(l)} x ${num(w)} x ${num(n(s, "partHeightMm"))} mm +-${num(n(s, "partTolPct"))} %`;
+    const size = round(s) ? `cylinder D${num(longSide(s))}` : `${num(longSide(s))} x ${num(shortSide(s))}`;
+    return `${size} x ${num(n(s, "partHeightMm"))} mm +-${num(n(s, "partTolPct"))} %`;
   }
-  const ownGripperNodes = (s) => s.gripper === "children";
+  /** For the screens: "50 × 30 × 30 mm" / "Ø40 × 30 mm". */
+  function partWords(s) {
+    const size = round(s) ? `Ø${num(longSide(s))}` : `${num(longSide(s))} × ${num(shortSide(s))}`;
+    return `${size} × ${num(n(s, "partHeightMm"))} mm`;
+  }
 
   /** Why the node cannot generate a program yet, or null when it can. */
   function problem(s) {
@@ -325,7 +316,7 @@
     if (!/^[A-Za-z0-9.:\-]+$/.test(s.host)) return `the camera computer's host "${s.host}" is not an address`;
     if (!(s.port >= 1 && s.port <= 65535)) return "the pick port must be 1..65535";
     if (!/^[0-9a-f]{1,12}$/.test(s.nodeId)) return "the node has no identity yet - open it once";
-    if (s.points.length === 0) return "add a picture point: move the arm where the camera sees the parts and tap Add";
+    if (s.points.length === 0) return "add a picture point: move the arm where the camera sees the parts and tap +";
     if (s.points.length > MAX_POINTS) return `at most ${MAX_POINTS} picture points`;
     for (let i = 0; i < s.points.length; i++) {
       const p = s.points[i];
@@ -342,15 +333,9 @@
     if (n(s, "gripBelowTopMm") > n(s, "partHeightMm") - 2) {
       return `the grip (${num(n(s, "gripBelowTopMm"))} mm below the top) would put the fingertips on the table: the part is ${num(n(s, "partHeightMm"))} mm tall`;
     }
-    const shortSide = Math.min(n(s, "partLengthMm"), n(s, "partWidthMm"));
-    if (shortSide > n(s, "strokeMm") - 6) {
-      return `the part's short side (${num(shortSide)} mm) needs fingers that open wider than ${num(n(s, "strokeMm"))} mm`;
-    }
+    if (!SHAPES.includes(s.shape)) return `unknown part shape "${s.shape}"`;
+    if (s.arm && !/^[A-Za-z0-9]{1,8}$/.test(s.arm)) return `the robot model "${s.arm}" is not a name`;
     if (!isOrder(s.orderFirst, s.orderRows)) return "the pick order must be one horizontal and one vertical direction";
-    if (!GRIPPERS.includes(s.gripper)) return `unknown gripper "${s.gripper}"`;
-    if (!(s.reachMinM >= 0 && s.reachMinM < 3 && s.reachMaxM >= 0 && s.reachMaxM <= 3 && (s.reachMaxM === 0 || s.reachMaxM > s.reachMinM))) {
-      return "the reach limits are not valid (Application → Perceptronic → Reach)";
-    }
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s.foundVariable) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(s.locVariable)) {
       return "the result variable names are not valid";
     }
@@ -367,12 +352,15 @@
   /** " part=50x30x30 tol=25 order=LR,FB …" for picture point i (0-based; -1: none): exactly
    * what the pick server's parse_options reads, and what the teach screen asks with. */
   function tokens(s, i) {
-    const l = Math.max(n(s, "partLengthMm"), n(s, "partWidthMm")), w = Math.min(n(s, "partLengthMm"), n(s, "partWidthMm"));
-    let b = ` part=${num(l)}x${num(w)}x${num(n(s, "partHeightMm"))}`;
+    let b = ` part=${num(longSide(s))}x${num(shortSide(s))}x${num(n(s, "partHeightMm"))}`;
     b += ` tol=${num(n(s, "partTolPct"))}`;
+    if (round(s)) b += " shape=cyl";
     b += ` order=${s.orderFirst},${s.orderRows}`;
-    b += ` grip=${num(n(s, "gripBelowTopMm"))} stroke=${num(n(s, "strokeMm"))}`;
-    if (s.reachMinM > 0 || s.reachMaxM > 0) b += ` reach=${s.reachMinM.toFixed(3)},${s.reachMaxM.toFixed(3)}`;
+    b += ` grip=${num(n(s, "gripBelowTopMm"))}`;
+    b += ` approach=${num(n(s, "approachMm"))}`;
+    b += ` gripcheck=${s.gripCheck ? 1 : 0} room=${num(n(s, "fingerRoomMm"))}`;
+    if (s.gripLongSide && !round(s)) b += " across=long";
+    if (s.arm) b += ` arm=${s.arm}`;
     const p = i >= 0 && i < s.points.length ? s.points[i] : null;
     if (p && p.plane) b += ` plane=${pose(p.plane)} area=${num(p.areaXmm)}x${num(p.areaYmm)}`;
     b += ` node=${s.nodeId}`;
@@ -386,7 +374,7 @@
   /** One stage report: textmsg for the Log tab and a LOG line to the pick server. */
   function say(s, indent, text, value) {
     const v = value == null ? '""' : value;
-    s.push(`${indent}textmsg("Perceptronic Pick: ${text}", ${v})`);
+    s.push(`${indent}textmsg("3D Pick: ${text}", ${v})`);
     const line = value == null ? `"LOG ${text}"` : `str_cat("LOG ${text}", to_str(${value}))`;
     s.push(`${indent}socket_send_line(${line}, "${SOCKET}")`);
   }
@@ -408,101 +396,38 @@
     s.push(`${indent}  rs_ok = False`);
     s.push(`${indent}end`);
   }
-  function rq(s, indent, name, value) {
-    s.push(`${indent}socket_send_line("SET ${name} ${value}", "${RQ_SOCKET}")`);
-    s.push(`${indent}rs_ack = socket_read_string("${RQ_SOCKET}", timeout=2.0)`);
-  }
-  function gripperOpen(st, s, indent) {
-    if (st.gripper === "robotiq") { rq(s, indent, "POS", 0); rq(s, indent, "GTO", 1); }
-    else if (st.gripper === "digital") s.push(`${indent}set_standard_digital_out(${Math.round(n(st, "gripperDo"))}, False)`);
-  }
-  function gripperStart(st, s, indent) {
-    if (st.gripper === "robotiq") {
-      s.push(`${indent}rs_ok = socket_open("127.0.0.1", 63352, "${RQ_SOCKET}")`);
-      s.push(`${indent}if rs_ok:`);
-      s.push(`${indent}  socket_send_line("GET ACT", "${RQ_SOCKET}")`);
-      s.push(`${indent}  rs_act = socket_read_string("${RQ_SOCKET}", timeout=2.0)`);
-      s.push(`${indent}  if str_find(rs_act, "1") < 0:`);
-      say(s, `${indent}    `, "activating the gripper", null);
-      rq(s, `${indent}    `, "ACT", 1);
-      s.push(`${indent}    rs_t = 0`);
-      s.push(`${indent}    while rs_t < 40:`);
-      s.push(`${indent}      socket_send_line("GET STA", "${RQ_SOCKET}")`);
-      s.push(`${indent}      if str_find(socket_read_string("${RQ_SOCKET}", timeout=2.0), "3") >= 0:`);
-      s.push(`${indent}        rs_t = 40`);
-      s.push(`${indent}      else:`);
-      s.push(`${indent}        sleep(0.25)`);
-      s.push(`${indent}        rs_t = rs_t + 1`);
-      s.push(`${indent}      end`);
-      s.push(`${indent}    end`);
-      s.push(`${indent}  end`);
-      rq(s, `${indent}  `, "SPE", Math.round(n(st, "gripperSpeedPct") * 2.55));
-      rq(s, `${indent}  `, "FOR", Math.round(n(st, "gripperForcePct") * 2.55));
-      gripperOpen(st, s, `${indent}  `);
-      s.push(`${indent}else:`);
-      s.push(`${indent}  rs_why = "no Robotiq gripper on this controller (is its URCap installed?) - or choose another gripper in the node's Options"`);
-      s.push(`${indent}end`);
-    } else if (st.gripper === "digital") {
-      gripperOpen(st, s, indent);
-    }
-  }
-  function gripperOpenWait(st, s, indent) {
-    if (st.gripper !== "robotiq") return;
-    s.push(`${indent}rs_t = 0`);
-    s.push(`${indent}while rs_t < 30:`);
-    s.push(`${indent}  socket_send_line("GET OBJ", "${RQ_SOCKET}")`);
-    s.push(`${indent}  if str_find(socket_read_string("${RQ_SOCKET}", timeout=2.0), "3") >= 0:`);
-    s.push(`${indent}    rs_t = 30`);
-    s.push(`${indent}  else:`);
-    s.push(`${indent}    sleep(0.1)`);
-    s.push(`${indent}    rs_t = rs_t + 1`);
-    s.push(`${indent}  end`);
-    s.push(`${indent}end`);
-  }
-  function gripperClose(st, s, indent) {
-    if (st.gripper === "robotiq") {
-      rq(s, indent, "POS", 255);
-      rq(s, indent, "GTO", 1);
-      s.push(`${indent}sleep(0.2)`);
-      s.push(`${indent}rs_obj = ""`);
-      s.push(`${indent}rs_t = 0`);
-      s.push(`${indent}while rs_t < 40:`);
-      s.push(`${indent}  socket_send_line("GET OBJ", "${RQ_SOCKET}")`);
-      s.push(`${indent}  rs_obj = socket_read_string("${RQ_SOCKET}", timeout=2.0)`);
-      s.push(`${indent}  if str_find(rs_obj, "0") < 0:`);
-      s.push(`${indent}    rs_t = 40`);
-      s.push(`${indent}  else:`);
-      s.push(`${indent}    sleep(0.1)`);
-      s.push(`${indent}    rs_t = rs_t + 1`);
-      s.push(`${indent}  end`);
-      s.push(`${indent}end`);
-      // OBJ 1/2: stopped on contact = holding it; 3: closed all the way = nothing between the fingers
-      s.push(`${indent}rs_held = (str_find(rs_obj, "1") >= 0) or (str_find(rs_obj, "2") >= 0)`);
-      say(s, indent, "gripper ", "rs_obj");
-    } else {
-      s.push(`${indent}set_standard_digital_out(${Math.round(n(st, "gripperDo"))}, True)`);
-      s.push(`${indent}sleep(${f2(n(st, "gripperWaitS"))})`);
-      s.push(`${indent}rs_held = True`);
-    }
+  /** The survey: to picture point rs_loc, settle, FIND. */
+  function survey(st, s, ind, ja, jv) {
+    st.points.forEach((p, i) => {
+      s.push(`${ind}${i === 0 ? "if" : "elif"} rs_loc == ${i + 1}:`);
+      s.push(`${ind}  movej(${joints(p.joints)}, a=${ja}, v=${jv})`);
+    });
+    s.push(`${ind}end`);
+    s.push(`${ind}sleep(${f2(SETTLE_S)})`);
+    say(s, ind, "survey at point ", "rs_loc");
+    s.push(`${ind}socket_send_line(str_cat("FIND ", str_cat(to_str(get_actual_tcp_pose()), rs_tok)), "${SOCKET}")`);
+    read16(s, ind);
+    say(s, ind, "FIND status ", "rs_st");
+    s.push(`${ind}if rs_st != 1:`);
+    reasons(s, `${ind}  `);
+    s.push(`${ind}end`);
   }
 
-  /** The lines up to the grip (the PolyScope 5 node's beforeChildren). Throws when problem(). */
-  function beforeLines(st) {
+  /** The node's whole contribution, line by line (PickScript.lines() in the PolyScope 5 node). Throws when problem(). */
+  function lines(st) {
     const why = problem(st);
     if (why) throw new Error(why);
     const s = [];
     const np = st.points.length;
-    const budget = np + Math.round(n(st, "maxAttempts")) + 1;
-    const k = n(st, "speedPct") / 100;
-    const jv = f2(1.05 * k), ja = f2(1.4 * k), lv = f2(0.25 * k), la = f2(0.6 * k);
+    const budget = np + MAX_ATTEMPTS + 1;
+    const jv = f2(1.05 * SPEED), ja = f2(1.4 * SPEED), lv = f2(0.25 * SPEED), la = f2(0.6 * SPEED);
     const found = st.foundVariable, loc = st.locVariable;
-    s.push(`# Perceptronic Pick ${VERSION} - camera computer ${st.host}:${st.port} - part ${partText(st)} - ${orderText(st.orderFirst, st.orderRows)} - ${np} picture point${np === 1 ? "" : "s"}`);
+    s.push(`# 3D Pick ${VERSION} - camera computer ${st.host}:${st.port} - part ${partText(st)} - ${orderText(st.orderFirst, st.orderRows)} - ${np} picture point${np === 1 ? "" : "s"}${st.closeLook ? "" : " - no closer look"}${st.gripCheck ? ` - finger room ${num(n(st, "fingerRoomMm"))} mm` : " - no grip check"}${st.gripLongSide && !round(st) ? " - across the long side" : ""}`);
     s.push(`global ${found} = False`);
     s.push(`global ${loc} = 0`);
     s.push("rs_tcp0 = get_tcp_offset()");
     s.push("set_tcp(p[0, 0, 0, 0, 0, 0])");
     s.push('rs_why = "no answer from the camera computer within 10 s"');
-    s.push("rs_held = False");
     s.push("rs_try = 0");
     s.push("rs_ok = True");
     s.push("rs_loc = 1");
@@ -510,7 +435,6 @@
     s.push(`if socket_open("${st.host}", ${st.port}, "${SOCKET}"):`);
     say(s, "  ", "start, flange ", "get_actual_tcp_pose()");
     say(s, "  ", `looking for ${partText(st)}`, null);
-    gripperStart(st, s, "  ");
     s.push(`  while (rs_ok) and (rs_try < ${budget}) and (${found} == False):`);
     s.push("    rs_try = rs_try + 1");
     s.push(`    socket_send_line(str_cat("NEXT ", str_cat(to_str(get_actual_tcp_pose()), " node=${st.nodeId} locs=${np} proto=2")), "${SOCKET}")`);
@@ -526,41 +450,42 @@
       s.push(`      rs_tok = "${tokens(st, i)}"`);
     });
     s.push("    end");
-    s.push("    if rs_st == 1:");
-    say(s, "      ", "next part already seen, #", "rs_r[12]");
-    s.push("    else:");
-    st.points.forEach((p, i) => {
-      s.push(`      ${i === 0 ? "if" : "elif"} rs_loc == ${i + 1}:`);
-      s.push(`        movej(${joints(p.joints)}, a=${ja}, v=${jv})`);
-    });
-    s.push("      end");
-    s.push(`      sleep(${f2(n(st, "settleS"))})`);
-    say(s, "      ", "picture at point ", "rs_loc");
-    s.push(`      socket_send_line(str_cat("FIND ", str_cat(to_str(get_actual_tcp_pose()), rs_tok)), "${SOCKET}")`);
-    read16(s, "      ");
-    say(s, "      ", "FIND status ", "rs_st");
-    s.push("      if rs_st != 1:");
-    reasons(s, "        ");
-    s.push("      end");
-    s.push("    end");
+    if (st.closeLook) {
+      s.push("    if rs_st == 1:");
+      say(s, "      ", "next part already seen, #", "rs_r[12]");
+      s.push("    else:");
+      survey(st, s, "      ", ja, jv);
+      s.push("    end");
+    } else {
+      // every part is measured from its picture point: the parts queued at the last one were
+      // seen from there too, but the arm is no longer where it could look again
+      survey(st, s, "    ", ja, jv);
+    }
     s.push("    if rs_st == 1:");
     s.push("      rs_c = p[rs_r[2], rs_r[3], rs_r[4], 0, 0, 0]");
     s.push("      rs_top = p[rs_r[5], rs_r[6], rs_r[7], rs_r[8], rs_r[9], rs_r[10]]");
-    s.push(`      rs_look = pose_trans(rs_top, p[0, 0, ${m(-n(st, "lookMm"))}, 0, 0, 0])`);
-    s.push(`      socket_send_line(str_cat("LOOK ", str_cat(to_str(get_actual_tcp_pose()), str_cat(" ", to_str(rs_c)))), "${SOCKET}")`);
-    s.push(`      rs_lk = socket_read_ascii_float(10, "${SOCKET}", 10)`);
-    s.push("      if rs_lk[0] == 10:");
-    s.push("        if rs_lk[1] == 1:");
-    s.push("          rs_look = p[rs_lk[5], rs_lk[6], rs_lk[7], rs_lk[8], rs_lk[9], rs_lk[10]]");
-    s.push("        end");
-    s.push("      end");
-    s.push("      if get_inverse_kin_has_solution(rs_look, get_actual_joint_positions()):");
-    s.push(`        movej(get_inverse_kin(rs_look, get_actual_joint_positions()), a=${ja}, v=${jv})`);
-    s.push(`        sleep(${f2(n(st, "settleS"))})`);
-    say(s, "        ", "close look ", "rs_look");
-    s.push("      else:");
-    say(s, "        ", "the close look is out of reach - looking again from here", null);
-    s.push("      end");
+    if (st.closeLook) {
+      s.push(`      socket_send_line(str_cat("LOOK ", str_cat(to_str(get_actual_tcp_pose()), str_cat(" ", str_cat(to_str(rs_c), " stroke=${num(LOOK_STROKE_MM)}")))), "${SOCKET}")`);
+      s.push(`      rs_lk = socket_read_ascii_float(10, "${SOCKET}", 10)`);
+      s.push("      rs_see = False");
+      s.push("      rs_look = rs_top");
+      s.push("      if rs_lk[0] == 10:");
+      s.push("        if rs_lk[1] == 1:");
+      s.push("          rs_look = p[rs_lk[5], rs_lk[6], rs_lk[7], rs_lk[8], rs_lk[9], rs_lk[10]]");
+      s.push("          rs_see = True");
+      s.push("        end");
+      s.push("      end");
+      s.push("      if rs_see:");
+      s.push("        rs_see = get_inverse_kin_has_solution(rs_look, get_actual_joint_positions())");
+      s.push("      end");
+      s.push("      if rs_see:");
+      s.push(`        movej(get_inverse_kin(rs_look, get_actual_joint_positions()), a=${ja}, v=${jv})`);
+      s.push(`        sleep(${f2(SETTLE_S)})`);
+      say(s, "        ", "closer look ", "rs_look");
+      s.push("      else:");
+      say(s, "        ", "no closer look from here - measuring again where the arm is", null);
+      s.push("      end");
+    }
     s.push("      rs_leans = [0, 12, 24]");
     s.push("      rs_lean = 0");
     s.push("      rs_go = False");
@@ -578,12 +503,11 @@
     s.push("          rs_top = p[rs_r[5], rs_r[6], rs_r[7], rs_r[8], rs_r[9], rs_r[10]]");
     s.push(`          rs_hover = pose_trans(rs_top, p[0, 0, ${m(-n(st, "approachMm"))}, 0, 0, 0])`);
     s.push(`          rs_grip = pose_trans(rs_top, p[0, 0, ${m(n(st, "gripBelowTopMm"))}, 0, 0, 0])`);
-    s.push(`          rs_lift = pose_trans(rs_top, p[0, 0, ${m(-n(st, "liftMm"))}, 0, 0, 0])`);
     s.push("          rs_q = get_actual_joint_positions()");
-    s.push("          if get_inverse_kin_has_solution(rs_hover, rs_q) and get_inverse_kin_has_solution(rs_grip, rs_q) and get_inverse_kin_has_solution(rs_lift, rs_q):");
+    s.push("          if get_inverse_kin_has_solution(rs_hover, rs_q) and get_inverse_kin_has_solution(rs_grip, rs_q):");
     s.push("            rs_go = True");
     s.push("          else:");
-    say(s, "            ", "no IK for approach + grip + lift at lean ", "rs_leans[rs_lean]");
+    say(s, "            ", "no IK for approach + grip at lean ", "rs_leans[rs_lean]");
     s.push("          end");
     s.push("          rs_lean = rs_lean + 1");
     s.push("        else:");
@@ -593,94 +517,48 @@
     s.push("      if rs_go:");
     say(s, "        ", "approach ", "rs_hover");
     s.push(`        movel(rs_hover, a=${la}, v=${lv})`);
-    gripperOpenWait(st, s, "        ");
     say(s, "        ", "down to the grip ", "rs_grip");
     s.push("        movel(rs_grip, a=0.3, v=0.05)");
-    s.push("        rs_held = False");
-    if (ownGripperNodes(st)) {
-      s.push("        set_tcp(rs_tcp0)");
-      say(s, "        ", "your gripper nodes", null);
-    } else {
-      gripperClose(st, s, "        ");
-    }
-    return s;
-  }
-
-  /** The lines from the lift to the end (the PolyScope 5 node's afterChildren). */
-  function afterLines(st) {
-    const s = [];
-    const own = ownGripperNodes(st);
-    const k = n(st, "speedPct") / 100;
-    const found = st.foundVariable, loc = st.locVariable;
-    if (own) {
-      s.push("        set_tcp(p[0, 0, 0, 0, 0, 0])");
-      s.push("        rs_held = True");
-    }
-    say(s, "        ", "lift", null);
-    s.push(`        movel(rs_lift, a=0.5, v=${f2(Math.max(0.05, 0.15 * k))})`);
-    s.push("        if rs_held:");
-    s.push(`          global ${found} = True`);
-    s.push(`          global ${loc} = rs_loc`);
-    say(s, "          ", "picked at point ", "rs_loc");
-    s.push("        else:");
-    s.push('          rs_why = "the gripper closed on nothing"');
-    say(s, "          ", "closed on nothing - trying the next part", null);
-    if (!own) gripperOpen(st, s, "          ");
-    s.push("        end");
+    s.push(`        global ${found} = True`);
+    s.push(`        global ${loc} = rs_loc`);
+    say(s, "        ", "at the grip, part from point ", "rs_loc");
     s.push("      elif rs_rs != 1:");
     s.push("        rs_st = rs_rs");
     reasons(s, "        ");
     s.push("      else:");
-    s.push('        rs_why = "no approach the arm can reach (straight down or leaned to 24 deg)"');
+    s.push('        rs_why = "the controller has no joint solution for the approach (straight down or leaned to 24 deg)"');
     s.push("      end");
     s.push("    end");
     s.push("  end");
     s.push(`  if ${found} == False:`);
-    s.push('    textmsg("Perceptronic Pick: no pick - ", rs_why)');
+    s.push('    textmsg("3D Pick: no pick - ", rs_why)');
     s.push(`    socket_send_line(str_cat("LOG no pick - ", rs_why), "${SOCKET}")`);
     s.push("  end");
     s.push(`  socket_close("${SOCKET}")`);
     s.push("else:");
     s.push(`  rs_why = "no camera computer at ${st.host}:${st.port} - is it on, and is the address in Application > Perceptronic right?"`);
-    s.push('  textmsg("Perceptronic Pick: ", rs_why)');
+    s.push('  textmsg("3D Pick: ", rs_why)');
     s.push("end");
-    if (st.gripper === "robotiq") s.push(`socket_close("${RQ_SOCKET}")`);
     s.push("set_tcp(rs_tcp0)");
     if (st.popupOnFail) {
       s.push(`if ${found} == False:`);
-      s.push('  popup(str_cat("Perceptronic Pick: no pick - ", rs_why), "Perceptronic Pick", False, True, blocking=True)');
+      s.push('  popup(str_cat("3D Pick: no pick - ", rs_why), "3D Pick", False, True, blocking=True)');
       s.push("end");
     }
     return s;
   }
 
   /**
-   * What the node contributes, in PolyScope X's shape: the lines before the children, how
-   * deep the children sit (PolyScope indents them by it) and the lines after. With a
-   * gripper the node drives, the children are the routine after the pick, inside
-   * `if <found>:` at the end; with "my nodes" they run at the grip, four blocks deep.
+   * What the node contributes, in PolyScope X's shape. The node has no children (0.5.0): every
+   * line comes before where they would be, at the node's own depth, and nothing after.
    */
   function script(st) {
-    if (ownGripperNodes(st)) {
-      return { before: beforeLines(st), childDepth: 4, after: afterLines(st) };
-    }
-    const before = beforeLines(st).concat(afterLines(st));
-    before.push(`if ${st.foundVariable}:`);
-    return { before, childDepth: 1, after: ["end"] };
+    return { before: lines(st), childDepth: 0, after: [] };
   }
 
-  /** The whole contribution as text with `children` (already indented lines) where the child nodes go — tests. */
-  function render(st, children) {
-    const sc = script(st);
-    const pad = "  ".repeat(sc.childDepth);
-    const kids = (children || []).map((l) => (l ? pad + l : l));
-    return sc.before.concat(kids, sc.after).join("\n") + "\n";
-  }
-
-  /** The "After picture N" node's lines: its children run only for a pick from that picture point. */
-  function afterPictureScript(locVariable, point) {
-    const v = /^[A-Za-z_][A-Za-z0-9_]*$/.test(locVariable || "") ? locVariable : LOC_VARIABLE;
-    return { before: [`if ${v} == ${Math.round(point)}:`], childDepth: 1, after: ["end"] };
+  /** The whole contribution as one text — tests. */
+  function render(st) {
+    return lines(st).join("\n") + "\n";
   }
 
   // -- the drawings (the PolyScope 5 node's Diagrams.java, as SVG strings) --------------------------
@@ -721,40 +599,50 @@
     return out + "</svg>";
   }
 
-  /** The part, drawn in proportion (isometric), with its length, width and height, and the jaws across the width. */
-  function svgPart(lengthMm, widthMm, heightMm, w, h) {
-    w = w || 140; h = h || 140;
-    const l = Math.max(lengthMm, widthMm), wd = Math.min(lengthMm, widthMm), ht = heightMm;
+  /** The part, drawn in proportion with its dimensions: a box (isometric), or a cylinder standing on its end. */
+  function svgPart(lengthMm, widthMm, heightMm, cylinder, w, h) {
+    w = w || 260; h = h || 200;
+    const ht = heightMm;
+    if (cylinder) {
+      const d = lengthMm;
+      const k = Math.min((w - 130) / d, (h - 50) / (ht + d * 0.35), 4);
+      const rx = (d * k) / 2, ry = (d * k * 0.35) / 2, hh = ht * k;
+      const cx = w / 2 - 14, top = (h - hh - 2 * ry) / 2 + ry, bot = top + hh;
+      let out = svgOpen(w, h, ` role="img" aria-label="the part: a cylinder Ø${num(d)} × ${num(ht)} mm"`);
+      out += `<path d="M ${r1(cx - rx)} ${r1(top)} L ${r1(cx - rx)} ${r1(bot)} A ${r1(rx)} ${r1(ry)} 0 0 0 ${r1(cx + rx)} ${r1(bot)} L ${r1(cx + rx)} ${r1(top)} Z" fill="#b4cdf5" stroke="${C.accent}" stroke-width="1.6" stroke-linejoin="round"/>`;
+      out += `<ellipse cx="${r1(cx)}" cy="${r1(top)}" rx="${r1(rx)}" ry="${r1(ry)}" fill="#e8f0fd" stroke="${C.accent}" stroke-width="1.6"/>`;
+      out += text(cx, top, `Ø ${num(d)}`, 12, C.ink, "bold");
+      out += text(cx + rx + 22, (top + bot) / 2, num(ht), 12, C.ink, "bold");
+      return out + "</svg>";
+    }
+    const l = Math.max(lengthMm, widthMm), wd = Math.min(lengthMm, widthMm);
     const cos30 = Math.cos(Math.PI / 6), sin30 = 0.5;
     const span = (l + wd) * cos30, tall = ht + (l + wd) * sin30;
-    const k = Math.min((w - 30) / span, (h - 34) / tall);
-    const ox = 15 + wd * cos30 * k, oy = h - 18;
+    const k = Math.min((w - 110) / span, (h - 44) / tall, 4);
+    const ox = (w - span * k) / 2 + wd * cos30 * k, oy = h - 22 - (h - 44 - tall * k) / 2;
     const base = [[0, 0], [l, 0], [l, wd], [0, wd]];
     const bot = base.map(([x, y]) => [ox + (x - y) * cos30 * k, oy - (x + y) * sin30 * k]);
     const top = bot.map(([x, y]) => [x, y - ht * k]);
     const poly = (pts, fill) => `<polygon points="${pts.map(([x, y]) => `${r1(x)},${r1(y)}`).join(" ")}" fill="${fill}" stroke="${C.accent}" stroke-width="1.6" stroke-linejoin="round"/>`;
     let out = svgOpen(w, h, ` role="img" aria-label="the part: ${num(l)} × ${num(wd)} × ${num(ht)} mm"`);
     out += poly([bot[0], bot[1], top[1], top[0]], "#cfe0fb") + poly([bot[3], bot[0], top[0], top[3]], "#b4cdf5") + poly([top[0], top[1], top[2], top[3]], "#e8f0fd");
-    out += text((bot[0][0] + bot[1][0]) / 2 + 8, (bot[0][1] + bot[1][1]) / 2 + 12, num(l), 11.5, C.ink, "bold");
-    out += text((bot[3][0] + bot[0][0]) / 2 - 10, (bot[3][1] + bot[0][1]) / 2 + 12, num(wd), 11.5, C.ink, "bold");
-    out += text(bot[0][0] + 16, (bot[0][1] + top[0][1]) / 2 + 2, num(ht), 11.5, C.ink, "bold");
-    // the jaws: against the two long faces (the fingers close across the width)
-    const ex = cos30, ey = -sin30, len = l * k * 0.22;
-    const fx = (bot[0][0] + bot[1][0] + top[0][0] + top[1][0]) / 4 + cos30 * 9, fy = (bot[0][1] + bot[1][1] + top[0][1] + top[1][1]) / 4 + sin30 * 9;
-    const bx = (top[2][0] + top[3][0]) / 2 - cos30 * 9, by = (top[2][1] + top[3][1]) / 2 - sin30 * 9 - 4;
-    const jaw = (x, y) => `<line x1="${r1(x - ex * len)}" y1="${r1(y - ey * len)}" x2="${r1(x + ex * len)}" y2="${r1(y + ey * len)}" stroke="${C.jaw}" stroke-width="4.5" stroke-linecap="round"/>`;
-    return out + jaw(fx, fy) + jaw(bx, by) + "</svg>";
+    out += text((bot[0][0] + bot[1][0]) / 2 + 10, (bot[0][1] + bot[1][1]) / 2 + 13, num(l), 12, C.ink, "bold");
+    out += text((bot[3][0] + bot[0][0]) / 2 - 12, (bot[3][1] + bot[0][1]) / 2 + 13, num(wd), 12, C.ink, "bold");
+    out += text(bot[1][0] + 18, (bot[1][1] + top[1][1]) / 2, num(ht), 12, C.ink, "bold");
+    return out + "</svg>";
   }
 
-  /** The approach from the side: the table, the part, the open fingers over it, the grip and the lift. */
-  function svgApproach(approachMm, gripMm, liftMm, heightMm, widthMm, strokeMm, w, h) {
-    w = w || 150; h = h || 170;
-    const total = heightMm + Math.max(approachMm, liftMm) + 40;
-    const k = Math.min((h - 26) / total, (w - 80) / Math.max(strokeMm + 20, widthMm + 20));
-    const table = h - 14, cx = w / 2 - 6;
+  /** The approach from the side: the table, the part, the open fingers over it and how deep they grip. */
+  function svgApproach(approachMm, gripMm, heightMm, widthMm, roomMm, w, h) {
+    w = w || 260; h = h || 200;
+    roomMm = roomMm || 0;
+    const open = widthMm + 2 * Math.max(4, roomMm * 0.5); // the fingers, somewhere inside the room
+    const total = heightMm + approachMm + 45;
+    const k = Math.min((h - 26) / total, (w - 190) / (Math.max(open, widthMm + 2 * roomMm) + 20), 3);
+    const table = h - 14, cx = w / 2 - 50;
     const pw = widthMm * k, ph = heightMm * k, topY = table - ph;
-    const tipY = topY - approachMm * k, half = (strokeMm * k) / 2, gripY = topY + gripMm * k, liftY = topY - liftMm * k;
-    let out = svgOpen(w, h, ` role="img" aria-label="approach ${num(approachMm)} mm over the top, grip ${num(gripMm)} mm below it, lift ${num(liftMm)} mm"`);
+    const tipY = topY - approachMm * k, half = (open * k) / 2, gripY = topY + gripMm * k;
+    let out = svgOpen(w, h, ` role="img" aria-label="approach ${num(approachMm)} mm over the top, grip ${num(gripMm)} mm below it"`);
     out += `<rect x="0" y="${r1(table)}" width="${w}" height="14" fill="#e6eaf0"/><line x1="0" y1="${r1(table)}" x2="${w}" y2="${r1(table)}" stroke="${C.faint}"/>`;
     out += `<rect x="${r1(cx - pw / 2)}" y="${r1(topY)}" width="${r1(pw)}" height="${r1(ph)}" fill="#cfe0fb" stroke="${C.accent}"/>`;
     // fingers, fully open, tips `approach` over the top
@@ -762,14 +650,18 @@
     out += `<rect x="${r1(cx + half)}" y="${r1(tipY - 38)}" width="7" height="38" rx="3" fill="${C.grey}"/>`;
     out += `<rect x="${r1(cx - half - 10)}" y="${r1(tipY - 50)}" width="${r1(2 * half + 20)}" height="12" rx="6" fill="${C.grey}"/>`;
     out += `<line x1="${r1(cx - half - 16)}" y1="${r1(gripY)}" x2="${r1(cx + half + 16)}" y2="${r1(gripY)}" stroke="${C.jaw}" stroke-width="1.6" stroke-dasharray="4 4"/>`;
-    const dx = cx + half + 14;
+    const dx = cx + half + 16;
     const dim = (y0, y1, t, color) =>
       `<g stroke="${color}" stroke-width="1.2"><line x1="${r1(dx)}" y1="${r1(y0)}" x2="${r1(dx)}" y2="${r1(y1)}"/><line x1="${r1(dx - 4)}" y1="${r1(y0)}" x2="${r1(dx + 4)}" y2="${r1(y0)}"/><line x1="${r1(dx - 4)}" y1="${r1(y1)}" x2="${r1(dx + 4)}" y2="${r1(y1)}"/></g>` +
-      text(dx + 6, (y0 + y1) / 2, t, 11, color, "bold", "start");
-    out += dim(tipY, topY, num(approachMm), C.accent) + dim(topY, gripY, num(gripMm), "#9a6a00");
-    const ax = cx - half - 18;
-    out += `<line x1="${r1(ax)}" y1="${r1(gripY)}" x2="${r1(ax)}" y2="${r1(liftY)}" stroke="${C.ok}" stroke-width="1.2"/><polygon points="${r1(ax - 5)},${r1(liftY + 8)} ${r1(ax + 5)},${r1(liftY + 8)} ${r1(ax)},${r1(liftY)}" fill="${C.ok}"/>`;
-    out += text(Math.max(2, ax - 12), Math.max(12, liftY - 6), `lift ${num(liftMm)}`, 11, C.ok, "bold", "start");
+      text(dx + 6, (y0 + y1) / 2, t, 11.5, color, "bold", "start");
+    out += dim(tipY, topY, `approach ${num(approachMm)}`, C.accent) + dim(topY, gripY, `grip ${num(gripMm)}`, "#9a6a00");
+    if (roomMm > 0) {
+      // the finger room: the clear space wanted on each side of the part
+      const rw = roomMm * k;
+      out += `<rect x="${r1(cx - pw / 2 - rw)}" y="${r1(topY)}" width="${r1(rw)}" height="${r1(ph)}" fill="rgba(61,220,132,.25)"/>`;
+      out += `<rect x="${r1(cx + pw / 2)}" y="${r1(topY)}" width="${r1(rw)}" height="${r1(ph)}" fill="rgba(61,220,132,.25)"/>`;
+      out += text(cx + pw / 2 + 4, table - 8, `room ${num(roomMm)}`, 11.5, C.ok, "bold", "start");
+    }
     return out + "</svg>";
   }
 
@@ -780,20 +672,25 @@
     return [[0, 0], [sx, 0], [sx, sy], [0, sy]].map(([u, v]) => [M[0][3] + u * M[0][0] + v * M[0][1], M[1][3] + u * M[1][0] + v * M[1][1]]);
   }
 
-  /** The cell from above: the base, the ring the parts may be in (the reach limits), and every
-   * taught pick area — so an area out of reach shows at once. `areas`: [{name, corners: [[x, y] × 4]}]. */
-  function svgReachMap(baseR, minR, maxR, areas, highlight, w, h) {
-    w = w || 240; h = h || 240;
-    let extent = Math.max(maxR > 0 ? maxR : minR * 2, minR, 0.05) * 1.15;
+  /** How far the farthest corner of a taught area is from the base axis (m). */
+  const farthest = (corners) => corners.reduce((far, [x, y]) => Math.max(far, Math.hypot(x, y)), 0);
+
+  /** The cell from above: the base, how far the arm reaches (its rated reach, named on its
+   * circle), the keep-out round the base, and every taught pick area — where each area sits in
+   * the arm's reach, at a glance. `reachR` 0: the model is unknown, no reach circle.
+   * `areas`: [{name, corners: [[x, y] × 4]}]. */
+  function svgReachMap(model, baseR, keepOutR, reachR, areas, highlight, w, h) {
+    w = w || 300; h = h || 300;
+    let extent = Math.max(reachR > 0 ? reachR : keepOutR * 2, keepOutR, 0.05) * 1.12;
     (areas || []).forEach((a) => a.corners.forEach(([x, y]) => { extent = Math.max(extent, Math.max(Math.abs(x), Math.abs(y)) * 1.1); }));
-    const k = (Math.min(w, h) / 2 - 8) / extent, cx = w / 2, cy = h / 2;
-    let out = svgOpen(w, h, ' role="img" aria-label="the cell from above: the reach ring and the pick areas"');
+    const k = (Math.min(w, h - 34) / 2 - 6) / extent, cx = w / 2, cy = 12 + (h - 34) / 2;
+    let out = svgOpen(w, h, ' role="img" aria-label="the cell from above: the arm\'s reach and the pick areas"');
     out += `<rect x="0" y="0" width="${w}" height="${h}" rx="14" fill="${C.bg}"/>`;
-    if (maxR > 0) out += `<circle cx="${cx}" cy="${cy}" r="${r1(maxR * k)}" fill="#e2f5eb" stroke="${C.ok}"/>`;
-    out += `<circle cx="${cx}" cy="${cy}" r="${r1(minR * k)}" fill="#fde3e3" stroke="${C.err}" stroke-width="1.2" stroke-dasharray="5 4"/>`;
+    if (reachR > 0) out += `<circle cx="${cx}" cy="${r1(cy)}" r="${r1(reachR * k)}" fill="#e2f5eb" stroke="${C.ok}" stroke-width="1.8"/>`;
+    out += `<circle cx="${cx}" cy="${r1(cy)}" r="${r1(keepOutR * k)}" fill="#fde3e3" stroke="${C.err}" stroke-width="1.2" stroke-dasharray="5 4"/>`;
     const b = baseR * k;
-    out += `<circle cx="${cx}" cy="${cy}" r="${r1(b)}" fill="${C.grey}"/>`;
-    out += `<line x1="${cx}" y1="${cy}" x2="${r1(cx + b + 14)}" y2="${cy}" stroke="${C.err}" stroke-width="1.5"/><line x1="${cx}" y1="${cy}" x2="${cx}" y2="${r1(cy - b - 14)}" stroke="${C.ok}" stroke-width="1.5"/>`;
+    out += `<circle cx="${cx}" cy="${r1(cy)}" r="${r1(b)}" fill="${C.grey}"/>`;
+    out += `<line x1="${cx}" y1="${r1(cy)}" x2="${r1(cx + b + 14)}" y2="${r1(cy)}" stroke="${C.err}" stroke-width="1.5"/><line x1="${cx}" y1="${r1(cy)}" x2="${cx}" y2="${r1(cy - b - 14)}" stroke="${C.ok}" stroke-width="1.5"/>`;
     out += text(cx + b + 20, cy, "X", 10, C.muted, "bold") + text(cx, cy - b - 20, "Y", 10, C.muted, "bold");
     (areas || []).forEach((a, i) => {
       const pts = a.corners.map(([x, y]) => [cx + x * k, cy - y * k]);
@@ -801,18 +698,80 @@
       out += `<polygon points="${pts.map(([x, y]) => `${r1(x)},${r1(y)}`).join(" ")}" fill="rgba(28,100,216,${i === highlight ? 0.35 : 0.18})" stroke="${C.accent}" stroke-width="${i === highlight ? 2.4 : 1.4}"/>`;
       out += text(mx, my, a.name || String(i + 1), 11, C.ink, "bold");
     });
-    out += text(8, h - 8, `pick ${Math.round(minR * 1000)}–${maxR > 0 ? Math.round(maxR * 1000) : "∞"} mm from the base axis`, 10, C.muted, "normal", "start");
+    if (reachR > 0) {
+      // the reach, named on its own circle (drawn last: an area never hides it)
+      const label = `reach ${Math.round(reachR * 1000)} mm`, tw = label.length * 7 + 16, y = cy - reachR * k;
+      out += `<rect x="${r1(cx - tw / 2)}" y="${r1(y - 10)}" width="${tw}" height="20" rx="10" fill="${C.ok}"/>` + text(cx, y + 0.5, label, 12, "#fff", "bold");
+    }
+    out += text(8, h - 9, reachR > 0 ? `green: the ${model || "arm"}'s reach · red: too near its base` : "robot model unknown: no reach to draw", 11, C.muted, "normal", "start");
     return out + "</svg>";
   }
 
+  // -- what went wrong, for the operator (the PolyScope 5 node's Cockpit.advise) -------------------
+
+  const CHECK_CABLES = "Cables: the camera computer is powered and its network cable is plugged in at both ends (link lights on)";
+  const CHECK_FIREWALL = `Firewall: the camera computer must let this robot in on TCP ports ${DEFAULT_COCKPIT_PORT} and ${DEFAULT_PICK_PORT}`;
+  const CHECK_USB = "Camera cable: the camera's USB cable seated at both ends, in a blue (USB 3) port — unplug it and plug it back in";
+  const checkAddress = (base) => `IP address: is ${hostOf(base) || base} the camera computer's, and on the same network as the robot?`;
+
+  /**
+   * Why the camera computer gave no picture, as the operator should read it: one plain line,
+   * then what to check — most likely first. `kind`: "silent" (no answer / timed out),
+   * "refused" (the browser was refused or nothing listens), "cors" (it answers but turns
+   * this page away), "nopicture" (HTTP 503: the camera), "outdated" (HTTP 404), "badurl".
+   * `detail` is the long story, for the log (console), never for the screen.
+   */
+  function advise(kind, base, detail) {
+    const host = hostOf(base) || base;
+    const self = /^(localhost|127\.0\.0\.1|::1)$/.test(host);
+    let summary, checks;
+    if (kind === "badurl") {
+      summary = `"${base}" is not an address.`;
+      checks = [`Enter it as  http://<camera computer's IP>:${DEFAULT_COCKPIT_PORT}`];
+    } else if (kind === "nopicture") {
+      summary = "The camera computer is on, but its camera gives no picture.";
+      checks = [CHECK_USB, "The picture comes back by itself a few seconds after the camera does"];
+    } else if (kind === "outdated") {
+      summary = "The camera computer answers, but its software is older than this URCap.";
+      checks = ["Update the camera computer's software and restart it"];
+    } else if (kind === "cors") {
+      summary = `The camera computer at ${host} is running, but is not set up to serve this robot's screen.`;
+      checks = ["Camera program: it must be started for this robot — ask whoever set it up (the detail is in the log)"];
+    } else if (kind === "refused") {
+      summary = self ? `Nothing on this robot itself answers at ${base}.` : `A computer answers at ${host}, but not the camera program.`;
+      checks = [
+        self ? "IP address: this address is the robot itself, not the camera computer — enter that computer's IP address" : checkAddress(base),
+        "Camera program: is it running on the camera computer? Restart that computer if unsure",
+        CHECK_FIREWALL,
+      ];
+    } else {
+      summary = `No answer from the camera computer at ${host}.`;
+      checks = [CHECK_CABLES, checkAddress(base), CHECK_FIREWALL];
+    }
+    return { summary, checks, detail: `${base} — ${detail || kind}`, text: [summary].concat(checks.map((c) => `• ${c}`)).join("\n") };
+  }
+
+  /** The rejected candidates the picture draws: nearly the part (a cockpit before 0.7.0 says nothing: all of them). */
+  const nearMisses = (scene) => ((scene && scene.rejected) || []).filter((r) => r && r.near !== false);
+
+  /** One line for the status: how many parts will be picked, how many nearly. */
+  function sceneSummary(scene) {
+    const parts = ((scene && scene.parts) || []).length, near = nearMisses(scene).length;
+    if (!parts && !near) return "no part in view";
+    const s = `${parts} part${parts === 1 ? "" : "s"} to pick`;
+    return near ? `${s} · ${near} not (yellow, with why)` : s;
+  }
+
   root.PerceptronicPick = {
-    orderGrid, svgOrderTile, svgPart, svgApproach, areaCorners, svgReachMap,
-    APP_TYPE, PICK_TYPE, AFTER_TYPE, VERSION, DEFAULT_PICK_PORT, DEFAULT_COCKPIT_PORT, DEFAULT_TIP_MM,
-    SOCKET, RQ_SOCKET, MAX_POINTS, MAX_AREAS, ORDERS, ORDER_TILES, GRIPPERS, GRIPPER_FIELDS, REASONS,
+    orderGrid, svgOrderTile, svgPart, svgApproach, areaCorners, farthest, svgReachMap,
+    APP_TYPE, PICK_TYPE, VERSION, DEFAULT_PICK_PORT, DEFAULT_COCKPIT_PORT, DEFAULT_TIP_MM,
+    SOCKET, MAX_POINTS, MAX_AREAS, ORDERS, ORDER_TILES, SHAPES, REASONS,
+    SPEED, SETTLE_S, MAX_ATTEMPTS, LOOK_STROKE_MM, KEEP_OUT_M,
     NUMBERS, BY_KEY, FOUND_VARIABLE, LOC_VARIABLE,
-    num, clamp, defaults, values, modelReach, reachLimits,
+    num, clamp, defaults, values, modelReach,
     poseToMat, matToPose, matMul, matInv, poseTrans, poseInv, flangeMat, fingertip, plane, tiltDeg,
-    cockpitBase, hostOf, areasOf, newNodeId, settings, isOrder, horizontal, words, orderText, partText,
-    problem, tokens, script, render, afterPictureScript,
+    cockpitBase, hostOf, areasOf, newNodeId, settings, isOrder, horizontal, words, orderText, partText, partWords,
+    round, longSide, shortSide, problem, tokens, lines, script, render,
+    advise, nearMisses, sceneSummary,
   };
 })(typeof self !== "undefined" ? self : globalThis);

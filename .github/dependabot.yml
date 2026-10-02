@@ -1,5 +1,5 @@
 # Automated dependency maintenance. Three ecosystems:
-#   - uv:            pyproject.toml + uv.lock (dev deps + optional extras)
+#   - pip:           requirements-dev.txt / requirements-vision.txt (pinned, hashed) + pyproject.toml
 #   - github-actions: the workflow action pins
 #   - docker-compose: the URSim / PolyScope X simulator images
 # Minor + patch bumps are grouped into one weekly PR per ecosystem so the
@@ -10,7 +10,7 @@
 # target-branch lines do nothing until this reaches main.
 version: 2
 updates:
-  - package-ecosystem: "uv"
+  - package-ecosystem: "pip"
     directory: "/"
     target-branch: "dev"
     schedule:

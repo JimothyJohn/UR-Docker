@@ -32,7 +32,7 @@
   body {
     background: radial-gradient(ellipse at 40% 40%, #06110b 0%, var(--void) 62%);
     color: var(--phos); font-family: var(--mono); font-size: 13px; letter-spacing: .06em;
-    display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; text-transform: uppercase;
+    display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; text-transform: uppercase;
   }
   ::selection { background: var(--phos); color: var(--void); }
 
@@ -140,7 +140,18 @@
     .lamps { margin-left: 0; flex-wrap: wrap; }
     #tty { font-size: 17px; }
   }
-  @media (prefers-reduced-motion: reduce) { .lamp.alert, .lamp.crit { animation: none; } }
+  /* a lost link, said plainly: what dropped, what to do, and that it comes back by itself */
+  header { grid-row: 1; } main { grid-row: 3; }
+  #alarm { grid-row: 2; margin: 0 24px 10px; padding: 12px 18px; border: 2px solid var(--red); background: rgba(255,74,61,.14); color: #FFD9D5;
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 22px; }
+  #alarm[hidden] { display: none; }
+  #alarm b { font-family: var(--tty); font-weight: 400; font-size: 34px; line-height: 1; letter-spacing: .06em; color: var(--red);
+    text-shadow: 0 0 8px rgba(255,74,61,.7); animation: blink .9s steps(2) infinite; }
+  #alarm span { font-size: 17px; letter-spacing: .04em; flex: 1 1 420px; }
+  #alarm.warn { border-color: var(--amber); background: rgba(255,194,71,.1); color: #FFE9BF; }
+  #alarm.warn b { color: var(--amber); text-shadow: 0 0 6px rgba(255,194,71,.6); animation: none; }
+  body.stale #gl, body.stale #ov, body.stale #scan, body.stale #scanOv { opacity: .35; transition: opacity .3s; }   /* the picture is old: don't let it pass for live */
+  @media (prefers-reduced-motion: reduce) { .lamp.alert, .lamp.crit, #alarm b { animation: none; } }
 </style>
 </head>
 <body>
@@ -154,6 +165,7 @@
   </div>
   <div class="clock" id="clock">--:--:--</div>
 </header>
+<div id="alarm" role="alert" hidden><b id="alarmWhat"></b><span id="alarmFix"></span></div>
 
 <main>
   <div id="scanStage" class="corners">
@@ -230,8 +242,12 @@
     }
     tty.typing = false;
   }
+  // ---- links: the cockpit, the camera, the robot. `heard` = the cockpit answered just now; health() (below) turns
+  // silence into the alarm strip and clears it when the link is back — nothing here needs a refresh.
+  const L = { serverAt: performance.now(), bootAt: performance.now(), camErr: null, fails: 0, uptime: null, alarm: null, wasRemote: false, robotSeen: false, page: null, reload: false };
+  const heard = () => { L.serverAt = performance.now(); L.fails = 0; };
   async function post(url, body) {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); heard();
     let j; try { j = await r.json(); } catch (e) { j = { ok: false, error: `HTTP ${r.status}` }; }
     if (!r.ok && j.ok !== false) j.ok = false;
     return j;
@@ -867,8 +883,8 @@
     while (true) {
       if (!S.running) { await sleep(150); continue; }
       try {
-        const r = await fetch(`/api/rgbd?after=${S.seq}&timeout_ms=1500`);
-        if (r.status === 503) { if (misses++ % 10 === 0) { const j = await r.json(); say(j.last_error || 'camera: waiting for the first frame', 'warn'); } await sleep(500); continue; }
+        const r = await fetch(`/api/rgbd?after=${S.seq}&timeout_ms=1500`); heard();
+        if (r.status === 503) { const j = await r.json(); L.camErr = j.last_error || null; if (misses++ % 10 === 0) say(j.last_error || 'camera: waiting for the first frame', 'warn'); await sleep(500); continue; }
         if (!r.ok) throw new Error(`frame ${r.status}`);
         const fr = parseContainer(await r.arrayBuffer()); if (fr.header.seq === S.seq) continue; misses = 0; S.seq = fr.header.seq;
         const [bmp, rawDepth] = await Promise.all([createImageBitmap(new Blob([fr.png], { type: 'image/png' })), inflate(fr.depth)]);
@@ -881,7 +897,7 @@
         bmp.close && bmp.close();
         if (performance.now() - lastSurfAt > 800) { lastSurfAt = performance.now(); surface(h, depth); }
         $('feedTag').textContent = `${h.width}×${h.height} · ${(h.fps || 0).toFixed(0)} HZ${h.pose_age_s !== undefined ? ` · POSE ${(h.pose_age_s * 1000).toFixed(0)} MS` : ''}${S.flipped ? ' · ROBOT VIEW' : ''}`;
-      } catch (e) { say(`stream: ${e.message}`, 'warn'); await sleep(800); }
+      } catch (e) { L.fails++; await sleep(800); }   // the alarm strip says what is wrong; this loop just keeps trying
     }
   }
   function surface(h, depth) {   // the table: the commonest height (it is flat); the fitted tilt is the calibration's error
@@ -1051,7 +1067,7 @@
       if ((was.control_mode || '') !== cm) say(`control ${was.control_mode || '?'} → ${cm}${cm === 'REMOTE' ? '' : ' · motion needs remote'}`, cm === 'REMOTE' ? '' : 'warn');
     } else if (!was) { say(`robot ${rm} · safety ${sm} · control ${cm}`, (rm === 'RUNNING' && safe && cm === 'REMOTE') ? '' : 'warn'); if (cm && cm !== 'REMOTE') say('switch the pendant to REMOTE to move', 'warn'); }
   }
-  async function events() { try { const j = await (await fetch(`/api/events?after=${S.lastEvent}`)).json(); for (const e of j.events || []) { if (S.lastEvent && e.kind !== 'segment') say(`${e.kind} · ${e.message}`, e.ok === false ? 'warn' : 'dim'); S.lastEvent = e.seq; } } catch (e) {} }
+  async function events() { try { const j = await (await fetch(`/api/events?after=${S.lastEvent}`)).json(); heard(); for (const e of j.events || []) { if (S.lastEvent && e.kind !== 'segment') say(`${e.kind} · ${e.message}`, e.ok === false ? 'warn' : 'dim'); S.lastEvent = e.seq; } } catch (e) {} }
   function armKeys() { $('kGo').disabled = !(S.robot && (selected() || (S.feat && S.feat.point_m))) || S.moving; $('kHome').disabled = !S.robot || S.moving; for (const id of ['kStart', 'stopKey']) $(id).disabled = !S.robot; }
 
   // ---- the prompt ------------------------------------------------------------------------------------------
@@ -1134,8 +1150,14 @@
   let booted = false;
   async function info() {
     try {
-      const j = await (await fetch('/api/info')).json(), c = j.camera || {}, d = c.device || {}, cell = j.cell || {};
-      S.robot = j.robot; lamp('lCam', c.open ? (c.kind === 'synthetic' ? 'alert' : 'on') : 'crit');
+      const j = await (await fetch('/api/info')).json(), c = j.camera || {}, d = c.device || {}, cell = j.cell || {}; heard();
+      if (j.last_error || !j.stalled) L.camErr = j.last_error || null;
+      if (L.uptime !== null && j.uptime_s + 2 < L.uptime) {   // the cockpit was restarted under this page: its counters began again
+        S.lastEvent = 0; S.seq = 0; say('cockpit restarted · reconnected', 'warn');
+        pageStamp().then((v) => { if (v && L.page && v !== L.page) L.reload = true; });
+      }
+      L.uptime = j.uptime_s;
+      S.robot = j.robot; lamp('lCam', c.open && !j.stalled ? (c.kind === 'synthetic' ? 'alert' : 'on') : 'crit');
       const short = (d.name || c.kind || '').replace(/^.*RealSense\s*/i, '').replace(/\s+/g, ' ').trim();
       $('ident').textContent = [cell.UR_CELL ? String(cell.UR_CELL).toUpperCase() : (S.robot ? 'ARM' : 'NO ROBOT'), short || null, S.robot && S.robot.dry_run ? 'DRY RUN' : null].filter(Boolean).join(' · ');
       $('ident').title = [S.robot ? `${S.robot.platform || ''} ${S.robot.host}` : 'no robot', d.name ? `${d.name}${d.serial ? ' ' + d.serial : ''}` : c.kind].filter(Boolean).join(' · ');
@@ -1146,6 +1168,36 @@
         if (S.robot) say(`hand-eye ${(S.robot.handeye || {}).source || '?'} · fingertips ${(((S.robot.approach || {}).tip_m || 0.163) * 1000).toFixed(0)} mm past the flange`, 'dim'); state(); }
     } catch (e) { lamp('lCam', 'crit'); }
   }
+  // is the page the cockpit serves now still this one? (it is read from disk per request; a restart may bring a newer one)
+  async function pageStamp() {
+    try { const t = await (await fetch(location.pathname, { cache: 'no-store' })).text(); let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return `${t.length}:${h}`; } catch (e) { return null; }
+  }
+  pageStamp().then((v) => { L.page = v; });
+  const BACK = { cockpit: 'cockpit answering again', camera: 'camera is sending pictures again', robot: 'robot answering again', local: 'pendant back in remote' };
+  function health() {
+    const now = performance.now(), secs = (ms) => Math.round(ms / 1000), st = S.state, cm = st && st.control_mode;
+    if (cm === 'REMOTE') L.wasRemote = true;
+    if (st && st.robot_mode) L.robotSeen = true;   // a robot that never answered (practice mode) is the lamps' business, not an alarm
+    const frozen = S.running && S.frameAt && now - S.frameAt > 4000, never = S.running && !S.frameAt && now - L.bootAt > 8000;
+    let a = null;
+    if (L.reload) a = ['reload', 'crit', 'COCKPIT WAS UPDATED · RELOAD THIS PAGE', 'This page is older than the program now running. Press F5, or the reload button of your browser, once.'];
+    else if (L.fails >= 3 || now - L.serverAt > 4000) a = ['cockpit', 'crit', `COCKPIT NOT ANSWERING · ${secs(now - L.serverAt)} S`, 'The program on the camera computer has stopped, or the network to it is down. Start it again or check the cable. This page reconnects by itself: no refresh needed.'];
+    else if (frozen || never) a = ['camera', 'crit', frozen ? `CAMERA STOPPED · PICTURE IS ${secs(now - S.frameAt)} S OLD` : 'NO PICTURE FROM THE CAMERA',
+      `${L.camErr ? L.camErr + ' — ' : ''}Unplug the camera and plug it back in (blue USB socket, its own cable). It reconnects by itself within about 30 seconds: no restart, no refresh.`];
+    else if (S.robot && L.robotSeen && st && st.ok === false && !st.robot_mode) a = ['robot', 'crit', 'ROBOT NOT ANSWERING', `${why(st)} — check the robot is switched on and its network cable is in. It reconnects by itself.`];
+    else if (S.robot && L.wasRemote && cm && cm !== 'REMOTE') a = ['local', 'warn', 'PENDANT SWITCHED TO LOCAL · MOTION IS OFF', 'On the pendant, top right, switch Local back to Remote. Nothing needs restarting.'];
+    const id = a && a[0];
+    if (id !== L.alarm) {
+      if (id) say(a[2], a[1]); else say(BACK[L.alarm] || 'link restored');
+      if (L.alarm === 'cockpit') { info(); if (!S.moving) state(); }
+      L.alarm = id;
+    }
+    $('alarm').hidden = !a; $('alarm').className = a ? a[1] : '';
+    if (a) { $('alarmWhat').textContent = a[2]; $('alarmFix').textContent = a[3]; }
+    document.body.classList.toggle('stale', id === 'cockpit' || id === 'camera');
+    if (id === 'cockpit') { lamp('lCam', 'crit'); lamp('lArm'); lamp('lSafe'); lamp('lRmt'); } else if (id === 'camera') lamp('lCam', 'crit');
+  }
+  setInterval(health, 1000);
   say('interface online', 'dim');
   say('click a part in the feed · approach · HELP for commands', 'dim');
   setInterval(() => { $('clock').textContent = clock(); }, 1000);

@@ -172,7 +172,7 @@ elif cmd == "descend":
     print(snap("pick_down"))
 elif cmd in ("grip", "release"):
     out = subprocess.run(
-        ["uv", "run", "urctl", "gripper", "close" if cmd == "grip" else "open", "--force", "80"],
+        [sys.executable, "-m", "urctl", "gripper", "close" if cmd == "grip" else "open", "--force", "80"],
         capture_output=True,
         text=True,
         env={**__import__("os").environ, "UR_HOST": "192.168.3.3"},

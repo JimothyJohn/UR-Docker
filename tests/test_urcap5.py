@@ -32,9 +32,11 @@ sys.path.insert(0, str(ROOT / "urcap"))
 import urcap5  # noqa: E402
 
 SRC = ROOT / "urcap" / "perceptronic-ps5"
-JAVA = SRC / "src" / "com" / "nickarmenta" / "perceptronic"
-DIST = ROOT / "urcap" / "dist" / "perceptronic-ps5-0.6.0.urcap"
+JAVA = SRC / "src" / "io" / "advin" / "perceptronic"
+DIST = ROOT / "urcap" / "dist" / "perceptronic-ps5-0.8.0.urcap"
 JAVAC = shutil.which("javac")
+# the screens (pure Swing): the harness lays them out off-screen
+SCREEN_JAVA = ("PickScreen.java", "LiveView.java", "LocationsScreen.java")
 # the pure-Java classes the harness compiles (no UR API)
 PURE_JAVA = (
     "Json.java",
@@ -46,6 +48,7 @@ PURE_JAVA = (
     "Scene.java",
     "Logo.java",
     "FeedPoller.java",
+    "Log.java",
 )
 SVG = ROOT / "urcap" / "perceptronic.svg"
 _PLAN = urcap5.compat_plan(urcap5.read_properties((SRC / "bundle.properties").read_text(encoding="utf-8")))
@@ -105,7 +108,7 @@ def test_embedded_pom_names_the_api_version_the_way_polyscope_reads_it():
     # artifactId api -> <version>. Parse it the same way.
     props = urcap5.read_properties((SRC / "bundle.properties").read_text(encoding="utf-8"))
     path, body = urcap5.pom_xml(props)
-    assert path == "META-INF/maven/com.nickarmenta/perceptronic/pom.xml"
+    assert path == "META-INF/maven/io.advin/perceptronic/pom.xml"
     ns = {"m": "http://maven.apache.org/POM/4.0.0"}
     deps = ET.fromstring(body).findall("m:dependencies/m:dependency", ns)
     versions = [
@@ -138,7 +141,7 @@ def test_the_downloadable_urcap_is_built_from_the_current_sources():
     assert any(p.startswith("com.ur.urcap.api.contribution.toolbar.swing;") for p in imports)
     assert not any("toolbar" in p and "optional" in p for p in imports)
     for cls in ("ToolbarService", "ToolbarContribution", "Logo", "FeedPoller"):
-        assert f"com/nickarmenta/perceptronic/{cls}.class" in bundle["names"], cls
+        assert f"io/advin/perceptronic/{cls}.class" in bundle["names"], cls
     assert bundle["names"][:2] == ["META-INF/", "META-INF/MANIFEST.MF"]
     activator = props["Bundle-Activator"].replace(".", "/") + ".class"
     assert activator in bundle["names"]
@@ -176,7 +179,7 @@ def test_package_reports_a_missing_sdk_clearly(tmp_path):
 # -- the Java client, under a JDK -----------------------------------------------------------
 
 HARNESS = r"""
-package com.nickarmenta.perceptronic;
+package io.advin.perceptronic;
 
 import java.util.*;
 
@@ -223,11 +226,11 @@ public class Harness {
                     s.orderFirst = (String) ((List<?>) o.get("order")).get(0);
                     s.orderRows = (String) ((List<?>) o.get("order")).get(1);
                 }
-                if (o.containsKey("gripper")) s.gripper = (String) o.get("gripper");
-                if (o.containsKey("reach")) {
-                    s.reachMinM = ((Number) ((List<?>) o.get("reach")).get(0)).doubleValue();
-                    s.reachMaxM = ((Number) ((List<?>) o.get("reach")).get(1)).doubleValue();
-                }
+                if (o.containsKey("shape")) s.shape = (String) o.get("shape");
+                if (o.containsKey("gripCheck")) s.gripCheck = (Boolean) o.get("gripCheck");
+                if (o.containsKey("gripLong")) s.gripLongSide = (Boolean) o.get("gripLong");
+                if (o.containsKey("closeLook")) s.closeLook = (Boolean) o.get("closeLook");
+                if (o.containsKey("arm")) s.arm = (String) o.get("arm");
                 if (o.containsKey("popup")) s.popupOnFail = (Boolean) o.get("popup");
                 if (o.containsKey("polyscope")) {
                     List<?> v = (List<?>) o.get("polyscope");
@@ -237,7 +240,8 @@ public class Harness {
                 if (o.containsKey("var")) s.foundVariable = (String) o.get("var");
                 Map<String, Object> m = new LinkedHashMap<String, Object>();
                 m.put("problem", s.problem());
-                m.put("script", s.problem() == null ? s.render((String) o.get("children")) : null);
+                m.put("script", s.problem() == null ? s.render() : null);
+                m.put("words", PickScript.class.getDeclaredMethod("partText").invoke(s));
                 List<Object> toks = new ArrayList<Object>();
                 for (int i = -1; i < s.points.size(); i++) toks.add(s.tokens(i));
                 m.put("tokens", toks);
@@ -314,6 +318,9 @@ public class Harness {
                 for (Scene.Part p : sc.parts) orders.add(p.order);
                 List<Object> whys = new ArrayList<Object>();
                 for (Scene.Part p : sc.rejected) whys.add(p.why);
+                List<Object> drawn = new ArrayList<Object>();
+                for (Scene.Part p : sc.nearMisses()) drawn.add(p.why);
+                m.put("drawn", drawn); m.put("summary", sc.summary());
                 m.put("orders", orders); m.put("whys", whys); m.put("surface", sc.surface);
                 m.put("width", sc.width); m.put("base", sc.baseFrame);
                 out = m;
@@ -330,7 +337,101 @@ public class Harness {
                         : a[1].equals("dns") ? new java.net.UnknownHostException("jetson")
                         : a[1].equals("timeout") ? new java.net.SocketTimeoutException("connect timed out")
                         : new java.net.MalformedURLException("no protocol");
-                out = Cockpit.explain(e, a[2]);
+                Cockpit.Advice adv = Cockpit.advise(e, a[2]);
+                Map<String, Object> m = new LinkedHashMap<String, Object>();
+                m.put("summary", adv.summary);
+                m.put("checks", Arrays.asList((Object[]) adv.checks));
+                m.put("detail", adv.detail);
+                m.put("text", Cockpit.explain(e, a[2]));
+                m.put("logged", new ArrayList<Object>(Log.recent()));
+                out = m;
+                break;
+            }
+            case "nopicture": {
+                Map<String, Object> m = new LinkedHashMap<String, Object>();
+                m.put("text", Cockpit.noPicture(a[1], "Frame didn't arrive within 5000"));
+                m.put("logged", new ArrayList<Object>(Log.recent()));
+                out = m;
+                break;
+            }
+            case "toggle": {
+                // the Picture / Depth toggle in a w-wide frame: where it is, and what a tap there chooses
+                int w = Integer.parseInt(a[1]);
+                java.awt.Rectangle r = Ui.ViewToggle.bounds(w, 0);
+                out = Arrays.asList(r.x, r.y, r.width, r.height);
+                break;
+            }
+            case "liveview": {
+                // LiveView painted off-screen: [toggle tapped on Depth?, pixels the overlay changed]
+                final LiveView v = new LiveView();
+                v.setSize(640, 400);
+                java.awt.image.BufferedImage img =
+                        new java.awt.image.BufferedImage(848, 480, java.awt.image.BufferedImage.TYPE_INT_RGB);
+                v.setFrame(img);
+                v.setLive(true);
+                final boolean[] heard = new boolean[2];
+                v.setViewListener(new LiveView.ViewListener() {
+                    public void depthView(boolean on) { heard[0] = true; heard[1] = on; }
+                });
+                java.awt.Rectangle r = Ui.ViewToggle.bounds(640, 0);
+                int tapX = r.x + (a[1].equals("depth") ? r.width * 3 / 4 : r.width / 4);
+                int tapY = r.y + r.height / 2;
+                java.awt.event.MouseEvent tap = new java.awt.event.MouseEvent(
+                        v, java.awt.event.MouseEvent.MOUSE_RELEASED, 0L, 0, tapX, tapY, 1, false);
+                for (java.awt.event.MouseListener l : v.getMouseListeners()) l.mouseReleased(tap);
+                java.awt.image.BufferedImage plain = paint(v);
+                v.setScene(Scene.parse(Json.parseObject(a[2])));
+                java.awt.image.BufferedImage drawn = paint(v);
+                int changed = 0;
+                for (int y = 60; y < 400; y++) {
+                    for (int x = 0; x < 640; x++) if (plain.getRGB(x, y) != drawn.getRGB(x, y)) changed++;
+                }
+                Map<String, Object> m = new LinkedHashMap<String, Object>();
+                m.put("heard", heard[0]); m.put("depth", heard[1]); m.put("view", v.depthView());
+                m.put("changed", changed);
+                int green = 0, yellow = 0;
+                for (int y = 60; y < 400; y++) {
+                    for (int x = 0; x < 640; x++) {
+                        int px = drawn.getRGB(x, y);
+                        if (px == plain.getRGB(x, y)) continue;
+                        int cr = (px >> 16) & 255, cg = (px >> 8) & 255, cb = px & 255;
+                        if (cg > 180 && cr < 120 && cb < 180) green++;       // Ui.PART 0x3ddc84
+                        if (cr > 230 && cg > 170 && cg < 215 && cb < 110) yellow++; // Ui.JAW 0xffc53d
+                    }
+                }
+                m.put("green", green); m.put("yellow", yellow);
+                out = m;
+                break;
+            }
+            case "screen": {
+                // the node's whole screen, laid out at the pendant's panel size: does everything fit?
+                final Map<String, Object> m = new LinkedHashMap<String, Object>();
+                final String[] args = a;
+                javax.swing.SwingUtilities.invokeAndWait(new Runnable() {
+                    public void run() {
+                        PickScreen screen = new PickScreen(null);
+                        PickScript ps = new PickScript();
+                        ps.host = "192.168.3.10"; ps.nodeId = "ab12";
+                        if (args[3].equals("cyl")) ps.shape = "cyl";
+                        List<PickScreen.PointRow> rows = new ArrayList<PickScreen.PointRow>();
+                        int n = Integer.parseInt(args[4]);
+                        for (int i = 0; i < n; i++) {
+                            ps.points.add(new PickScript.Point(new double[6], null, 0, 0));
+                            rows.add(new PickScreen.PointRow("live table", false));
+                        }
+                        screen.show(ps, rows, Math.max(0, n - 1));
+                        if (args[5].equals("part")) screen.showOptions(0);
+                        if (args[5].equals("approach")) screen.showOptions(1);
+                        screen.setSize(Integer.parseInt(args[1]), Integer.parseInt(args[2]));
+                        layout(screen);
+                        List<Object> clipped = new ArrayList<Object>();
+                        List<Object> scrollers = new ArrayList<Object>();
+                        List<Object> texts = new ArrayList<Object>();
+                        walk(screen, screen, clipped, scrollers, texts);
+                        m.put("clipped", clipped); m.put("scrollers", scrollers); m.put("texts", texts);
+                    }
+                });
+                out = m;
                 break;
             }
             case "svg": out = Logo.SVG; break;
@@ -427,6 +528,73 @@ public class Harness {
         // bytes, not print(): the JVM's default charset is cp1252 on Windows
         System.out.write(Json.write(out).getBytes("UTF-8"));
         System.out.flush();
+        System.exit(0); // the screens start AWT's event thread, which would keep the JVM alive
+    }
+
+    static java.awt.image.BufferedImage paint(javax.swing.JComponent c) {
+        java.awt.image.BufferedImage out = new java.awt.image.BufferedImage(c.getWidth(), c.getHeight(),
+                java.awt.image.BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = out.createGraphics();
+        c.paint(g);
+        g.dispose();
+        return out;
+    }
+
+    /** Lay out without a display: AWT skips re-validating what isn't on screen, so invalidate first. */
+    static void layout(java.awt.Component c) {
+        invalidateAll(c);
+        doLayouts(c);
+    }
+
+    static void invalidateAll(java.awt.Component c) {
+        c.invalidate();
+        if (c instanceof java.awt.Container) {
+            for (java.awt.Component k : ((java.awt.Container) c).getComponents()) invalidateAll(k);
+        }
+    }
+
+    static void doLayouts(java.awt.Component c) {
+        c.doLayout();
+        if (c instanceof java.awt.Container) {
+            for (java.awt.Component k : ((java.awt.Container) c).getComponents()) doLayouts(k);
+        }
+    }
+
+    /**
+     * Every showing component under {@code c}: one that sticks out of the screen (or was laid
+     * out with no room) is "clipped" — content the operator could only reach by scrolling,
+     * which nothing here does; any scroll pane or scroll bar is named; every label's text.
+     */
+    static void walk(java.awt.Component root, java.awt.Component c, List<Object> clipped,
+            List<Object> scrollers, List<Object> texts) {
+        if (!c.isVisible()) return;
+        if (c instanceof javax.swing.JScrollPane || c instanceof javax.swing.JScrollBar
+                || c instanceof javax.swing.JViewport) {
+            scrollers.add(c.getClass().getSimpleName());
+        }
+        java.awt.Rectangle r = javax.swing.SwingUtilities.convertRectangle(
+                c.getParent() == null ? c : c.getParent(), c.getBounds(), root);
+        boolean leaf = !(c instanceof java.awt.Container)
+                || ((java.awt.Container) c).getComponentCount() == 0;
+        if (c instanceof javax.swing.JLabel) texts.add(((javax.swing.JLabel) c).getText());
+        if (c instanceof javax.swing.AbstractButton) texts.add(((javax.swing.AbstractButton) c).getText());
+        if (leaf && c != root && !(c instanceof javax.swing.Box.Filler)) {
+            boolean inside = r.x >= 0 && r.y >= 0 && r.x + r.width <= root.getWidth()
+                    && r.y + r.height <= root.getHeight();
+            boolean squashed = r.width <= 0 || r.height <= 0;
+            if (!inside || squashed) {
+                String what = c instanceof javax.swing.JLabel ? ((javax.swing.JLabel) c).getText()
+                        : c instanceof javax.swing.AbstractButton ? ((javax.swing.AbstractButton) c).getText()
+                        : c.getClass().getName();
+                clipped.add(what + " @ " + r.x + "," + r.y + " " + r.width + "x" + r.height);
+            }
+        }
+        if (c instanceof java.awt.Container) {
+            for (java.awt.Component k : ((java.awt.Container) c).getComponents()) {
+                // only the card that is showing: CardLayout hides the others
+                walk(root, k, clipped, scrollers, texts);
+            }
+        }
     }
 }
 """
@@ -437,10 +605,10 @@ def java_client(tmp_path_factory):
     if not JAVAC:
         pytest.skip("javac is not installed")
     root = tmp_path_factory.mktemp("java")
-    pkg = root / "src" / "com" / "nickarmenta" / "perceptronic"
+    pkg = root / "src" / "io" / "advin" / "perceptronic"
     pkg.mkdir(parents=True)
     (pkg / "Harness.java").write_text(HARNESS, encoding="utf-8")
-    for name in PURE_JAVA:
+    for name in (*PURE_JAVA, *SCREEN_JAVA):
         shutil.copy(JAVA / name, pkg / name)
     classes = root / "classes"
     subprocess.run(
@@ -462,7 +630,14 @@ def java_client(tmp_path_factory):
 
     def run(*args: str):
         proc = subprocess.run(
-            ["java", "-cp", str(classes), "com.nickarmenta.perceptronic.Harness", *args],
+            [
+                "java",
+                "-Djava.awt.headless=true",
+                "-cp",
+                str(classes),
+                "io.advin.perceptronic.Harness",
+                *args,
+            ],
             capture_output=True,
             timeout=60,
         )
@@ -548,16 +723,41 @@ def test_target_text_says_which_check_judged_reach(java_client):
     assert text.endswith("OUT OF REACH  (0.50 m datasheet radius, UR3E — no IK answer)")
 
 
-def test_failures_explain_themselves(java_client):
-    refused = java_client("explain", "refused", "http://127.0.0.1:7621")
-    assert "connection refused" in refused and "the robot controller itself" in refused
+def test_a_lost_camera_computer_says_what_to_check_and_the_long_story_goes_to_the_log(java_client):
+    """Nick, 2026-09-30: "more helpful suggestions ... like check your firewall, IP address,
+    cables, etc. and keep the verbose errors in the logs"."""
+    silent = java_client("explain", "timeout", "http://10.0.0.9:7621")
+    assert silent["summary"] == "No answer from the camera computer at 10.0.0.9."
+    cables, address, firewall = silent["checks"]
+    assert cables.startswith("Cables:") and "network cable" in cables
+    assert address.startswith("IP address:") and "10.0.0.9" in address
+    assert firewall.startswith("Firewall:") and "7621" in firewall and "7622" in firewall
+    assert silent["text"] == silent["summary"] + "".join(f"\n• {c}" for c in silent["checks"])
+    # nothing a technician needs is lost, and none of it is on the screen
+    assert "SocketTimeoutException" in silent["detail"] and "--bind 0.0.0.0" in silent["detail"]
+    assert silent["logged"] == [silent["detail"]]
+    for noise in ("Exception", "--bind", "perceptronics", "http://"):
+        assert noise not in silent["text"]
+
+    itself = java_client("explain", "refused", "http://127.0.0.1:7621")
+    assert "robot controller itself" in itself["summary"]
+    assert itself["checks"][0].startswith("IP address: 127.0.0.1 is this robot")
     remote = java_client("explain", "refused", "http://192.168.3.10:7621")
-    assert "--bind 0.0.0.0" in remote
-    assert "resolve" in java_client("explain", "dns", "http://jetson:7621")
-    assert "firewall" in java_client("explain", "timeout", "http://10.0.0.9:7621")
-    assert "is not a URL" in java_client("explain", "url", "ht!tp://x")
+    assert "not the camera program" in remote["summary"]
+    assert [c.split(":")[0] for c in remote["checks"]] == ["IP address", "Camera program", "Firewall"]
+    assert "loopback" in remote["detail"]
+    dns = java_client("explain", "dns", "http://jetson:7621")
+    assert "jetson" in dns["summary"] and dns["checks"][0].startswith("IP address:")
+    assert "is not an address" in java_client("explain", "url", "ht!tp://x")["summary"]
     # a real refused connection (nothing listens on port 1) takes the same path
-    assert "connection refused" in java_client("error", "127.0.0.1:1")
+    assert "robot controller itself" in java_client("error", "127.0.0.1:1")
+
+
+def test_a_camera_computer_with_no_picture_points_at_the_camera_cable_not_the_network(java_client):
+    out = java_client("nopicture", "http://192.168.3.10:7621")
+    assert out["text"].startswith("The camera computer is on, but its camera gives no picture.")
+    assert "USB" in out["text"] and "Firewall" not in out["text"]
+    assert "Frame didn't arrive within 5000" in out["logged"][-1] and "5000" not in out["text"]
 
 
 # -- the Java client against the real cockpit HTTP server ----------------------------------
@@ -609,6 +809,9 @@ def test_release_check_publishes_exactly_the_committed_jar_for_its_version():
     out = urcap5.release_check(f"urcap5-v{version}", SRC, DIST.parent)
     assert out["version"] == version and Path(out["path"]) == DIST
     assert out["sha256"] == hashlib.sha256(DIST.read_bytes()).hexdigest()
+    # ... and the stick's auto-install file for that jar, which the release attaches beside it
+    assert Path(out["stick"]) == DIST.parent / urcap5.MAGIC_NAME
+    assert out["sha256"] in Path(out["stick"]).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -637,6 +840,14 @@ def test_release_check_refuses_a_stale_or_missing_jar(tmp_path):
     dist = tmp_path / "dist"
     dist.mkdir()
     shutil.copy(DIST, dist / DIST.name)
+    with pytest.raises(urcap5.Urcap5Error, match="urmagic_perceptronic.sh is not committed"):
+        urcap5.release_check(f"urcap5-v{version}", src, dist)  # a release without its stick file
+    stick = dist / urcap5.MAGIC_NAME
+    good = (DIST.parent / urcap5.MAGIC_NAME).read_text(encoding="utf-8")
+    stick.write_text(good.replace(hashlib.sha256(DIST.read_bytes()).hexdigest(), "0" * 64), encoding="utf-8")
+    with pytest.raises(urcap5.Urcap5Error, match="is not the one for"):
+        urcap5.release_check(f"urcap5-v{version}", src, dist)  # ... or one written for another jar
+    stick.write_text(good, encoding="utf-8")
     urcap5.release_check(f"urcap5-v{version}", src, dist)  # a faithful copy passes
     java = next((src / "src").rglob("PickScript.java"))
     java.write_text(java.read_text(encoding="utf-8") + "\n// edited after the build\n", encoding="utf-8")
@@ -700,5 +911,7 @@ def test_feed_poller_streams_frames_and_stops(java_client, cockpit):
 def test_feed_poller_explains_a_dead_cockpit_and_keeps_going(java_client):
     got = java_client("poll", "http://127.0.0.1:9", "0")  # port 9: nothing listens
     assert got["events"], got
-    assert got["events"][0].startswith("failed nothing answers at http://127.0.0.1:9"), got["events"]
+    assert got["events"][0].startswith("failed Nothing on the robot controller itself answers at"), got[
+        "events"
+    ]
     assert got["was_running"] and got["stopped"]

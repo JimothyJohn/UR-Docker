@@ -1,38 +1,48 @@
-# Bring a Windows laptop up as the cell's brain: uv (+ Python), the Intel RealSense
-# SDK 2.0 (realsense2.dll), the repo's venv, then the pre-flight doctor.
+# Bring a Windows laptop up as the cell's brain: Python, the Intel RealSense SDK 2.0
+# (realsense2.dll), then the pre-flight doctor. Nothing else is installed: the package
+# is stdlib-only and runs from this folder.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1 -Cell ur20
 #
 # Idempotent: re-run it after plugging the camera in or fixing the network.
-# No admin needed for uv/venv; the RealSense SDK installer asks for elevation itself.
+# Python comes from winget; the RealSense SDK installer asks for elevation itself.
 [CmdletBinding()]
 param(
     [string]$Cell = "sim",
     # librealsense release whose Windows installer we fetch (GitHub Releases asset name pattern:
     # RealSense.SDK-WIN10-<ver>.<build>.exe). Keep in step with Dockerfile.perceptronics's LIBREALSENSE_REF.
     [string]$SdkVersion = "2.58.4",
+    # The winget package installed when no Python >= 3.10 is found.
+    [string]$PythonPackage = "Python.Python.3.13",
     [switch]$SkipSdk,
     [switch]$Stream
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
+. "$PSScriptRoot\_python.ps1"
 
 function Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
 
-# ---- 1. uv -----------------------------------------------------------------
-Step "uv"
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+# ---- 1. Python ---------------------------------------------------------------
+Step "Python"
+$python = Find-Python
+if (-not $python) {
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        winget install --id astral-sh.uv -e --accept-source-agreements --accept-package-agreements
-    } else {
-        Write-Host "winget not available; installing uv with the official script"
-        powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+        Write-Host "no Python 3.10+ found; installing $PythonPackage with winget"
+        winget install --id $PythonPackage -e --accept-source-agreements --accept-package-agreements
+        Update-PathFromRegistry
+        $python = Find-Python
     }
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + $env:Path
+    if (-not $python) {
+        Write-Host "Python 3.10 or newer is needed and could not be installed automatically." -ForegroundColor Red
+        Write-Host "Install it from https://www.python.org/downloads/windows/ (tick 'Add python.exe to PATH')," -ForegroundColor Yellow
+        Write-Host "then run this setup again." -ForegroundColor Yellow
+        exit 1
+    }
 }
-uv --version
+Invoke-Python $python @("--version")
 
 # ---- 2. Intel RealSense SDK 2.0 (realsense2.dll) ----------------------------
 $sdkDll = "C:\Program Files (x86)\Intel RealSense SDK 2.0\bin\x64\realsense2.dll"
@@ -61,13 +71,10 @@ if (-not $SkipSdk) {
     }
 }
 
-# ---- 3. venv -----------------------------------------------------------------
-Step "uv sync"
-uv sync
-
-# ---- 4. pre-flight -------------------------------------------------------------
+# ---- 3. pre-flight -------------------------------------------------------------
 Step "doctor ($Cell)"
-$args = @("run", "perceptronics", "--cell", $Cell, "doctor")
-if ($Stream) { $args += "--stream" }
-& uv @args
+$doctor = @("-m", "perceptronics", "--cell", $Cell, "doctor")
+if ($Stream) { $doctor += "--stream" }
+Invoke-Python $python $doctor
 Write-Host "`nnext: scripts\cockpit.ps1 -Cell $Cell    (the pilot's seat, opens the browser)" -ForegroundColor Green
+exit 0

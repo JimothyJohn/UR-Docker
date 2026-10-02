@@ -33,3 +33,6 @@ captures/
 # Local build output (the downloadable URCap is committed under urcap/dist/)
 target/
 *.wic
+
+# The product page's build output (site/site.sh build)
+site/_build/

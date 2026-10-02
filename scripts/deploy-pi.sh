@@ -88,16 +88,16 @@ case "$mode" in
         ;;
 esac
 
-command -v uv >/dev/null || die "uv not found (https://docs.astral.sh/uv/)"
+python3 -m pip --version >/dev/null 2>&1 || die "python3 with pip not found (needed to build the wheel)"
 arch="$(ssh "${ssh_opts[@]}" "$target" uname -m)"
 [ "$arch" = aarch64 ] || log "warning: ${target} is ${arch}, not aarch64 — install.sh builds natively, carrying on"
 
 stage_local="$(mktemp -d)"
 trap 'rm -rf "$stage_local"' EXIT
-log "building the wheel (uv build)"
-(cd "$repo" && uv build --wheel --out-dir "$stage_local" -q)
+log "building the wheel (pip wheel)"
+python3 -m pip wheel "$repo" --no-deps --wheel-dir "$stage_local" -q
 wheel="$(find "$stage_local" -maxdepth 1 -name '*-py3-none-any.whl' | head -n 1)"
-[ -n "$wheel" ] || die "uv build produced no pure-Python wheel"
+[ -n "$wheel" ] || die "pip wheel produced no pure-Python wheel"
 log "built $(basename "$wheel")"
 
 stage_remote="$(ssh "${ssh_opts[@]}" "$target" 'mktemp -d /tmp/perceptronics-deploy.XXXXXX')"

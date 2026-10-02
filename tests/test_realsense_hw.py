@@ -3,7 +3,7 @@
 Marked ``realsense`` and skipped automatically when the SDK is missing or no
 camera can be opened (on macOS that means: not running as root). Run with
 
-    sudo uv run pytest -m realsense -q
+    sudo python3 -m pytest -m realsense -q
 """
 
 from __future__ import annotations

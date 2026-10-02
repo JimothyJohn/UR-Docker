@@ -232,3 +232,20 @@ def test_shellcheck_clean():
         pytest.skip("shellcheck not installed")
     for script in (MAGIC, USB, ROOT / "scripts" / "urcapx-autoinstall.sh"):
         subprocess.run(["shellcheck", str(script)], check=True)
+
+
+def test_the_committed_stick_file_is_the_template_filled_in_for_the_committed_jar():
+    """urcap/dist/urmagic_perceptronic.sh is what a user copies onto a stick by hand: it must
+    name the committed jar, carry its sha256 and the bundle id — `make urcap5-package` writes it."""
+    sys.path.insert(0, str(ROOT / "urcap"))
+    import urcap5
+
+    props = urcap5.read_properties(PROPS.read_text())
+    jar = ROOT / "urcap" / "dist" / urcap5.dist_name(props)
+    committed = (ROOT / "urcap" / "dist" / urcap5.MAGIC_NAME).read_text()
+    expected = urcap5.render_magic(MAGIC.read_text(), jar, _symbolic_name())
+    assert committed == expected, "run `make urcap5-package`"
+    assert not re.findall(r"@[A-Z_0-9]+@", committed)
+    # ... and it is what scripts/urcap5-usb.sh's sed writes: same three values, nothing else
+    assert f'URCAP_FILE="{jar.name}"' in committed and f'SYMBOLIC_NAME="{_symbolic_name()}"' in committed
+    assert hashlib.sha256(jar.read_bytes()).hexdigest() in committed

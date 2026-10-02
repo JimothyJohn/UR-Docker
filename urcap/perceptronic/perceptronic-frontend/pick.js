@@ -1,27 +1,29 @@
-// Perceptronic Pick — Program Node presenters, plain custom elements like main.js.
+// 3D Pick — the Program Node's presenter, plain custom elements like main.js.
 //
 // PolyScope X draws a program node's presenter *inside its tree row* (an
-// `ur-inline-presenter` in a 48 px row, 10.13), so the Pick node's row is one line — the
-// part, the picture points, the order, the verdict — with a button that opens the real
-// screen as a PolyScope dialog (`presenterAPI.dialogService.openCustomDialog(tag,
-// inputData, options)`: PolyScope creates the element, sets `inputData`, `presenterApi`
-// (a WebComponentDialogAPI) and `afterOpen` on it, and closes it from its own footer).
-// The dialog is the PolyScope 5 node's screen in the browser: the camera computer's live
-// picture with the parts the program would find outlined and numbered in the pick order
-// (`GET /api/pick/scene?opts=<the program's own request options>`), the picture points
-// (taught from where the arm is — PolyScope's joint positions — Go = UR's auto-move
-// screen), the pick-order tiles, Check approach (the approach over part #1 through
-// PolyScope's inverse kinematics + auto-move), and Options (the part's size, approach,
-// gripper, motion). It saves through the row's `programNodeService.updateNode` as it goes.
-// The cockpit's address, the pick areas and the reach come from the Perceptronic
-// application node. The settings, the request options and the script are pickscript.js —
-// shared with the behavior worker, so what the screen shows is what the program sends.
+// `ur-inline-presenter` in a 48 px row, 10.13), so the node's row is one line — the part,
+// the picture points, the order, the verdict — with a button that opens the real screen as
+// a PolyScope dialog (`presenterAPI.dialogService.openCustomDialog(tag, inputData,
+// options)`: PolyScope creates the element, sets `inputData`, `presenterApi` (a
+// WebComponentDialogAPI) and `afterOpen` on it, and closes it from its own footer).
+// The dialog is the PolyScope 5 node's screen in the browser (0.5.0 = its 0.7.0), and like
+// it nothing in it scrolls: the camera computer's live picture — or, with the toggle in its
+// top right corner, the depth as a heatmap — carrying only the candidates that are nearly
+// the part and are not going to be picked, each outlined with why
+// (`GET /api/pick/scene?opts=<the program's own request options>`); the picture points as a
+// fixed grid of numbered buttons (taught from where the arm is — PolyScope's joint
+// positions — Go = UR's auto-move screen); the pick-order tiles; Check approach (the
+// approach over the first part through PolyScope's inverse kinematics + auto-move); and
+// Options: two tabs, Part and Approach. It saves through the row's
+// `programNodeService.updateNode` as it goes. The cockpit's address and the pick areas come
+// from the Perceptronic application node. The settings, the request options and the script
+// are pickscript.js — shared with the behavior worker, so what the screen shows is what the
+// program sends.
 (() => {
-  const PICK_TAG = "nickarmenta-perceptronic-pick";
-  const DIALOG_TAG = "nickarmenta-perceptronic-pick-dialog";
-  const AFTER_TAG = "nickarmenta-perceptronic-after";
-  const APP_TAG = "nickarmenta-perceptronic";
-  const ARCHIVE_PATH = "/nickarmenta/perceptronic/perceptronic-frontend/";
+  const PICK_TAG = "advin-perceptronic-pick";
+  const DIALOG_TAG = "advin-perceptronic-pick-dialog";
+  const APP_TAG = "advin-perceptronic";
+  const ARCHIVE_PATH = "/advin/perceptronic/perceptronic-frontend/";
   const POLL_TIMEOUT_MS = 1500;
   const SCENE_EVERY_MS = 700;
   const APP_EVERY_MS = 4000;
@@ -47,46 +49,56 @@
   }));
 
   const CSS = `
-    .pk { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1f2a37; padding: 4px 8px; }
+    .pk { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1f2a37; padding: 4px 8px; overflow: hidden; }
     .pk h2 { margin: 0 0 8px; font-size: 18px; display: flex; align-items: center; gap: 10px; }
     .pk .dot { width: 10px; height: 10px; border-radius: 50%; background: #c0c8d2; display: inline-block; }
     .pk .dot.live { background: #1d9a5a; } .pk .dot.dead { background: #d64545; }
-    .pk .cols { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-    .pk .stage { position: relative; display: inline-block; background: #0f1620; border-radius: 8px; overflow: hidden; flex: 0 0 auto; }
-    .pk .stage img { display: block; width: 640px; max-width: 100%; height: auto; }
+    .pk .cols { display: flex; gap: 16px; align-items: flex-start; }
+    .pk .stage { position: relative; background: #0f1620; border-radius: 8px; overflow: hidden; flex: 1 1 640px; min-width: 0; max-width: 760px; aspect-ratio: 848 / 480; }
+    .pk .stage img { display: block; width: 100%; height: 100%; object-fit: contain; }
     .pk .stage canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
-    .pk .stage .caption { position: absolute; left: 8px; padding: 3px 8px; background: rgba(15,22,32,.8); color: #e8eef6; border-radius: 4px; font-size: 12px; pointer-events: none; }
-    .pk .stage .caption.top { top: 8px; } .pk .stage .caption.bottom { bottom: 8px; }
-    .pk .side { flex: 1 1 320px; min-width: 300px; }
+    .pk .stage .view { position: absolute; right: 10px; top: 10px; display: inline-flex; padding: 3px; border-radius: 20px; background: rgba(13,19,26,.85); }
+    .pk .stage .view button { padding: 6px 14px; border: 0; border-radius: 16px; background: none; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    .pk .stage .view button.on { background: #1f5fbf; }
+    .pk .stage .nocam { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #1a2029; }
+    .pk .stage .nocam > div { max-width: 86%; padding: 14px 20px; border: 3px solid #d64545; border-radius: 14px; background: #0d131a; color: #c9d3de; font-size: 13px; white-space: pre-wrap; }
+    .pk .stage .nocam b { display: block; color: #fff; font-size: 22px; text-align: center; margin-bottom: 6px; }
+    .pk .side { flex: 0 0 320px; width: 320px; }
     .pk .card { border: 1px solid #d5dce5; border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
     .pk .card h3 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; justify-content: space-between; }
     .pk .card h3 small { color: #5b6b7d; font-weight: normal; }
-    .pk .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+    .pk .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
     .pk button { padding: 8px 12px; border: 1px solid #8e9bab; border-radius: 6px; background: #fff; font: inherit; cursor: pointer; }
     .pk button:disabled { opacity: .45; cursor: default; }
     .pk button.primary { background: #1f5fbf; color: #fff; border-color: #1f5fbf; }
     .pk button.on { background: #1f5fbf; color: #fff; border-color: #1f5fbf; }
-    .pk button.small { padding: 4px 8px; font-size: 12.5px; }
-    .pk .points { list-style: none; margin: 0; padding: 0; }
-    .pk .points li { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
-    .pk .points li.sel { background: #eef2f7; }
-    .pk .points li .n { width: 22px; height: 22px; border-radius: 50%; background: #1f5fbf; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex: 0 0 auto; }
-    .pk .points li .area { flex: 1; color: #5b6b7d; font-size: 12.5px; }
-    .pk .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 84px)); gap: 6px; }
+    .pk button.small { padding: 6px 10px; font-size: 12.5px; }
+    .pk .chips { display: grid; grid-template-columns: repeat(6, 1fr); grid-auto-rows: 40px; gap: 5px; height: 85px; }
+    .pk .chips button { padding: 0; font-weight: 700; border-color: #d5dce5; border-radius: 10px; }
+    .pk .chips button.sel { background: #1f5fbf; color: #fff; border-color: #1f5fbf; }
+    .pk .chips button.add { background: #e6efff; color: #1f5fbf; border-color: #1f5fbf; font-size: 18px; }
+    .pk .point { display: flex; align-items: center; gap: 6px; height: 40px; margin-top: 5px; }
+    .pk .point .what { flex: 1; min-width: 0; cursor: pointer; }
+    .pk .point .what b { display: block; font-size: 13px; }
+    .pk .point .what span { color: #5b6b7d; font-size: 12px; }
+    .pk .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
     .pk .tiles button { padding: 0; border: 0; background: none; line-height: 0; }
     .pk .tiles button svg { width: 100%; height: auto; }
-    .pk .withart { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }
-    .pk .withart .art { grid-row: 1 / span 6; }
-    .pk .withart .art svg { display: block; }
-    .pk .status { margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: #eef2f7; white-space: pre-wrap; }
+    .pk .tab { display: flex; gap: 24px; align-items: flex-start; }
+    .pk .tab .fields { flex: 0 0 460px; }
+    .pk .tab .art svg { display: block; }
+    .pk .status { margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: #eef2f7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .pk .status.warn { background: #fff4d6; } .pk .status.err { background: #fde2e2; } .pk .status.ok { background: #e3f5ea; }
     .pk .num { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; padding: 4px 0; border-bottom: 1px solid #eef2f7; }
     .pk .num .lbl { font-size: 13px; } .pk .num .lbl small { display: block; color: #5b6b7d; font-size: 11.5px; }
     .pk .stepper { display: inline-flex; align-items: center; gap: 4px; }
     .pk .stepper input { width: 64px; padding: 5px 6px; border: 1px solid #b9c3cf; border-radius: 6px; font: inherit; text-align: right; }
-    .pk .stepper button { padding: 4px 9px; }
+    .pk .stepper button { padding: 4px 11px; }
+    .pk .seg { display: inline-flex; }
     .pk .seg button { border-radius: 0; } .pk .seg button:first-child { border-radius: 6px 0 0 6px; } .pk .seg button:last-child { border-radius: 0 6px 6px 0; }
-    .pk .switch { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .pk .check { display: flex; align-items: center; gap: 10px; margin: 10px 0 2px; cursor: pointer; }
+    .pk .check input { width: 24px; height: 24px; }
+    .pk .check small { display: block; }
     .pk small { color: #5b6b7d; }
     .pk .hidden { display: none !important; }
     /* the tree row: one line, 48 px */
@@ -95,9 +107,6 @@
     .pkrow .verdict { overflow: hidden; text-overflow: ellipsis; color: #5b6b7d; font-size: 12.5px; flex: 1 1 auto; }
     .pkrow .verdict.warn { color: #9a6b00; } .pkrow .verdict.ok { color: #1d9a5a; }
     .pkrow button { padding: 6px 12px; border: 1px solid #1f5fbf; border-radius: 6px; background: #1f5fbf; color: #fff; font: inherit; cursor: pointer; flex: 0 0 auto; }
-    .pkrow .stepper { display: inline-flex; align-items: center; gap: 4px; }
-    .pkrow .stepper input { width: 48px; padding: 4px 6px; border: 1px solid #b9c3cf; border-radius: 6px; font: inherit; text-align: right; }
-    .pkrow .stepper button { padding: 3px 9px; background: #fff; color: #1f2a37; border-color: #8e9bab; }
   `;
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -220,13 +229,11 @@
       if (!this._built) return;
       const P = this._P;
       const st = P.settings(this.params(), this._app, pageHost());
-      const v = st.values;
-      const l = Math.max(v.partLengthMm, v.partWidthMm), w = Math.min(v.partLengthMm, v.partWidthMm);
       const np = st.points.length;
-      this.$("txt").textContent = `${P.num(l)}×${P.num(w)}×${P.num(v.partHeightMm)} mm · ${np} picture${np === 1 ? "" : "s"} · ${P.orderText(st.orderFirst, st.orderRows)}`;
+      this.$("txt").textContent = `${P.partWords(st)} · ${np} picture${np === 1 ? "" : "s"} · ${P.orderText(st.orderFirst, st.orderRows)}`;
       const why = P.problem(st);
       if (why) this.setVerdict(why, "warn");
-      else this.setVerdict(`ready · camera computer ${st.host}:${st.port} · ${st.gripper === "children" ? "your gripper nodes" : st.gripper === "digital" ? `digital output ${Math.round(v.gripperDo)}` : "Robotiq Hand-E"}`, "ok");
+      else this.setVerdict(`ready · camera computer ${st.host}:${st.port}`, "ok");
     }
 
     async startApp() {
@@ -293,7 +300,7 @@
         await this.ensureVariables();
         // the dialog edits this very node and saves through this API as it goes
         await api.dialogService.openCustomDialog(DIALOG_TAG, { node: this._node, api, app: this._app, row: this }, {
-          title: "Perceptronic Pick",
+          title: "3D Pick",
           dialogSize: "XL",
           confirmText: "Done",
           raiseForKeyboard: false,
@@ -333,6 +340,10 @@
       this._scene = null;
       this._sceneBusy = false;
       this._options = false;
+      this._tab = "part";
+      this._depth = false; // the picture's toggle: the depth as a heatmap instead of the camera's picture
+      this._nocam = null; // what to check while there is no picture (pickscript.js advise())
+      this._logged = "";
     }
 
     // -- what PolyScope sets on a custom dialog's element ------------------------------------
@@ -429,72 +440,69 @@
       this.innerHTML = `
         <style>${CSS}</style>
         <div class="pk">
-          <h2><span class="dot" data-pk="dot"></span> <span data-pk="title">Picture</span> <small data-pk="fps"></small>
-            <span style="flex:1"></span>
-            <button class="small" data-pk="toggle">Options</button>
-          </h2>
           <div data-pk="main">
             <div class="cols">
               <div class="stage" data-pk="stage">
                 <img data-pk="img" alt="wrist camera" draggable="false" />
                 <canvas data-pk="overlay"></canvas>
-                <div class="caption top" data-pk="cap-top">waiting for the camera computer…</div>
-                <div class="caption bottom" data-pk="cap-bottom"></div>
+                <div class="nocam" data-pk="nocam"><div><b>NO CAMERA CONNECTED</b><span data-pk="nocam-text">waiting for the camera computer…</span></div></div>
+                <div class="view" data-pk="view">
+                  <button data-view="picture" class="on">Picture</button><button data-view="depth">Depth</button>
+                </div>
               </div>
               <div class="side">
+                <h2><span class="dot" data-pk="dot"></span> 3D Pick <small>v${P.VERSION}</small></h2>
                 <div class="card">
                   <h3>Picture points <small data-pk="points-count"></small></h3>
-                  <ul class="points" data-pk="points"></ul>
-                  <div class="row">
-                    <button class="primary" data-pk="add">+ Add picture point here</button>
-                  </div>
-                  <small>Move the arm where the camera sees the parts, then Add. Tap a point's area to choose the pick area it looks at.</small>
+                  <div class="chips" data-pk="chips"></div>
+                  <div class="point" data-pk="point"></div>
                 </div>
                 <div class="card">
                   <h3>Pick order <small data-pk="order-text"></small></h3>
                   <div class="tiles" data-pk="tiles"></div>
                 </div>
                 <div class="row">
-                  <button data-pk="check" title="PolyScope's auto-move screen over part #1: hold Move to see the fingers arrive open, Approach mm over it">Check approach</button>
+                  <button data-pk="toggle">Options</button>
+                  <button data-pk="check" title="PolyScope's auto-move screen over the first part: hold Move to see the fingers arrive open, Approach mm over it">Check approach</button>
                 </div>
               </div>
             </div>
           </div>
           <div data-pk="options" class="hidden">
-            <div class="cols">
-              <div class="side">
-                <div class="card"><h3>Part <small>as it lies</small></h3>
-                  <div class="withart"><div data-pk="card-part"></div><div class="art" data-pk="part-art"></div></div></div>
-                <div class="card"><h3>Approach</h3>
-                  <div class="withart"><div data-pk="card-approach"></div><div class="art" data-pk="approach-art"></div></div></div>
+            <div class="row">
+              <button data-pk="back">‹ Back to the picture</button>
+              <span style="flex:1"></span>
+              <span class="seg" data-pk="tabs"><button data-tab="part">Part</button><button data-tab="approach">Approach</button></span>
+              <span style="flex:1"></span>
+              <button class="small" data-pk="reset">Reset to defaults</button>
+            </div>
+            <div class="card" data-pk="tab-part">
+              <h3>The part, as it lies on the table</h3>
+              <div class="tab">
+                <div class="fields">
+                  <span class="seg" data-pk="shapes"><button data-shape="box">Box</button><button data-shape="cyl">Cylinder</button></span>
+                  <div data-pk="card-part"></div>
+                </div>
+                <div class="art" data-pk="part-art"></div>
               </div>
-              <div class="side">
-                <div class="card" data-pk="card-gripper">
-                  <h3>Gripper</h3>
-                  <div class="row seg" data-pk="grippers">
-                    <button data-gripper="robotiq">Robotiq Hand-E</button>
-                    <button data-gripper="digital">Digital output</button>
-                    <button data-gripper="children">My own nodes</button>
-                  </div>
-                  <div data-pk="gripper-fields"></div>
-                  <small data-pk="gripper-note"></small>
+            </div>
+            <div class="card hidden" data-pk="tab-approach">
+              <h3>Approach and grip</h3>
+              <div class="tab">
+                <div class="fields">
+                  <div data-pk="card-approach"></div>
+                  <label class="check"><input type="checkbox" data-pk="gripCheck" /><span>Grip check<small>skip a part with less than the finger room on either side</small></span></label>
+                  <label class="check" data-pk="gripLongRow"><input type="checkbox" data-pk="gripLongSide" /><span>Grip across the long side<small>off: the fingers close across the short side</small></span></label>
+                  <label class="check"><input type="checkbox" data-pk="closeLook" /><span>Closer look<small>a second, nearer measurement before the approach</small></span></label>
                 </div>
-                <div class="card" data-pk="card-motion">
-                  <h3>Motion</h3>
-                  <div data-pk="motion-fields"></div>
-                  <label class="switch"><input type="checkbox" data-pk="popup" /> Popup when nothing is picked</label>
-                  <small>The routine after the pick goes inside this node; an <b>After picture N</b> node (toolbox) runs its part only for a pick from that picture point. <code>${P.FOUND_VARIABLE}</code> and <code>${P.LOC_VARIABLE}</code> are there for your own logic.</small>
-                  <div class="row"><button class="small" data-pk="reset">Reset to defaults</button></div>
-                </div>
+                <div class="art" data-pk="approach-art"></div>
               </div>
             </div>
           </div>
           <div class="status" data-pk="status"></div>
         </div>`;
-      const cards = { part: this.$("card-part"), approach: this.$("card-approach"), motion: this.$("motion-fields") };
-      P.NUMBERS.filter((n) => n.section !== "gripper").forEach((n) => cards[n.section].appendChild(this.stepper(n)));
-      const gf = this.$("gripper-fields");
-      P.NUMBERS.filter((n) => n.section === "gripper").forEach((n) => gf.appendChild(this.stepper(n)));
+      const cards = { part: this.$("card-part"), approach: this.$("card-approach") };
+      P.NUMBERS.forEach((n) => cards[n.section].appendChild(this.stepper(n)));
       const tiles = this.$("tiles");
       P.ORDER_TILES.forEach(([first, rows]) => {
         const b = document.createElement("button");
@@ -505,19 +513,34 @@
         b.addEventListener("click", () => { this.params().orderFirst = first; this.params().orderRows = rows; this.save(); this.sync(); });
         tiles.appendChild(b);
       });
-      this.$("toggle").addEventListener("click", () => { this._options = !this._options; this.sync(); });
-      this.$("add").addEventListener("click", () => this.addPoint());
+      this.$("toggle").addEventListener("click", () => { this._options = true; this.sync(); });
+      this.$("back").addEventListener("click", () => { this._options = false; this.sync(); });
+      this.$("tabs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { this._tab = b.dataset.tab; this.sync(); }));
       this.$("check").addEventListener("click", () => this.checkApproach());
       this.$("reset").addEventListener("click", () => {
-        this.params().values = P.defaults();
-        this.params().popupOnFail = true;
+        const p = this.params();
+        p.values = P.defaults();
+        p.shape = "box";
+        p.gripCheck = true;
+        p.gripLongSide = false;
+        p.closeLook = true;
         this.save();
         this.sync();
       });
-      this.$("popup").addEventListener("change", (ev) => { this.params().popupOnFail = !!ev.target.checked; this.save(); this.sync(); });
-      this.$("grippers").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-        this.params().gripper = b.dataset.gripper;
+      this.$("shapes").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+        this.params().shape = b.dataset.shape;
         this.save();
+        this.sync();
+      }));
+      ["gripCheck", "gripLongSide", "closeLook"].forEach((key) => this.$(key).addEventListener("change", (ev) => {
+        this.params()[key] = !!ev.target.checked;
+        this.save();
+        this.sync();
+      }));
+      // the Picture / Depth toggle, inside the picture's frame
+      this.$("view").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+        this._depth = b.dataset.view === "depth";
+        this._seq = 0;
         this.sync();
       }));
     }
@@ -527,7 +550,7 @@
       row.className = "num";
       row.dataset.key = n.key;
       row.innerHTML = `
-        <div class="lbl">${esc(n.label)}${n.unit ? ` <small style="display:inline">(${esc(n.unit)})</small>` : ""}<small>${esc(n.help)}</small></div>
+        <div class="lbl"><span data-lbl>${esc(n.label)}</span>${n.unit ? ` <small style="display:inline">(${esc(n.unit)})</small>` : ""}<small data-help>${esc(n.help)}</small></div>
         <div class="stepper"><button data-step="-1">−</button><input type="text" inputmode="decimal" /><button data-step="1">+</button></div>`;
       const input = row.querySelector("input");
       const set = (v) => {
@@ -551,11 +574,32 @@
       el.className = "status" + (kind ? ` ${kind}` : "");
     }
 
-    setLive(live, fps) {
+    /** An action's own message: it stays for a few seconds before the scene's count takes the line back. */
+    tell(text, kind) {
+      this._hold = Date.now() + 5000;
+      this.setStatus(text, kind);
+    }
+
+    setLive(live) {
       const dot = this.$("dot");
       if (dot) dot.className = "dot " + (live ? "live" : "dead");
-      const f = this.$("fps");
-      if (f) f.textContent = live && fps ? `${Number(fps).toFixed(1)} fps` : "";
+      const card = this.$("nocam");
+      if (card) card.classList.toggle("hidden", !!live);
+      const view = this.$("view");
+      if (view) view.classList.toggle("hidden", !live);
+    }
+
+    /** No picture: say what to check where the picture would be; the long story goes to the console. */
+    noCamera(advice) {
+      this._nocam = advice;
+      this.setLive(false);
+      const t = this.$("nocam-text");
+      if (t) t.textContent = advice.text;
+      if (advice.detail !== this._logged) {
+        this._logged = advice.detail;
+        console.warn(`Perceptronic: ${advice.detail}`);
+      }
+      this.setStatus(advice.summary, "err");
     }
 
     /** Everything that reflects the node's state. Cheap; called after every change. */
@@ -566,63 +610,89 @@
       const st = this.settings();
       this.$("main").classList.toggle("hidden", this._options);
       this.$("options").classList.toggle("hidden", !this._options);
-      this.$("toggle").textContent = this._options ? "Picture" : "Options";
-      this.$("title").textContent = this._options ? "Options" : "Picture";
-      // picture points
-      const sel = Math.max(0, Math.min((p.points || []).length - 1, p.selectedPoint || 0));
+      this.$("tab-part").classList.toggle("hidden", this._tab !== "part");
+      this.$("tab-approach").classList.toggle("hidden", this._tab !== "approach");
+      this.$("tabs").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.tab === this._tab));
+      this.$("view").querySelectorAll("button").forEach((b) => b.classList.toggle("on", (b.dataset.view === "depth") === this._depth));
+      // picture points: a fixed grid of numbered buttons, the selected one's actions under it
+      const points = p.points || [];
+      const sel = Math.max(0, Math.min(points.length - 1, p.selectedPoint || 0));
       const areas = P.areasOf(this._app);
-      const ul = this.$("points");
-      ul.innerHTML = "";
-      (p.points || []).forEach((pt, i) => {
-        const li = document.createElement("li");
-        li.className = i === sel ? "sel" : "";
+      const chips = this.$("chips");
+      chips.innerHTML = "";
+      points.forEach((pt, i) => {
+        const b = document.createElement("button");
+        b.textContent = String(i + 1);
+        b.className = i === sel ? "sel" : "";
+        b.title = `picture point ${i + 1}`;
+        b.addEventListener("click", () => { p.selectedPoint = i; this.save(); this.sync(); });
+        chips.appendChild(b);
+      });
+      if (points.length < P.MAX_POINTS) {
+        const add = document.createElement("button");
+        add.textContent = "+";
+        add.className = "add";
+        add.dataset.pk = "add";
+        add.title = "add a picture point where the arm is now";
+        add.addEventListener("click", () => this.addPoint());
+        chips.appendChild(add);
+      }
+      const row = this.$("point");
+      if (!points.length) {
+        row.innerHTML = "<small>tap + with the arm where the camera sees the parts</small>";
+      } else {
+        const pt = points[sel];
         const area = pt.area >= 0 && pt.area < areas.length ? areas[pt.area] : null;
         const areaText = area ? (area.plane ? area.name : `${area.name} (not taught)`) : "live table";
-        li.innerHTML = `<span class="n">${i + 1}</span><span class="area" title="tap to choose the pick area">${esc(areaText)}</span>
+        row.innerHTML = `<span class="what" title="tap to choose the pick area this picture looks at"><b>Picture ${sel + 1}</b><span>${esc(areaText)} ›</span></span>
           <button class="small" data-act="go" title="PolyScope's auto-move screen to this picture point">Go</button>
           <button class="small" data-act="here" title="retake this point from where the arm is">Here</button>
           <button class="small" data-act="del" title="remove">✕</button>`;
-        li.addEventListener("click", () => { p.selectedPoint = i; this.save(); this.sync(); });
-        li.querySelector(".area").addEventListener("click", (ev) => { ev.stopPropagation(); this.cycleArea(i); });
-        li.querySelector('[data-act="go"]').addEventListener("click", (ev) => { ev.stopPropagation(); this.goPoint(i); });
-        li.querySelector('[data-act="here"]').addEventListener("click", (ev) => { ev.stopPropagation(); this.addPoint(i); });
-        li.querySelector('[data-act="del"]').addEventListener("click", (ev) => { ev.stopPropagation(); this.removePoint(i); });
-        ul.appendChild(li);
-      });
-      this.$("points-count").textContent = `${(p.points || []).length} of ${P.MAX_POINTS}`;
-      this.$("add").disabled = (p.points || []).length >= P.MAX_POINTS;
+        row.querySelector(".what").addEventListener("click", () => this.cycleArea(sel));
+        row.querySelector('[data-act="go"]').addEventListener("click", () => this.goPoint(sel));
+        row.querySelector('[data-act="here"]').addEventListener("click", () => this.addPoint(sel));
+        row.querySelector('[data-act="del"]').addEventListener("click", () => this.removePoint(sel));
+      }
+      this.$("points-count").textContent = `${points.length} of ${P.MAX_POINTS}`;
       // order
       this.$("tiles").querySelectorAll("button").forEach((b) => {
         const on = b.dataset.first === st.orderFirst && b.dataset.rows === st.orderRows;
         if (b.dataset.on !== String(on)) { b.dataset.on = String(on); b.innerHTML = P.svgOrderTile(b.dataset.first, b.dataset.rows, on, 62, 50); }
       });
-      // the drawings that explain the numbers as they change
-      const v = st.values;
-      this.$("part-art").innerHTML = P.svgPart(v.partLengthMm, v.partWidthMm, v.partHeightMm, 140, 140);
-      this.$("approach-art").innerHTML = P.svgApproach(v.approachMm, v.gripBelowTopMm, v.liftMm, v.partHeightMm, Math.min(v.partLengthMm, v.partWidthMm), v.strokeMm, 150, 170);
       this.$("order-text").textContent = P.orderText(st.orderFirst, st.orderRows);
-      // options
-      this.querySelectorAll(".num").forEach((row) => {
-        const n = P.BY_KEY[row.dataset.key];
-        const v = st.values[n.key];
-        row.querySelector("input").value = n.step >= 1 ? P.num(v) : String(Math.round(v * 100) / 100);
+      // the two option tabs
+      const v = st.values, round = P.round(st);
+      this.$("shapes").querySelectorAll("button").forEach((b) => b.classList.toggle("on", (b.dataset.shape === "cyl") === round));
+      this.querySelectorAll(".num").forEach((r) => {
+        const n = P.BY_KEY[r.dataset.key];
+        const val = st.values[n.key];
+        r.querySelector("input").value = n.step >= 1 ? P.num(val) : String(Math.round(val * 100) / 100);
+        if (n.key === "partLengthMm") {
+          r.querySelector("[data-lbl]").textContent = round ? "Diameter" : "Length";
+          r.querySelector("[data-help]").textContent = round ? "across the top, standing on its end" : n.help;
+        }
+        if (n.key === "partWidthMm") r.classList.toggle("hidden", round);
+        if (n.key === "fingerRoomMm") r.classList.toggle("hidden", !st.gripCheck);
       });
-      const fields = P.GRIPPER_FIELDS[st.gripper] || [];
-      this.$("gripper-fields").querySelectorAll(".num").forEach((row) => row.classList.toggle("hidden", !fields.includes(row.dataset.key)));
-      this.$("grippers").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.gripper === st.gripper));
-      this.$("gripper-note").textContent = st.gripper === "children"
-        ? "put your gripper's Close nodes inside this node: they run at the grip, with your TCP"
-        : st.gripper === "digital" ? "the output goes True to close, False to open" : "the Hand-E through its URCap's socket on the controller";
-      this.$("popup").checked = st.popupOnFail;
+      this.$("part-art").innerHTML = P.svgPart(P.longSide(st), P.shortSide(st), v.partHeightMm, round, 300, 240);
+      const longWay = st.gripLongSide && !round;
+      this.$("approach-art").innerHTML = P.svgApproach(v.approachMm, v.gripBelowTopMm, v.partHeightMm,
+        longWay ? P.longSide(st) : P.shortSide(st), st.gripCheck ? v.fingerRoomMm : 0, 300, 240);
+      this.$("gripCheck").checked = st.gripCheck;
+      this.$("gripLongSide").checked = st.gripLongSide;
+      this.$("gripLongRow").classList.toggle("hidden", round); // a cylinder has no side to choose
+      this.$("closeLook").checked = st.closeLook;
       // the verdict
       const why = P.problem(st);
       this.$("check").disabled = !!why;
       if (why) this.setStatus(why, this._app ? "warn" : "");
-      else this.setStatus(`ready: ${P.partText(st)} · ${P.orderText(st.orderFirst, st.orderRows)} · camera computer ${st.host}:${st.port}`, "ok");
+      else if (this._nocam && !this._options) this.setStatus(this._nocam.summary, "err");
+      else if (this._options || !this._scene || !this._scene.ok) this.setStatus(`ready: ${P.partWords(st)} · ${P.orderText(st.orderFirst, st.orderRows)} · camera computer ${st.host}:${st.port}`, "ok");
+      else this.setStatus(P.sceneSummary(this._scene), (this._scene.parts || []).length ? "ok" : "warn");
       this.drawScene();
     }
 
-    // -- the application node (cockpit, areas, reach) --------------------------------------------
+    // -- the application node (cockpit, areas) ---------------------------------------------------
     async startApp() {
       while (!this._stopped && this.isConnected) {
         const app = await fetchAppNode(this._api || this._dialogApi);
@@ -654,9 +724,9 @@
         }
         await this.save();
         this.sync();
-        this.setStatus(`picture point ${(index === undefined ? points.length - 1 : index) + 1} taught at joints [${fmtVec(q, 3)}]`, "ok");
+        this.tell(`picture point ${(index === undefined ? points.length - 1 : index) + 1} taught at joints [${fmtVec(q, 3)}]`, "ok");
       } catch (err) {
-        this.setStatus(`picture point: ${err && err.message ? err.message : err}`, "err");
+        this.tell(`picture point: ${err && err.message ? err.message : err}`, "err");
       }
     }
     removePoint(i) {
@@ -680,26 +750,36 @@
     async goPoint(i) {
       const q = this.params().points[i].q;
       const rms = this.service("robotMoveService");
-      if (!rms || typeof rms.autoMove !== "function") { this.setStatus("PolyScope's move service is not on this API", "warn"); return; }
+      if (!rms || typeof rms.autoMove !== "function") { this.tell("PolyScope's move service is not on this API", "warn"); return; }
       try {
         this.params().selectedPoint = i;
         this.sync();
         await rms.autoMove(arrayToJoints(q));
-        this.setStatus(`PolyScope's move screen is open — hold Move To Position to go to picture point ${i + 1}`, "ok");
+        this.tell(`PolyScope's move screen is open — hold Move To Position to go to picture point ${i + 1}`, "ok");
       } catch (err) {
-        this.setStatus(`Go: ${err && err.message ? err.message : err}`, "err");
+        this.tell(`Go: ${err && err.message ? err.message : err}`, "err");
       }
     }
 
     // -- the feed and the scene ------------------------------------------------------------------
     async startFeed() {
       const img = this.$("img");
+      const P = this._P;
       while (!this._stopped && this.isConnected) {
         if (!this._app) { await sleep(500); continue; }
+        const base = this.cockpitUrl();
+        const depth = this._depth;
         try {
-          const r = await fetch(`${this.cockpitUrl()}/api/color.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`);
-          if (r.status === 503) { this.setLive(false); await sleep(500); continue; }
-          if (!r.ok) throw new Error(`HTTP ${r.status} on /api/color.png`);
+          const r = await fetch(`${base}/api/${depth ? "depth" : "color"}.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`);
+          if (r.status === 503) { this.noCamera(P.advise("nopicture", base, "HTTP 503: the cockpit has no frame")); await sleep(500); continue; }
+          if (r.status === 404 && depth) {
+            // a camera computer older than 0.7.0 has no heatmap: the picture instead
+            this._depth = false;
+            console.warn(`Perceptronic: ${base} answered 404 on /api/depth.png: it predates the depth view; update it`);
+            this.sync();
+            continue;
+          }
+          if (!r.ok) { this.noCamera(P.advise("outdated", base, `HTTP ${r.status} on /api/color.png`)); await sleep(1500); continue; }
           const seq = Number(r.headers.get("X-Seq") || 0);
           const blob = await r.blob();
           const url = URL.createObjectURL(blob);
@@ -708,12 +788,35 @@
           img.src = url;
           this._blobUrl = url;
           if (seq) this._seq = seq;
-          this.setLive(true, r.headers.get("X-Fps"));
+          const was = this._nocam;
+          this._nocam = null;
+          this.setLive(true);
+          if (was) this.sync();
         } catch (err) {
-          this.setLive(false);
-          this.$("cap-top").textContent = `no camera computer at ${this.cockpitUrl()} (${err && err.message ? err.message : err}) — set it in Application → Perceptronic`;
+          const why = err && err.message ? err.message : String(err);
+          let kind = "silent";
+          try { new URL(base); } catch (e) { kind = "badurl"; }
+          if (kind === "silent") kind = await this.probe(base);
+          this.noCamera(P.advise(kind, base, `${why} (page origin ${location.origin}; a cockpit must be started with --cors ${location.origin} --bind 0.0.0.0)`));
           await sleep(1500);
         }
+      }
+    }
+
+    // "Failed to fetch" is all the browser says, whether the cockpit refused this page's origin
+    // (CORS) or nothing answered. A no-cors request tells them apart: it resolves (opaque) when
+    // the server is up, whatever its CORS list, rejects at once when nothing listens, and hangs
+    // when the host is not there at all.
+    async probe(base) {
+      const ctl = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), 2500) : null;
+      try {
+        await fetch(`${base}/api/info`, { mode: "no-cors", cache: "no-store", signal: ctl ? ctl.signal : undefined });
+        return "cors";
+      } catch (e) {
+        return e && e.name === "AbortError" ? "silent" : "refused";
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     }
 
@@ -735,7 +838,9 @@
           p.pickPort = res.pick_port;
           await this.save();
         }
+        const told = this._P.sceneSummary(this._scene);
         this._scene = res;
+        if (res && res.ok && this._P.sceneSummary(res) !== told && Date.now() > (this._hold || 0)) this.sync();
       } catch (e) {
         this._scene = null;
       } finally {
@@ -744,6 +849,9 @@
       this.drawScene();
     }
 
+    /** What is drawn on the picture (0.6.0, Nick 2026-10-01): every part that will be picked
+     * in green with its number in the pick order, and every candidate that is nearly the part
+     * and will not be in yellow with why. Nothing else. */
     drawScene() {
       const img = this.$("img"), cv = this.$("overlay");
       if (!img || !cv) return;
@@ -754,41 +862,48 @@
       const ctx = cv.getContext("2d");
       ctx.clearRect(0, 0, w, h);
       const sc = this._scene;
-      const top = this.$("cap-top"), bottom = this.$("cap-bottom");
-      if (!sc) { bottom.textContent = ""; return; }
-      if (!sc.ok) { top.textContent = sc.error || sc.reason || "no scene"; bottom.textContent = ""; return; }
+      if (!sc || !sc.ok || this._nocam) return;
+      // the scene's pixels are the colour picture's (the depth view is half its size)
       const sx = w / (sc.width || img.naturalWidth || w), sy = h / (sc.height || img.naturalHeight || h);
-      const poly = (corners, stroke, fill) => {
+      (sc.parts || []).forEach((p) => {
+        const corners = p.corners_px;
         if (!Array.isArray(corners) || corners.length !== 4) return;
         ctx.beginPath();
         corners.forEach(([u, v], i) => (i ? ctx.lineTo(u * sx, v * sy) : ctx.moveTo(u * sx, v * sy)));
         ctx.closePath();
-        ctx.fillStyle = fill; ctx.fill();
-        ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke();
-      };
-      const badge = (px, text, bg) => {
-        if (!Array.isArray(px)) return;
-        const x = px[0] * sx, y = px[1] * sy;
-        ctx.beginPath(); ctx.arc(x, y, 11, 0, Math.PI * 2); ctx.fillStyle = bg; ctx.fill();
-        ctx.fillStyle = "#fff"; ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(text, x, y);
-      };
-      (sc.rejected || []).forEach((r) => {
-        poly(r.corners_px, "rgba(160,170,180,.9)", "rgba(160,170,180,.18)");
-        if (Array.isArray(r.pixel) && r.why) {
-          ctx.fillStyle = "rgba(15,22,32,.75)"; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
-          ctx.fillText(r.why, r.pixel[0] * sx + 8, r.pixel[1] * sy + 8);
+        ctx.fillStyle = "rgba(61,220,132,.25)"; ctx.fill();
+        ctx.strokeStyle = "#3ddc84"; ctx.lineWidth = 2.4; ctx.stroke();
+        if (Array.isArray(p.pixel)) {
+          const x = p.pixel[0] * sx, y = p.pixel[1] * sy;
+          ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2);
+          ctx.fillStyle = "#12824a"; ctx.fill();
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+          ctx.fillStyle = "#fff"; ctx.font = "bold 13px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(String(p.order || "·"), x, y);
         }
       });
-      (sc.parts || []).forEach((p) => {
-        poly(p.corners_px, "#ffd23f", "rgba(255,210,63,.15)");
-        badge(p.pixel, String(p.order || "·"), p.order === 1 ? "#1d9a5a" : "#1f5fbf");
+      this._P.nearMisses(sc).forEach((r) => {
+        const corners = r.corners_px;
+        if (!Array.isArray(corners) || corners.length !== 4) return;
+        const path = () => {
+          ctx.beginPath();
+          corners.forEach(([u, v], i) => (i ? ctx.lineTo(u * sx, v * sy) : ctx.moveTo(u * sx, v * sy)));
+          ctx.closePath();
+        };
+        ctx.setLineDash([]);
+        path(); ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 4; ctx.stroke();
+        ctx.setLineDash([7, 5]);
+        path(); ctx.strokeStyle = "#ffc53d"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.setLineDash([]);
+        if (Array.isArray(r.pixel) && r.why) {
+          ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          const tw = ctx.measureText(r.why).width + 14, x = r.pixel[0] * sx, y = r.pixel[1] * sy + 28;
+          ctx.fillStyle = "rgba(20,26,34,.85)";
+          ctx.fillRect(x - tw / 2, y - 10, tw, 20);
+          ctx.fillStyle = "#ffc53d";
+          ctx.fillText(r.why, x, y);
+        }
       });
-      const n = (sc.parts || []).length;
-      top.textContent = n ? `${n} part${n === 1 ? "" : "s"} · #1 is picked first` : (sc.rejected || []).length ? sc.reason || "nothing to pick" : "no part in view";
-      const surf = sc.surface || {};
-      bottom.textContent = (surf.source === "taught" ? `pick area taught · table ${surf.offset_mm >= 0 ? "+" : ""}${Math.round(surf.offset_mm || 0)} mm` : "table found live")
-        + (sc.base_frame === false ? " · no robot pose: reach not checked" : "");
     }
 
     // -- Check approach ------------------------------------------------------------------------------
@@ -797,10 +912,10 @@
       const rps = this.service("robotPositionService"), rms = this.service("robotMoveService");
       const st = this.settings();
       const p = this.params();
-      if (!rps || !rms) { this.setStatus("PolyScope's move services are not on this API", "warn"); return; }
+      if (!rps || !rms) { this.tell("PolyScope's move services are not on this API", "warn"); return; }
       const sel = (p.points || []).length ? Math.max(0, Math.min(p.points.length - 1, p.selectedPoint || 0)) : -1;
       const approach = st.values.approachMm;
-      this.setStatus("asking the camera computer for part #1…");
+      this.tell("asking the camera computer for the first part…");
       try {
         const res = await this.api("GET", `/api/pick/scene?opts=${encodeURIComponent(P.tokens(st, sel))}&approach_mm=${P.num(approach)}`, undefined, 15000);
         const part = res && res.ok && Array.isArray(res.parts) && res.parts.length ? res.parts[0] : null;
@@ -825,61 +940,13 @@
           `PolyScope found no joint solution for the approach [${fmtVec(hover)}] in 8 s`,
         );
         await rms.autoMove(joints);
-        this.setStatus(`PolyScope's move screen is open — hold Move To Position: fingertips ${P.num(approach)} mm over part #1's top, fingers open${tcpNote}`, "ok");
+        this.tell(`PolyScope's move screen is open — hold Move To Position: fingertips ${P.num(approach)} mm over the first part's top, fingers open${tcpNote}`, "ok");
       } catch (err) {
-        this.setStatus(`Check approach: ${err && err.message ? err.message : err}`, "err");
+        this.tell(`Check approach: ${err && err.message ? err.message : err}`, "err");
       }
-    }
-  }
-
-  // -- the "After picture N" node's row ------------------------------------------------------------
-
-  class PerceptronicAfterNode extends HTMLElement {
-    constructor() {
-      super();
-      this._node = null;
-      this._api = null;
-      this._built = false;
-    }
-    get contributedNode() { return this._node; }
-    set contributedNode(value) { this._node = value; this.render(); }
-    get presenterAPI() { return this._api; }
-    set presenterAPI(value) { this._api = value; }
-    get robotSettings() { return this._robotSettings; }
-    set robotSettings(value) { this._robotSettings = value; }
-    get programTree() { return this._programTree; }
-    set programTree(value) { this._programTree = value; }
-    get applicationContext() { return this._applicationContext; }
-    set applicationContext(value) { this._applicationContext = value; }
-    connectedCallback() { this.render(); }
-
-    render() {
-      if (!this._node || !this.isConnected) return;
-      if (!this._built) {
-        this.innerHTML = `
-          <style>${CSS}</style>
-          <div class="pkrow">
-            <span class="txt">the routine for a pick from picture point</span>
-            <span class="stepper"><button data-step="-1">−</button><input type="text" inputmode="numeric" data-pk="point" /><button data-step="1">+</button></span>
-            <span class="verdict">of the enclosing Perceptronic Pick node</span>
-          </div>`;
-        const set = (v) => {
-          const n = Math.max(1, Math.min(12, Math.round(Number(v) || 1)));
-          this._node.parameters = { ...(this._node.parameters || {}), point: n };
-          if (this._api && this._api.programNodeService) this._api.programNodeService.updateNode(this._node).catch(() => {});
-          this.render();
-        };
-        this.querySelectorAll("button").forEach((b) => b.addEventListener("click", (ev) => { ev.stopPropagation(); set(((this._node.parameters || {}).point || 1) + Number(b.dataset.step)); }));
-        const input = this.querySelector('[data-pk="point"]');
-        input.addEventListener("click", (ev) => ev.stopPropagation());
-        input.addEventListener("change", (ev) => set(ev.target.value));
-        this._built = true;
-      }
-      this.querySelector('[data-pk="point"]').value = String((this._node.parameters || {}).point || 1);
     }
   }
 
   if (!window.customElements.get(PICK_TAG)) window.customElements.define(PICK_TAG, PerceptronicPickNode);
   if (!window.customElements.get(DIALOG_TAG)) window.customElements.define(DIALOG_TAG, PerceptronicPickDialog);
-  if (!window.customElements.get(AFTER_TAG)) window.customElements.define(AFTER_TAG, PerceptronicAfterNode);
 })();

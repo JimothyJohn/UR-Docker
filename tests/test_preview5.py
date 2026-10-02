@@ -68,16 +68,34 @@ def count(img: tuple[int, int, bytes], test, box=None) -> int:
     )
 
 
-def test_the_preview_shows_the_simulated_parts_numbered_and_says_it_is_simulated(tmp_path):
+GREEN = lambda r, g, b: g > 180 and r < 200 and b < 200 and g - r > 30  # noqa: E731 — a pickable part's outline (Ui.PART)
+AMBER = lambda r, g, b: r > 240 and 180 < g < 215 and b < 90  # noqa: E731 — a near miss's outline (Ui.JAW)
+
+
+def test_the_preview_shows_parts_green_and_near_misses_yellow_and_says_it_is_simulated(tmp_path):
     out = tmp_path / "preview.png"
     assert preview5.main(["--snapshot", str(out)]) == 0
     img = pixels(out)
     assert img[:2] == (1280, 772)
     picture = (8, 60, 960, 760)
-    # the parts the program will pick: the overlay's green fill
-    assert count(img, lambda r, g, b: g > 180 and r < 200 and b < 200 and g - r > 30, picture) > 500
+    # the seven parts it will pick are green (0.8.0); the three it won't are outlined in yellow
+    assert count(img, GREEN, picture) > 300
+    assert count(img, AMBER, picture) > 150
     # the simulated picture's NO CAMERA CONNECTED banner (red, 0xb4 0x23 0x23)
     assert count(img, lambda r, g, b: r == 0xB4 and g == 0x23 and b == 0x23, picture) > 2000
+
+
+def test_the_depth_view_is_the_heatmap_with_the_same_outlines(tmp_path):
+    out = tmp_path / "depth.png"
+    assert preview5.main(["--snapshot", str(out), "--view", "depth"]) == 0
+    img = pixels(out)
+    picture = (8, 150, 960, 670)
+    # no camera picture: no banner; the table and the parts' tops are two ends of the ramp
+    assert count(img, lambda r, g, b: r == 0xB4 and g == 0x23 and b == 0x23, picture) == 0
+    far = count(img, lambda r, g, b: r > 150 and g > 180 and b < 120, picture)  # the table: yellow-green
+    near = count(img, lambda r, g, b: r < 90 and g < 60 and 40 < b < 120, picture)  # the tops: deep violet
+    assert far > 20000 and near > 2000
+    assert count(img, AMBER, picture) > 150
 
 
 def test_without_a_camera_computer_the_picture_is_the_no_camera_card(tmp_path):
@@ -87,4 +105,11 @@ def test_without_a_camera_computer_the_picture_is_the_no_camera_card(tmp_path):
     picture = (8, 60, 960, 760)
     # the card's red frame and no green part overlay anywhere
     assert count(img, lambda r, g, b: r > 190 and g < 90 and b < 90, picture) > 100
-    assert count(img, lambda r, g, b: g > 180 and r < 200 and b < 200 and g - r > 30, picture) == 0
+    assert count(img, GREEN, picture) == 0 and count(img, AMBER, picture) == 0
+    # ... and it says what to check, not an exception: the card is taller than its two-line title
+    card = [
+        y
+        for y in range(60, 760, 2)
+        if count(img, lambda r, g, b: r > 190 and g < 90 and b < 90, (300, y, 400, y + 2))
+    ]
+    assert max(card) - min(card) > 120

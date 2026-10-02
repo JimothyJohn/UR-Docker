@@ -364,3 +364,26 @@ def test_real_image_tool_call():
     out = call_tool(pipe, "perceive_image", {"path": str(IMAGE_PATH), "max_width": 352})
     assert out["ok"] is True
     assert out["n_blobs"] == 3
+
+
+def test_the_cli_survives_a_legacy_windows_codepage(tmp_path):
+    """`perceptronics doctor` prints arrows; on a Windows console (cp1252, strict) that raised
+    UnicodeEncodeError and the setup script died at its last step (CI, windows-latest,
+    2026-09-30). The CLI must degrade the character, not crash."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    env = {k: v for k, v in os.environ.items() if k != "UR_CELL" and not k.startswith("PERCEPTRONICS_")}
+    env["PYTHONIOENCODING"] = "cp1252"  # strict errors, as on a legacy console
+    out = subprocess.run(
+        [sys.executable, "-m", "perceptronics", "--cell", "sim", "doctor"],
+        cwd=Path(__file__).resolve().parent.parent,
+        env=env,
+        capture_output=True,
+        timeout=120,
+    )
+    assert b"UnicodeEncodeError" not in out.stderr, out.stderr[-400:]
+    # no robot or cockpit here, so the verdict is NOT READY (exit 1): what matters is that it got there
+    assert out.returncode in (0, 1) and b"verdict:" in out.stdout

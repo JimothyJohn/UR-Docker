@@ -216,3 +216,41 @@ def test_the_height_tells_a_flat_part_from_a_block_of_the_same_footprint():
     assert found == [] and rejects[0]["why"] == "too flat" and rejects[0]["height_mm"] == 8
     # no height given: not checked
     assert len(detect([BLOCK], PartSpec.from_mm(54, 40), height=0.008)[0]) == 1
+
+
+# -- cylinders and near misses (0.7.0) ---------------------------------------------------------
+
+
+def test_a_cylinder_is_its_diameter_twice_and_round_trips():
+    from perceptronics.partspec import parse
+
+    c = PartSpec.from_mm(40, 40, 30, 20, shape="cyl")
+    assert c.is_round and c.token() == "part=40x40x30 tol=20 shape=cyl"
+    assert parse(f"FIND p[0,0,0,0,0,0] {c.token()} proto=2") == c
+    assert c.as_dict()["shape"] == "cyl"
+    box = parse("part=40x40x30 tol=20")
+    assert box.shape == "box" and not box.is_round and box != c
+    assert "shape" not in box.token()  # an older pick server reads a box's token as it always did
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["part=50x40x30 shape=cyl", "part=40x40 shape=hex", "part=40x40 shape=", "part=40x40 shape=cyl;x"],
+)
+def test_a_malformed_shape_is_refused(text):
+    from perceptronics.partspec import parse
+
+    with pytest.raises(ValueError):
+        parse(text)
+
+
+def test_a_near_miss_is_a_candidate_a_little_off_and_nothing_else():
+    spec = PartSpec.from_mm(50, 30, 30, 25)
+    assert spec.near_miss(0.050, 0.030, 0.030)  # the part itself
+    assert spec.why_not(0.066, 0.030, 0.030) == "too long" and spec.near_miss(0.066, 0.030, 0.030)
+    assert spec.why_not(0.050, 0.030, 0.019) == "too flat" and spec.near_miss(0.050, 0.030, 0.019)
+    assert spec.near_miss(0.100, 0.030, 0.030)  # two parts end to end: worth telling the operator
+    assert not spec.near_miss(0.200, 0.090, 0.030)  # a clamp
+    assert not spec.near_miss(0.100, 0.030, 0.090)  # parts' worth long, but nothing like as tall
+    assert not spec.near_miss(0.050, 0.030, 0.090)  # three times as tall
+    assert spec.near_miss(0.066, 0.030, None)  # no height measured: not held against it

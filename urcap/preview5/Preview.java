@@ -1,4 +1,4 @@
-package com.nickarmenta.perceptronic;
+package io.advin.perceptronic;
 
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -19,7 +19,7 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
 /**
- * The Perceptronic Pick node's and the Installation node's screens in a desktop window, driven by
+ * The 3D Pick node's and the Installation node's screens in a desktop window, driven by
  * a live camera computer — the pendant's own Swing classes ({@link PickScreen},
  * {@link LocationsScreen}), with desktop stand-ins for what only PolyScope provides: typed
  * values come from a dialog instead of PolyScope's keypad, a picture point is added where the
@@ -28,9 +28,9 @@ import javax.swing.SwingUtilities;
  * real answer ({@code GET /api/pick/scene}) to exactly the options the program would send.
  *
  * <p>Not part of the URCap (it is outside {@code perceptronic-ps5/src}). Run it with
- * {@code uv run python urcap/preview5.py}.
+ * {@code python3 urcap/preview5.py}.
  *
- * <pre>java … Preview http://127.0.0.1:7650 [--snapshot out.png]</pre>
+ * <pre>java … Preview http://127.0.0.1:7650 [--snapshot out.png | --screens dir]</pre>
  */
 public final class Preview {
     private static final double[] PLACEHOLDER_Q = {0, -1.0, 1.2, -1.8, -1.5708, 0};
@@ -48,25 +48,36 @@ public final class Preview {
     final List<double[][]> areaTouches = new ArrayList<double[][]>(); // 3 points each, null until taught
     int selected;
     int selectedArea;
-    boolean perPoint;
-    double innerMm = 150;
-    double outerMm = 150;
     double tipMm = 163;
+    volatile boolean depthView;
+    volatile boolean frozen; // --screens: the feed stopped, for the no-camera picture
     PickScreen pick;
     LocationsScreen areas;
+    JPanel areasHost;
+    JPanel deck;
     volatile long seq;
 
     Preview(String base) {
         cockpit = new Cockpit(base);
         s.host = PickScript.hostOf(cockpit.base);
-        s.nodeId = "preview";
+        s.nodeId = "a11ce5"; // hex, like a real node's: PickScript.problem() rejects anything else
+        s.arm = "UR3";
     }
 
     public static void main(String[] a) throws Exception {
         final Preview p = new Preview(a.length > 0 ? a[0] : "http://127.0.0.1:7650");
         final String snapshot = a.length > 2 && "--snapshot".equals(a[1]) ? a[2] : null;
+        final String screens = a.length > 2 && "--screens".equals(a[1]) ? a[2] : null;
+        // --view main | part | approach | areas | depth: which screen the snapshot shows
+        final String shown = a.length > 4 && "--view".equals(a[3]) ? a[4] : "main";
+        p.depthView = "depth".equals(shown);
         final JPanel[] frame = new JPanel[1];
-        SwingUtilities.invokeAndWait(() -> frame[0] = p.window(snapshot == null));
+        SwingUtilities.invokeAndWait(() -> {
+            frame[0] = p.window(snapshot == null && screens == null);
+            if ("part".equals(shown)) p.pick.showOptions(0);
+            if ("approach".equals(shown)) p.pick.showOptions(1);
+            if ("areas".equals(shown)) ((java.awt.CardLayout) p.deck.getLayout()).show(p.deck, "areas");
+        });
         Thread poll = new Thread(p::poll, "preview-feed");
         poll.setDaemon(true);
         poll.start();
@@ -84,14 +95,68 @@ public final class Preview {
             ImageIO.write(out[0], "png", new File(snapshot));
             System.exit(0);
         }
+        if (screens != null) {
+            // the README's pictures (urcap/perceptronic-ps5/screens/): each screen by itself, 1000 x 560
+            Thread.sleep(4000);
+            final File dir = new File(screens);
+            shots(() -> {
+                shot(p.pick, new File(dir, "pick-main.png"));
+                p.pick.showOptions(0);
+                shot(p.pick, new File(dir, "pick-options.png"));
+                p.pick.showOptions(1);
+                shot(p.pick, new File(dir, "pick-approach.png"));
+                shot(p.areasHost, new File(dir, "installation-areas.png"));
+                p.pick.showMain();
+                p.pick.live.setDepthView(true);
+            });
+            p.depthView = true; // the next frames are the heatmap
+            p.seq = 0;
+            Thread.sleep(3000);
+            shots(() -> shot(p.pick, new File(dir, "pick-depth.png")));
+            p.frozen = true; // ... and what the screen says when the camera computer is gone
+            Thread.sleep(2000);
+            shots(() -> {
+                String why = Cockpit.explain(new java.net.SocketTimeoutException("connect timed out"),
+                        "http://192.168.3.10:7621");
+                p.pick.setLive(false, why);
+                p.pick.setStatus(why, Ui.Kind.ERR);
+                shot(p.pick, new File(dir, "no-camera.png"));
+            });
+            System.exit(0);
+        }
+    }
+
+    private interface Shots {
+        void run() throws java.io.IOException;
+    }
+
+    private static void shots(final Shots s) throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            try {
+                s.run();
+            } catch (java.io.IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    private static void shot(javax.swing.JComponent c, File to) throws java.io.IOException {
+        c.setSize(1000, 560);
+        layout(c);
+        BufferedImage img = new BufferedImage(1000, 560, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        c.paint(g);
+        g.dispose();
+        ImageIO.write(img, "png", to);
     }
 
     /** The screens in one panel; in a 1280 × 800 window when {@code show} (headless otherwise). */
     private JPanel window(boolean show) {
         pick = new PickScreen(new PickActions());
+        pick.live.setDepthView(depthView);
         areas = new LocationsScreen(new AreaActions());
-        final JPanel deck = new JPanel(new java.awt.CardLayout());
-        JPanel areasHost = new JPanel(new BorderLayout());
+        deck = new JPanel(new java.awt.CardLayout());
+        areasHost = new JPanel(new BorderLayout());
         areasHost.setBackground(Ui.BG);
         areasHost.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
         areasHost.add(areas);
@@ -102,7 +167,7 @@ public final class Preview {
         top.setBorder(BorderFactory.createEmptyBorder(8, 12, 0, 12));
         top.add(Ui.label("Preview — " + cockpit.base + "   (desktop stand-ins for the arm and PolyScope's keypad)",
                 12f, false, Ui.MUTED), BorderLayout.WEST);
-        Ui.Segmented tabs = new Ui.Segmented(new String[] {"Program: Perceptronic Pick", "Installation: pick areas"}, 0,
+        Ui.Segmented tabs = new Ui.Segmented(new String[] {"Program: 3D Pick", "Installation: pick areas"}, 0,
                 i -> ((java.awt.CardLayout) deck.getLayout()).show(deck, i == 0 ? "pick" : "areas"));
         tabs.setPreferredSize(new Dimension(460, 40));
         top.add(tabs, BorderLayout.EAST);
@@ -111,7 +176,7 @@ public final class Preview {
         root.add(top, BorderLayout.NORTH);
         root.add(deck, BorderLayout.CENTER);
         if (show) {
-            JFrame f = new JFrame("Perceptronic Pick " + PickScript.VERSION + " — preview");
+            JFrame f = new JFrame("3D Pick " + PickScript.VERSION + " — preview");
             f.setContentPane(root);
             f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             f.setSize(1280, 800); // the e-Series pendant's screen
@@ -123,8 +188,7 @@ public final class Preview {
         }
         pickDefaults();
         refresh();
-        pick.setStatus("preview: tap + Add picture point, try the order tiles and Options — the numbers are the"
-                + " camera computer's answer", Ui.Kind.INFO);
+        pick.setStatus("preview: what is outlined is the camera computer's answer", Ui.Kind.INFO);
         return root;
     }
 
@@ -160,30 +224,34 @@ public final class Preview {
 
     private void poll() {
         long sceneAt = 0;
-        while (true) {
+        while (!frozen) {
             try {
-                Cockpit.Frame fr = cockpit.colorPng(seq, 1500);
+                Cockpit.Frame fr = cockpit.framePng(depthView, seq, 1500);
                 if (fr.status != 200) {
-                    pick.setLive(false, null);
+                    pick.setLive(false, Cockpit.noPicture(cockpit.base, null));
                     Thread.sleep(800);
                     continue;
                 }
                 seq = fr.seq;
                 pick.setFrame(fr.image);
-                pick.setLive(true, fr.fps);
+                pick.setLive(true, null);
                 if (System.currentTimeMillis() - sceneAt > 500) {
                     sceneAt = System.currentTimeMillis();
                     rebuild();
                     Map<String, Object> res = cockpit.get("/api/pick/scene?opts="
                             + URLEncoder.encode(s.tokens(s.points.isEmpty() ? -1 : selected), "UTF-8"), 5000);
-                    pick.setScene(Scene.parse(res));
+                    Scene scene = Scene.parse(res);
+                    pick.setScene(scene);
                     if (!Boolean.TRUE.equals(res.get("ok"))) {
                         pick.setStatus("camera computer: " + res.get("error"), Ui.Kind.WARN);
+                    } else {
+                        pick.setStatus(scene.summary(), scene.parts.isEmpty() ? Ui.Kind.WARN : Ui.Kind.OK);
                     }
                 }
             } catch (Exception e) {
-                pick.setLive(false, null);
-                pick.setStatus(Cockpit.explain(e, cockpit.base), Ui.Kind.ERR);
+                String why = Cockpit.explain(e, cockpit.base);
+                pick.setLive(false, why);
+                pick.setStatus(why, Ui.Kind.ERR);
                 try {
                     Thread.sleep(1500);
                 } catch (InterruptedException ie) {
@@ -201,7 +269,7 @@ public final class Preview {
         return PoseMath.plane(t[0], t[1], t[2]);
     }
 
-    /** The script's picture points and reach from the preview's own state. */
+    /** The script's picture points from the preview's own state. */
     synchronized void rebuild() {
         List<PickScript.Point> pts = new ArrayList<PickScript.Point>();
         for (int i = 0; i < pointArea.size(); i++) {
@@ -211,9 +279,6 @@ public final class Preview {
         }
         s.points.clear();
         s.points.addAll(pts);
-        double[] m = PickScript.modelReach("UR3");
-        s.reachMinM = m[0] + innerMm / 1000;
-        s.reachMaxM = Math.max(0, m[1] - outerMm / 1000);
     }
 
     synchronized void refresh() {
@@ -224,14 +289,14 @@ public final class Preview {
                     : new PickScreen.PointRow("live table", false));
         }
         selected = Math.max(0, Math.min(selected, pointArea.size() - 1));
-        pick.show(s, rows, selected, perPoint);
+        pick.show(s, rows, selected);
         List<LocationsScreen.Area> list = new ArrayList<LocationsScreen.Area>();
         for (int i = 0; i < areaNames.size(); i++) {
             boolean done = areaTouches.get(i) != null;
             list.add(new LocationsScreen.Area(areaNames.get(i), new boolean[] {done, done, done}, plane(i)));
         }
         double[] m = PickScript.modelReach("UR3");
-        areas.show(list, selectedArea, "UR3e", m[0], m[1], innerMm, outerMm, tipMm);
+        areas.show(list, selectedArea, "UR3e", m[0], m[1], tipMm);
     }
 
     private static Double ask(String what, double now) {
@@ -298,7 +363,7 @@ public final class Preview {
             refresh();
             int a = pointArea.get(i);
             pick.setStatus(a < 0 ? "picture " + (i + 1) + " finds the table live" : "picture " + (i + 1)
-                    + " looks at " + areaNames.get(a) + " — parts outside it are dashed: outside the pick area",
+                    + " looks at " + areaNames.get(a) + " — parts outside it are outlined: outside the pick area",
                     Ui.Kind.OK);
         }
 
@@ -325,16 +390,23 @@ public final class Preview {
         }
 
         @Override
-        public void setGripper(String mode) {
-            s.gripper = mode;
+        public void setShape(String shape) {
+            s.shape = shape;
             refresh();
         }
 
         @Override
         public void setFlag(String key, boolean on) {
-            if (PickScreen.FLAG_POPUP.equals(key)) s.popupOnFail = on;
-            else perPoint = on;
+            if (PickScreen.FLAG_GRIP_CHECK.equals(key)) s.gripCheck = on;
+            else if (PickScreen.FLAG_GRIP_LONG.equals(key)) s.gripLongSide = on;
+            else s.closeLook = on;
             refresh();
+        }
+
+        @Override
+        public void setDepthView(boolean on) {
+            depthView = on;
+            seq = 0;
         }
 
         @Override
@@ -347,9 +419,9 @@ public final class Preview {
                     Object first = parts instanceof List && !((List<?>) parts).isEmpty() ? ((List<?>) parts).get(0) : null;
                     double[] p = first instanceof Map ? Cockpit.six(((Map<?, ?>) first).get("polyscope_approach_pose"))
                             : null;
-                    pick.setStatus(p == null ? "no part #1 to approach" : String.format(Locale.ROOT,
+                    pick.setStatus(p == null ? "no part to approach" : String.format(Locale.ROOT,
                             "on the robot PolyScope's move screen would take the TCP to p[%.3f, %.3f, %.3f, %.3f, %.3f,"
-                            + " %.3f] — fingertips %s mm over part #1, fingers open", p[0], p[1], p[2], p[3], p[4], p[5],
+                            + " %.3f] — fingertips %s mm over the first part, fingers open", p[0], p[1], p[2], p[3], p[4], p[5],
                             PickScript.num(s.n("approachMm"))), p == null ? Ui.Kind.WARN : Ui.Kind.OK);
                 } catch (Exception e) {
                     pick.setStatus(Cockpit.explain(e, cockpit.base), Ui.Kind.ERR);
@@ -360,7 +432,10 @@ public final class Preview {
         @Override
         public void resetDefaults() {
             for (PickScript.Num n : PickScript.NUMBERS) s.values.put(n.key, n.def);
-            s.popupOnFail = true;
+            s.shape = "box";
+            s.gripCheck = true;
+            s.gripLongSide = false;
+            s.closeLook = true;
             refresh();
         }
     }
@@ -419,18 +494,15 @@ public final class Preview {
         }
 
         @Override
-        public void setReach(String key, double delta) {
-            if ("reachInnerMm".equals(key)) innerMm = Math.max(0, innerMm + delta);
-            else if ("reachOuterMm".equals(key)) outerMm = Math.max(0, outerMm + delta);
-            else tipMm = Math.max(0, tipMm + delta);
+        public void stepTip(double byMm) {
+            tipMm = Math.max(0, tipMm + byMm);
             refresh();
         }
 
         @Override
-        public void askReach(String key, JLabel anchor) {
-            double now = "reachInnerMm".equals(key) ? innerMm : "reachOuterMm".equals(key) ? outerMm : tipMm;
-            Double v = ask(key, now);
-            if (v != null) setReach(key, v - now);
+        public void askTip(JLabel anchor) {
+            Double v = ask("Fingertip length (mm)", tipMm);
+            if (v != null) stepTip(v - tipMm);
         }
     }
 }

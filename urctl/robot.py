@@ -284,7 +284,9 @@ class Robot:
         }
         return self._log("get_state", {}, ok=True, result=result)
 
-    def get_flange_pose(self, *, collect_for: float = 3.0, script_fallback: bool = True) -> dict:
+    def get_flange_pose(
+        self, *, collect_for: float = 3.0, script_fallback: bool = True, stand_in: bool = True
+    ) -> dict:
         """The tool-flange pose in the base frame, alongside the active TCP pose
         and TCP offset it was derived from — what a camera on the flange needs
         to put its measurements into base coordinates (``perceptronics.handeye``).
@@ -307,12 +309,15 @@ class Robot:
         server, beside an operator's program) gets ``ok: False`` instead. In
         ``dry_run`` a stand-in pose is
         returned (tool pointing down, 0.5 m out and up) so cockpits can be
-        exercised without a controller.
+        exercised without a controller. ``stand_in=False`` is for a dry run that
+        measures from the arm's pose (``pick-cycle --dry-run``): it reads the
+        broadcast — a read, nothing is sent — and answers ``ok: False`` when
+        there is none, rather than a made-up pose or a script.
         """
         from . import stateframe
         from .pose import Transform
 
-        if self.dry_run:
+        if self.dry_run and stand_in:
             flange = [0.5, 0.0, 0.5, 0.0, math.pi, 0.0]
             return self._log(
                 "get_flange_pose",
@@ -344,7 +349,7 @@ class Robot:
                 }
                 return self._log("get_flange_pose", {}, ok=True, result=result)
             state_error = "the state broadcast had no joints/TCP pose"
-        if not script_fallback:
+        if not script_fallback or self.dry_run:
             return self._log("get_flange_pose", {}, ok=False, result={"error": state_error})
         captured = self.primary.run_and_capture(
             'textmsg("urctl/flange/tcp=", get_actual_tcp_pose())\n'

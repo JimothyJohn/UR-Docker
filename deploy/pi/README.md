@@ -5,7 +5,7 @@ a systemd service. The robot's PolyScope 5 URCap talks to it over Ethernet:
 
 - **Perceptronic** (Installation node) calls the cockpit's HTTP API on **:7621**,
   including `GET /api/color.png` for the feed on the pendant;
-- **Perceptronic Pick** (program node) runs URScript that opens a socket to the pick server
+- **3D Pick** (program node; "Perceptronic Pick" before URCap 0.7.0) runs URScript that opens a socket to the pick server
   on **:7622**.
 
 Nothing here needs a desktop, a GPU, Docker or a network connection at runtime. The
@@ -15,16 +15,17 @@ runtime is stdlib-only Python plus librealsense, which the installer builds from
 
 | | |
 | --- | --- |
-| Board | Raspberry Pi 5 (4 GB or 8 GB recommended), or a CM4/CM5 industrial box — any **arm64** board with a USB 3 port and Ethernet. 2 GB boards work: the installer adds a temporary swapfile for the build. |
+| Board | **Raspberry Pi 4 Model B, 4 GB** (the kit board, `hardware/BOM.md` K1; Nick, 2026-09-29: efficient compute), a Pi 5, or a CM4/CM5 industrial box — any **arm64** board with a **USB 3** port and Ethernet. Not a Pi 3 (USB 2 only). 2 GB boards work: the installer adds a temporary swapfile for the build. |
 | OS | **Debian arm64** (the target — Nick, 2026-09-28), bookworm (12) or trixie (13), minimal, no desktop; Raspberry Pi OS Lite (64-bit) is Debian and works the same. A RevPi Connect 5 gets a Debian image, not RevPi OS. Needs Python ≥ 3.10 (bookworm has 3.11, trixie 3.13) and systemd. |
 | Camera | One Intel RealSense **D435** (USB ID `8086:0b07`), connected **straight to a USB 3 port** (blue) with a short cable, no hub. |
 | Network | Ethernet on the robot's subnet. A static address is easiest to type into the pendant. |
 | Robot | UR e-Series on PolyScope 5 with the Perceptronic URCap (`urcap/dist/perceptronic-ps5-*.urcap`, see `urcap/perceptronic-ps5/README.md`). |
 
-**Power:** the D435 is powered from the USB port. Raspberry Pi's documentation says a
-Pi 5 limits the total USB current unless it runs on the 5 V / 5 A supply (or
-`usb_max_current_enable=1` is set in `config.txt`). This has **not been tested with a
-D435 in this repo**. If the camera drops out under load, check the supply first.
+**Power:** the D435 is powered from the USB port. Raspberry Pi's documentation gives a
+Pi 4 **1.2 A total** for USB peripherals on the recommended 3 A supply (the kit's 5 V
+HDR-30-5, trimmed to 5.1 V). A Pi 5 limits USB to 600 mA unless it runs on the 5 V / 5 A
+supply (or `usb_max_current_enable=1` is set in `config.txt`). Neither has **been tested
+with a D435 in this repo**. If the camera drops out under load, check the supply first.
 
 ## 1. Flash and first boot
 
@@ -47,13 +48,13 @@ D435 in this repo**. If the camera drops out under load, check the supply first.
 
 ## 2. Deploy (one command, from your laptop)
 
-From a checkout of this repo on the laptop (it needs `uv` and `ssh`):
+From a checkout of this repo on the laptop (it needs `python3` with `pip`, and `ssh`):
 
     scripts/deploy-pi.sh pi@192.168.3.10 --cell ur3 --robot-host 192.168.3.3
 
-This builds the wheel (`uv build`, the repo's locked tooling), copies it and `deploy/pi/`
+This builds the wheel (`python3 -m pip wheel`), copies it and `deploy/pi/`
 to the PC, runs `install.sh` there under `sudo`, and prints `perceptronics doctor` from the
-PC. The first run compiles librealsense, which takes tens of minutes on a Pi 5. Later runs
+PC. The first run compiles librealsense, which takes tens of minutes on a Pi 5 and longer on a Pi 4 (not yet timed). Later runs
 reuse it. Run from a terminal, and sudo on the PC prompts for your password. Run from an
 agent's shell (no terminal), the PC's sudo must be passwordless (Raspberry Pi OS's first
 user is), or the script stops with sudo's error rather than hanging.
@@ -108,7 +109,7 @@ in `/var/lib/perceptronics`, librealsense and the user. Add `--purge` to remove 
 | --- | --- | --- | --- |
 | 22/tcp | in | SSH | anyone (key auth; tighten in `nftables.conf` if the PC is on a wider network) |
 | 7621/tcp | in | cockpit HTTP API (`perceptronics gui --port`), incl. `/api/color.png` | cell subnet only |
-| 7622/tcp | in | pick server for the Perceptronic Pick node (`--pick-port`) | cell subnet only |
+| 7622/tcp | in | pick server for the 3D Pick node (`--pick-port`) | cell subnet only |
 | 29999, 30001, 30004/tcp | out | robot Dashboard, Primary, RTDE (`UR_*_PORT` in `cell.env`) | — |
 
 Both inbound services are **unauthenticated** (a trusted cell network, like the robot's

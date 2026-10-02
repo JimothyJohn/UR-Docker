@@ -42,8 +42,8 @@ changed since 2026-09-28. Everything below that says "verified" was verified bef
   `scp` has worked on the UR10 at `192.168.1.50` but not been exercised on this UR3e.
 - **URCap on it:** RealSense Pilot 0.2.0 installed and rendered on the pendant 2026-09-27;
   0.3.0 is on the "URE MODELS" USB stick; **0.5.0 has never been on a pendant**, and the
-  URCap is now **Perceptronic 0.6.0** (`urcap/dist/perceptronic-ps5-0.6.0.urcap`, bundle
-  `com.nickarmenta.perceptronic` — a different URCap to PolyScope: remove RealSense Pilot
+  URCap is now **Perceptronic 0.8.0** (`urcap/dist/perceptronic-ps5-0.8.0.urcap`, the **3D Pick** node; bundle
+  `io.advin.perceptronic` — a different URCap to PolyScope: remove RealSense Pilot
   on the pendant, its node data and Pick nodes don't carry over). Auto-install from the stick needs
   **Settings → Security → General → Run magic files** on (`scripts/urcap5-usb.sh`,
   `scripts/urmagic_perceptronic.sh`) — also never run on this robot yet.
@@ -53,7 +53,7 @@ changed since 2026-09-28. Everything below that says "verified" was verified bef
 | Machine | Role | Address / access | Notes |
 | --- | --- | --- | --- |
 | **Mac Studio** (M1 Max, arm64, macOS 26 / Darwin 25) | dev host; ran the cockpit for every hardware session so far | cell LAN `192.168.3.10` (bind the cockpit here, not 0.0.0.0); a second interface (`en1`) on the office LAN; Screen Sharing (VNC) on :5900 | Nick works on it **over SSH**: an SSH shell has no sudo credential, no camera access (TCC), and **cannot start Docker Desktop** (`open -a Docker` fails from a login session; start it from the console or Screen Sharing). The camera needs `sudo` (libusb must detach Apple's UVC driver) and a local Terminal; `--rs-lean` is what streams on this Mac (2026-09-25). The app firewall silently dropped pendant → cockpit :7621 until turned off (2026-09-27). `captures/` is root-owned from sudo runs. Two Logitech webcams (`HD Pro Webcam C920`, `Logi Webcam C920e`) are the extra views in `ur3.env`. |
-| **Pick PC** (`deploy/pi/`) | the shipped camera computer: Pi-class arm64 Debian, cockpit as `perceptronics-cockpit.service`, :7621 HTTP + :7622 pick server | example address `192.168.3.10`; `scripts/deploy-pi.sh <user@pc> --cell ur3 --robot-host 192.168.3.3` | **Never run on a board yet** (2026-09-28). Kit hardware in `hardware/BOM.md`: KUNBUS RevPi Connect 5 (primary) or CompuLab IOT-GATE-RPI5, Mean Well HDR-60-24, Newnex screw-lock USB cable, L-com Ethernet. |
+| **Pick PC** (`deploy/pi/`) | the shipped camera computer: Pi-class arm64 Debian, cockpit as `perceptronics-cockpit.service`, :7621 HTTP + :7622 pick server | example address `192.168.3.10`; `scripts/deploy-pi.sh <user@pc> --cell ur3 --robot-host 192.168.3.3` | **Never run on a board yet** (2026-09-28). Kit hardware in `hardware/BOM.md` (2026-09-29): Raspberry Pi 4 4 GB in a Waveshare DIN case on an industrial microSD, Mean Well HDR-30-5 (KUNBUS RevPi Connect 5 / CompuLab IOT-GATE-RPI5 + HDR-60-24 as the 24 V cabinet alternative), Newnex screw-lock USB cable, L-com Ethernet. |
 | **Windows work laptop** | demo host candidate (2026-09-27 trial); the D435 streams under WSL2 (verified 2026-09-23) | — | Native Windows path (`scripts/setup-windows.ps1`, `scripts/cockpit.ps1`) never run. |
 | **Jetson** | the on-controller GPU for the PolyScope X future: Orin first, then **AGX Thor** (`feature/perception-thor`, worktree `../UR-utils-thor`, NGC PyTorch 25.08 / CUDA 13) | — | Final deployment (decided 2026-09-25): a Jetson next to a UR running PolyScope X, room for a second on other arms. Not built yet. |
 
@@ -63,7 +63,7 @@ changed since 2026-09-28. Everything below that says "verified" was verified bef
 | --- | --- | --- |
 | PolyScope X 10.13.0 (`ursim-px`, arm64) | **yes** | `HOST_ARCH=arm64 make simx-up` → UI :8000, Primary :31001, RTDE :31004. Enable Primary/RTDE once under Settings → Security → Services; Remote mode for anything mutating. A second one as UR3 has run as a plain container on :8001 / :32001 / :32004. Each PX sim's inner Docker is ~12 GB (Docker Desktop disk raised to 160 GB, 2026-09-27); `docker rm -v` or it leaks. |
 | URCap in that sim + a fake cockpit | yes | `make urcap-install` (urservice endpoint, no Remote needed) + `make urcap-cockpit` (:7621 with `--cors` for :8000). `urcap/e2e.py` does it headless (~2 min). |
-| e-Series URSim 5.x (PolyScope 5) | **no** — the image is amd64-only and neither Rosetta nor QEMU user-mode keeps URControl + Xvfb alive | `scripts/ursim-e-vm.sh up` (full x86_64 QEMU VM, ~8 min to Dashboard) proves a URCap *loads*; PolyScope's JVM crashes in JIT there, so no clicking through. Every 5.x minor from 5.4 runs in CI on amd64 (`urcap5-matrix.yml`). Off-pendant screens: `uv run python urcap/preview5.py` (JDK). |
+| e-Series URSim 5.x (PolyScope 5) | **no** — the image is amd64-only and neither Rosetta nor QEMU user-mode keeps URControl + Xvfb alive | `scripts/ursim-e-vm.sh up` (full x86_64 QEMU VM, ~8 min to Dashboard) proves a URCap *loads*; PolyScope's JVM crashes in JIT there, so no clicking through. Every 5.x minor from 5.4 runs in CI on amd64 (`urcap5-matrix.yml`). Off-pendant screens: `python3 urcap/preview5.py` (JDK). |
 
 ## 4. Network summary
 

@@ -105,8 +105,12 @@ def clearance(
     finger_w_m: float = FINGER_W_M,
     min_points: int = 15,
     margin_z_m: float = 0.003,
+    room_m: float | None = None,
 ) -> dict:
-    """Is there room for the open fingers beside ``rect``? Each finger comes down just outside
+    """Is there room for the open fingers beside ``rect``? With ``room_m`` the question is
+    the operator's own (the 3D Pick node, 0.8.0): that much clear space on each side of the
+    part along the grip axis, whatever the gripper — the zone starts at the part's edge and
+    ``stroke_m`` / ``finger_t_m`` play no part. Otherwise: Each finger comes down just outside
     the open jaws, along the travel axis (across the object's short side), to
     ``grasp_below_m`` under its top. Anything in either finger's zone that stands higher than
     the fingertips will reach — a neighbouring block, the rail — is a collision; the floor is
@@ -120,6 +124,9 @@ def clearance(
     # never inside the block itself: a wide block's own edge is not a neighbour
     inner = max(stroke_m / 2 - 0.003, rect["minor_m"] / 2 + 0.002)
     outer = stroke_m / 2 + finger_t_m
+    if room_m is not None:
+        inner = rect["minor_m"] / 2 + 0.002
+        outer = rect["minor_m"] / 2 + room_m
     worst = {"+": [0, None], "-": [0, None]}
     for p in points_base:
         if p[2] <= bottom:

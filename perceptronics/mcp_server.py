@@ -17,7 +17,7 @@ One server, two tool families, one process for the agent to configure:
 
 Claude Code / Desktop config (``.mcp.json`` at the repo root does this)::
 
-    {"mcpServers": {"cell": {"command": "uv", "args": ["run", "perceptronics-mcp"]}}}
+    {"mcpServers": {"cell": {"command": "python3", "args": ["-m", "perceptronics.mcp_server"]}}}
 
 The cockpit URL is ``$PERCEPTRONICS_COCKPIT_URL`` (default http://127.0.0.1:7621).
 When no cockpit is running, ``cam_*`` tools answer with ``isError`` and the

@@ -1,7 +1,7 @@
 """Segment Anything (SAM) point/box-prompted segmentation via ``transformers``.
 
 Optional backend for :class:`perceptronics.segment.Segmenter`: install the
-``sam`` extra (``uv sync --extra sam`` — torch + transformers + pillow). The
+``sam`` extra (``python3 -m pip install -e ".[sam]"`` — torch + transformers + pillow). The
 first call downloads the checkpoint into the Hugging Face cache. Runs on CUDA
 (the Jetson), Apple ``mps``, or CPU — ``device=None`` picks the best available.
 
@@ -64,7 +64,7 @@ class SamSegmenter:
             from transformers import SamModel, SamProcessor
         except ImportError as exc:  # pragma: no cover - only without the extra
             raise ImportError(
-                "the SAM backend needs torch + transformers: install with `uv sync --extra sam`"
+                "the SAM backend needs torch + transformers: `python3 -m pip install -e '.[sam]'`"
             ) from exc
         if self.device is None:
             if torch.cuda.is_available():

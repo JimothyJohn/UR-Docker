@@ -24,9 +24,11 @@ Requests (one line each, ASCII, ≤ 1 kB; the pose is URScript's ``to_str(pose)`
     Where to take the closer look from: the flange pose that puts the camera halfway
     from where it is now to the block's top centre (never nearer than
     :data:`LOOK_MIN_M` — the D435 has no depth closer than ~0.2 m), aimed so the block
-    is in the middle of the picture, and backed out along that line until the
-    fingertips clear the top by :data:`LOOK_TIP_CLEAR_M`. Status -6 when no such pose
-    exists (the node then looks from straight over the block, as before).
+    sits :data:`LOOK_AIM_DEG` off the middle of the picture on the side away from the
+    gripper (the open fingers hang in the camera's view: a block in the middle of the
+    picture is behind them), and backed out along that line until the fingertips clear
+    the top by :data:`LOOK_TIP_CLEAR_M`. Status -6 when no such pose exists (the node
+    then measures again from where it is).
 
 ``part=<L>x<W>[x<H>] [tol=<pct>]`` (FIND and REFINE, optional): the part's rough size in
 mm as it lies — footprint and height above the table — and how far off it may measure
@@ -75,7 +77,9 @@ from .volume import Reach, Scene, Surface, find_parts, parse_order
 DEFAULT_PICK_PORT = 7622
 MAX_LINE = 1024
 REFINE_RADIUS_M = 0.06
-LOOK_MIN_M = 0.25  # camera to the block's top, the closest the D435 still measures well
+LOOK_MIN_M = 0.30  # camera to the block's top: past the D435's blind zone with room for the gripper
+LOOK_AIM_DEG = 12.0  # the block's bearing off the optical axis, away from the gripper
+LEANS_DEG = (0.0, 12.0, 24.0)  # the program's ladder when straight down has no joint solution
 LOOK_TIP_CLEAR_M = 0.06  # fingertips above the top at the look pose
 LOOK_MAX_TILT_DEG = 60.0  # tool Z from straight down
 MAX_LOG_TEXT = 240
@@ -90,7 +94,7 @@ STATUS = {
     -3: "the cockpit has no hand-eye calibration",
     -4: "no fresh camera frame",
     -5: "the second look did not find the block again",
-    -6: "no look pose keeps the camera in range and the fingertips clear",
+    -6: "no closer look keeps the camera in range and the fingertips clear",
     -7: "something is in view, but nothing the size of the part",
     -9: "malformed request",
     # protocol 2 (the 0.5.0 node): why a location had nothing to pick
@@ -162,6 +166,11 @@ _REACH_RX = re.compile(rf"\breach=({_NUM}),({_NUM})(?![\w.])")
 _MM_RX = {k: re.compile(rf"\b{k}=({_NUM})(?![\w.])") for k in ("grip", "stroke")}
 _NODE_RX = re.compile(r"\bnode=([0-9A-Za-z]{1,12})\b")
 _INT_RX = {k: re.compile(rf"\b{k}=(\d{{1,3}})\b") for k in ("loc", "locs", "proto")}
+_MM_RX["approach"] = re.compile(rf"\bapproach=({_NUM})(?![\w.])")
+_GRIPCHECK_RX = re.compile(r"\bgripcheck=([01])(?=\s|$)")
+_MM_RX["room"] = re.compile(rf"\broom=({_NUM})(?![\w.])")
+_ACROSS_RX = re.compile(r"\bacross=(short|long)(?=\s|$)")
+_ARM_RX = re.compile(r"\barm=([A-Za-z0-9]{1,8})(?=\s|$)")
 MAX_LOCS = 32
 QUEUE_TTL_S = 120.0  # a part seen at a picture point stays queued this long
 PROTO2_FIELDS = 16
@@ -174,7 +183,20 @@ class PickOptions:
     with ``area=<x>x<y>`` (mm, along the plane's X / Y from its origin), the pick
     ``order=LR,FB``, ``reach=<min>,<max>`` (m from the base axis), the grip depth
     ``grip=<mm>`` and the gripper's ``stroke=<mm>`` (for the finger-room check), and the
-    node's identity ``node=<id> loc=<i> locs=<n> proto=2``."""
+    node's identity ``node=<id> loc=<i> locs=<n> proto=2``.
+
+    The 0.7.0 node (2026-09-30) sends no ``reach=``: it names the arm (``arm=UR3``) and the
+    server asks the arm's own kinematics (:mod:`perceptronics.armik`) whether the approach
+    (``approach=<mm>`` over the top) and the grip have a joint solution — straight down or
+    leaned, the program's ladder — keeping only the base's keep-out radius. ``gripcheck=0``
+    drops the two checks of the gripper against the *measured* part (wider than the open
+    fingers, no room beside it): the part's size is known, and a width the camera reads a
+    few mm wide must not veto a part the fingers fit.
+
+    The 0.8.0 node (2026-10-01) does not drive a gripper at all — the program opens it before
+    the node and closes it after — so it knows no stroke. Its grip check is ``room=<mm>``:
+    that much clear space on each side of the part along the grip axis (default 20), and no
+    stroke test. ``across=long`` grips a box across its long side instead of its short one."""
 
     part: PartSpec | None = None
     surface: Surface | None = None
@@ -182,13 +204,21 @@ class PickOptions:
     reach: Reach | None = None
     grip_below_m: float = 0.015
     stroke_m: float = DEFAULT_STROKE_M
+    approach_m: float = 0.025
+    grip_check: bool = True
+    room_m: float | None = None  # 0.8.0: the clear space wanted on each side of the part
+    across: str = "short"  # which side of a box the fingers close across
+    arm: str = ""
     node: str = ""
     loc: int = 0
     locs: int = 1
     proto: int = 1
 
     def fingers(self) -> dict:
-        return {"grasp_below_m": self.grip_below_m, "stroke_m": self.stroke_m}
+        out: dict = {"grasp_below_m": self.grip_below_m, "stroke_m": self.stroke_m, "across": self.across}
+        if self.room_m is not None:
+            out["room_m"] = self.room_m
+        return out
 
 
 def parse_options(text: str) -> PickOptions:
@@ -227,13 +257,35 @@ def parse_options(text: str) -> PickOptions:
         if not (0.0 <= lo < 3.0 and 0.0 <= hi <= 3.0 and (hi == 0 or hi > lo)):
             raise RequestError("reach must be min,max in metres with max > min (max 0: no limit)")
         kw["reach"] = Reach(lo, hi)
-    for key, name, lo, hi in (("grip", "grip_below_m", 0.0, 60.0), ("stroke", "stroke_m", 10.0, 300.0)):
+    for key, name, lo, hi in (
+        ("grip", "grip_below_m", 0.0, 60.0),
+        ("stroke", "stroke_m", 10.0, 300.0),
+        ("approach", "approach_m", 0.0, 300.0),
+        ("room", "room_m", 0.0, 100.0),
+    ):
         g = _MM_RX[key].search(text)
         if g:
             mm = float(g.group(1))
             if not lo <= mm <= hi:
                 raise RequestError(f"{key} must be {lo:.0f}..{hi:.0f} mm")
             kw[name] = mm / 1000.0
+        elif key == "room" and re.search(r"\broom=", text):
+            raise RequestError("room must be a distance in mm, like room=20")
+    g = _GRIPCHECK_RX.search(text)
+    if g:
+        kw["grip_check"] = g.group(1) == "1"
+    elif re.search(r"\bgripcheck=", text):
+        raise RequestError("gripcheck must be 0 or 1")
+    side = _ACROSS_RX.search(text)
+    if side:
+        kw["across"] = side.group(1)
+    elif re.search(r"\bacross=", text):
+        raise RequestError("across must be short or long")
+    arm = _ARM_RX.search(text)
+    if arm:
+        kw["arm"] = arm.group(1)
+    elif re.search(r"\barm=", text):
+        raise RequestError("arm must be a robot model, like arm=UR3")
     n = _NODE_RX.search(text)
     if n:
         kw["node"] = n.group(1)
@@ -246,6 +298,19 @@ def parse_options(text: str) -> PickOptions:
     if kw.get("proto", 1) not in (1, 2):
         raise RequestError("proto must be 1 or 2")
     return PickOptions(**kw)
+
+
+def keep_out(opts: PickOptions) -> Reach | None:
+    """The radial limits the detector applies: the node's ``reach=`` when it sent one (0.5 /
+    0.6), else only the base's keep-out for ``arm=`` — its outer radius +
+    :data:`perceptronics.volume.REACH_MARGIN_M`; how far *out* the arm gets is the
+    kinematics' answer (:meth:`PickPlanner.reachable`), not a ring's."""
+    if opts.reach is not None:
+        return opts.reach
+    if not opts.arm:
+        return None
+    ring = Reach.for_model(opts.arm)
+    return None if ring is None else Reach(ring.min_m, 0.0)
 
 
 def format_reply2(
@@ -313,15 +378,21 @@ def look_pose(
     min_m: float = LOOK_MIN_M,
     tip_clear_m: float = LOOK_TIP_CLEAR_M,
     max_tilt_deg: float = LOOK_MAX_TILT_DEG,
+    aim_deg: float = LOOK_AIM_DEG,
+    stroke_m: float = DEFAULT_STROKE_M,
+    finger_axis: str = "y",
 ) -> list[float] | None:
     """The flange pose for the closer look (see ``LOOK``), or None when none will do.
 
-    The camera goes halfway along the line from where it is to ``top`` (not nearer
-    than ``min_m``, never farther than it already is) and turns to aim its optical
-    axis at ``top``, keeping its image X as close as it was (the least wrist roll).
-    If the fingertips would come within ``tip_clear_m`` of the top's height, the
-    camera backs out along the same line; a tool tilted past ``max_tilt_deg`` from
-    straight down is refused."""
+    The camera goes halfway along the line from where it is to ``top`` (never nearer
+    than ``min_m``) and turns so ``top`` sits ``aim_deg`` off its optical axis, on the
+    side away from the gripper — the open fingertips are in the picture (9° off the
+    axis and 0.15 m out on the UR3e cell, inside the D435's blind zone), and a block
+    aimed at the middle is half hidden behind them (Nick, 2026-09-30: "the gripper is
+    blocking the view"). The image X is kept as close as it was (the least wrist
+    roll). If the fingertips would come within ``tip_clear_m`` of the top's height,
+    the camera backs out along the same line; a tool tilted past ``max_tilt_deg``
+    from straight down is refused."""
     T_fc = Transform.from_pose(handeye)
     T_bc = Transform.from_pose(flange).compose(T_fc)
     cam = T_bc.translation
@@ -339,12 +410,18 @@ def look_pose(
     n = math.hypot(*x)
     x = [v / n for v in x]
     y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]]
-    start = min(d0, max(min_m, d0 / 2.0))
+    # turn the camera so the ray to the block leaves the axis away from the gripper:
+    # R_new · ray = z, with ray = the axis tipped aim_deg about k = (gy, -gx, 0)
+    gx, gy = gripper_bearing(handeye, tip_m, stroke_m, finger_axis)
+    aim = math.radians(aim_deg)
+    turn = Transform.from_pose([0.0, 0.0, 0.0, -aim * gy, aim * gx, 0.0])
+    start = max(min_m, d0 / 2.0)
+    far = max(d0, start + 0.10)
     steps = 20
     for k in range(steps + 1):
-        d = start + (d0 - start) * k / steps
+        d = start + (far - start) * k / steps
         origin = [top[i] + unit[i] * d for i in range(3)]
-        T_bf = Transform.from_axes(x, y, z, origin).compose(T_fc.inverse())
+        T_bf = Transform.from_axes(x, y, z, origin).compose(turn).compose(T_fc.inverse())
         tip = T_bf.apply((0.0, 0.0, tip_m))
         tool_z = T_bf.rotate((0.0, 0.0, 1.0))
         if math.degrees(math.acos(max(-1.0, min(1.0, -tool_z[2])))) > max_tilt_deg:
@@ -352,6 +429,30 @@ def look_pose(
         if tip[2] >= top[2] + tip_clear_m:
             return T_bf.to_pose()
     return None
+
+
+def gripper_bearing(
+    handeye: Sequence[float], tip_m: float, stroke_m: float = DEFAULT_STROKE_M, finger_axis: str = "y"
+) -> tuple[float, float]:
+    """Where the gripper is in the picture: the unit direction (image x, y) from the optical
+    axis toward whichever of the fingertips — the tool's centre and the two open fingers,
+    half the stroke either side along ``finger_axis`` — sits nearest that axis. ``(0, 0)``
+    when it is on the axis itself or behind the camera (no side to prefer)."""
+    T_cf = Transform.from_pose(handeye).inverse()
+    half = stroke_m / 2.0
+    side = (0.0, half, 0.0) if finger_axis == "y" else (half, 0.0, 0.0)
+    best: tuple[float, float, float] | None = None
+    for sign in (0.0, 1.0, -1.0):
+        px, py, pz = T_cf.apply((sign * side[0], sign * side[1], tip_m))
+        if pz <= 1e-6:
+            continue
+        r = math.hypot(px, py)
+        if best is None or r / pz < best[0]:
+            best = (r / pz, px, py)
+    if best is None or math.hypot(best[1], best[2]) < 1e-6:
+        return 0.0, 0.0
+    n = math.hypot(best[1], best[2])
+    return best[1] / n, best[2] / n
 
 
 def choose(blocks: list[Block], pixel: tuple[int, int] | None, width: int, height: int) -> Block | None:
@@ -430,7 +531,14 @@ class PickPlanner:
         he = self.handeye()
         if not he:
             return -3, None, None
-        pose = look_pose(req["flange"], req["near"], he, self.tip_m)
+        pose = look_pose(
+            req["flange"],
+            req["near"],
+            he,
+            self.tip_m,
+            stroke_m=req["options"].stroke_m,
+            finger_axis=self.finger_axis,
+        )
         return (1, list(req["near"]), pose) if pose else (-6, list(req["near"]), None)
 
     def _plan(self, req: dict) -> tuple[int, list[float] | None, list[float] | None]:
@@ -544,28 +652,61 @@ class PickPlanner:
             T_bc,
             spec=opts.part,
             surface=opts.surface,
-            reach=opts.reach,
+            reach=keep_out(opts),
             order=opts.order,
-            fingers=opts.fingers() if T_bc is not None else None,
+            fingers=opts.fingers() if T_bc is not None and opts.grip_check else None,
         )
         for p in list(scene.parts):
-            if p.width_m > opts.stroke_m - 0.006:
-                p.why = f"wider than the open gripper ({p.width_m * 1000:.0f} mm)"
+            why = None
+            if opts.grip_check and opts.room_m is None and p.width_m > opts.stroke_m - 0.006:
+                why = f"wider than the open gripper ({p.width_m * 1000:.0f} mm)"
+            elif flange is not None and not self.reachable(p, flange, opts):
+                why = "out of reach (no joint solution)"
+            if why is not None:
+                p.why = why
                 scene.parts.remove(p)
                 scene.rejected.append(p)
         for n, p in enumerate(scene.parts, 1):
             p.order = n
         return 1, scene, frame
 
-    def _grasp(self, part, flange: Sequence[float], lean: float) -> list[float]:
+    def reachable(self, part, flange: Sequence[float], opts: PickOptions) -> bool:
+        """Does ``opts.arm`` have a joint solution for the approach and the grip on ``part`` —
+        straight down, or at one of the leans the program tries next? True when the arm is
+        not named or not in the table: the controller's own IK decides in the program."""
+        from urctl.pose import pose_trans
+
+        from .armik import has_solution
+
+        if not opts.arm:
+            return True
+        for lean in LEANS_DEG:
+            top = self._grasp(part, flange, lean, opts)
+            hover = pose_trans(top, [0.0, 0.0, -opts.approach_m, 0.0, 0.0, 0.0])
+            grip = pose_trans(top, [0.0, 0.0, opts.grip_below_m, 0.0, 0.0, 0.0])
+            answers = [has_solution(hover, opts.arm), has_solution(grip, opts.arm)]
+            if None in answers or all(answers):
+                return True
+        return False
+
+    def _grasp(
+        self, part, flange: Sequence[float], lean: float, opts: PickOptions | None = None
+    ) -> list[float]:
         rot = grasp_rotation(flange, part.centre_base, lean)
-        yaw = grasp_yaw_deg(rot, part.theta + math.pi / 2, self.finger_axis)
+        if opts is not None and opts.part is not None and opts.part.is_round:
+            return tip_pose(part.centre_base, rot, self.tip_m, 0.0)  # no long side: the wrist stays
+        long_way = opts is not None and opts.across == "long"
+        # the fingers travel across the short side (perpendicular to the long one) — or along it
+        heading = part.theta if long_way else part.theta + math.pi / 2
+        yaw = grasp_yaw_deg(rot, heading, self.finger_axis)
         return tip_pose(part.centre_base, rot, self.tip_m, yaw)
 
-    def _item(self, part, flange: Sequence[float], lean: float, loc: int) -> dict:
+    def _item(
+        self, part, flange: Sequence[float], lean: float, loc: int, opts: PickOptions | None = None
+    ) -> dict:
         return {
             "centre": list(part.centre_base),
-            "pose": self._grasp(part, flange, lean),
+            "pose": self._grasp(part, flange, lean, opts),
             "loc": loc,
             "order": part.order,
             "dims_mm": [round(v * 1000, 1) for v in (part.length_m, part.width_m, part.height_m)],
@@ -584,7 +725,7 @@ class PickPlanner:
                 f"{p.height_m * 1000:.0f} mm at {[round(c, 3) for c in p.centre]}: {p.why}",
                 False,
             )
-        items = [self._item(p, req["flange"], req["lean"], loc) for p in scene.parts]
+        items = [self._item(p, req["flange"], req["lean"], loc, opts) for p in scene.parts]
         with self._lock:
             q = self._queue(opts.node or "-")
             q["t"] = self.clock()
@@ -613,7 +754,7 @@ class PickPlanner:
         part = min(close, key=lambda p: math.dist(p.centre[:2], near[:2]))
         if part.why and part.why.startswith("no room"):
             return {"status": -11, "loc": opts.loc, "centre": list(part.centre)}
-        item = self._item(part, req["flange"], req["lean"], opts.loc)
+        item = self._item(part, req["flange"], req["lean"], opts.loc, opts)
         with self._lock:
             remaining = len(self._queue(opts.node or "-")["items"])
         return {**item, "status": 1, "order": 0, "remaining": remaining}
@@ -733,7 +874,7 @@ def scene_report(
         # the grasp for each part (fingertips on its top centre, flange pose): the teach screen's
         # "Check approach" backs it off along the tool axis for PolyScope's move screen
         for d, p in zip(out["parts"], scene.parts, strict=True):
-            d["grasp_pose"] = [round(v, 6) for v in planner._grasp(p, flange, 0.0)]
+            d["grasp_pose"] = [round(v, 6) for v in planner._grasp(p, flange, 0.0, opts)]
     out.update(
         ok=True,
         seq=seq,

@@ -2,15 +2,19 @@
 // framework, no build). PolyScope X sets `applicationNode`, `applicationAPI`,
 // `robotSettings` and `robotContext` on it (SDK 6.5.65 JavaScript template).
 //
+// Two tabs, so nothing scrolls: Camera (the feed and the moves) and Pick areas (the areas
+// the 3D Pick node looks at, on a map of the arm's reach).
+//
 // The page talks to the RealSense cockpit (`perceptronics gui --cors <this origin>`)
 // over its HTTP API: the colour feed is `GET /api/color.png` long-polled by
-// sequence number, hover reads `GET /api/point`, a click runs
+// sequence number (the toggle in the picture's corner switches it to `/api/depth.png`,
+// the depth as a heatmap), hover reads `GET /api/point`, a click runs
 // `POST /api/segment` → `POST /api/robot/locate` (hand-eye → base frame,
 // approach pose, reach check), and the two Move buttons either hand the target
 // to PolyScope (inverse kinematics + UR's own auto-move screen, operator in the
 // loop) or ask the cockpit to move over Primary (urctl's safety envelope).
 (() => {
-  const TAG = "nickarmenta-perceptronic";
+  const TAG = "advin-perceptronic";
   const DEFAULT_COCKPIT_PORT = 7621;
   const POLL_TIMEOUT_MS = 1500;
   const HOVER_MS = 150;
@@ -29,7 +33,20 @@
     .rsp button.primary { background: #1f5fbf; color: #fff; border-color: #1f5fbf; }
     .rsp button.danger { background: #d64545; color: #fff; border-color: #d64545; }
     .rsp .stage { position: relative; display: inline-block; max-width: 100%; margin-top: 8px; background: #0f1620; border-radius: 8px; overflow: hidden; }
-    .rsp .stage img { display: block; max-width: 100%; width: 848px; height: auto; cursor: crosshair; }
+    .rsp .stage img { display: block; max-width: 100%; max-height: max(180px, calc(100vh - 470px)); width: auto; height: auto; min-width: 320px; min-height: 180px; cursor: crosshair; }
+    .rsp .stage .view { position: absolute; right: 10px; top: 10px; display: inline-flex; padding: 3px; border-radius: 20px; background: rgba(13,19,26,.85); }
+    .rsp .stage .view button { padding: 6px 14px; border: 0; border-radius: 16px; background: none; color: #fff; font: inherit; font-weight: 600; }
+    .rsp .stage .view button.on { background: #1f5fbf; }
+    .rsp .stage .nocam { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #1a2029; }
+    .rsp .stage .nocam > div { max-width: 90%; padding: 12px 18px; border: 3px solid #d64545; border-radius: 14px; background: #0d131a; color: #c9d3de; font-size: 13px; white-space: pre-wrap; }
+    .rsp .stage .nocam b { display: block; color: #fff; font-size: 20px; text-align: center; margin-bottom: 6px; }
+    .rsp .tabs { display: inline-flex; margin-left: auto; }
+    .rsp .tabs button { border-radius: 0; font-size: 14px; font-weight: 600; } .rsp .tabs button:first-child { border-radius: 6px 0 0 6px; } .rsp .tabs button:last-child { border-radius: 0 6px 6px 0; }
+    .rsp .tabs button.on { background: #1f5fbf; color: #fff; border-color: #1f5fbf; }
+    .rsp .two { display: flex; gap: 16px; align-items: flex-start; }
+    .rsp .two > .card { flex: 1 1 0; min-width: 0; }
+    .rsp .two > .reach-card { flex: 0 0 330px; }
+    .rsp .hidden { display: none !important; }
     .rsp .mark { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid #ffd23f; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0,0,0,.5); pointer-events: none; display: none; }
     .rsp .mark::after { content: ""; position: absolute; left: 9px; top: 9px; width: 4px; height: 4px; background: #ffd23f; border-radius: 50%; }
     .rsp .hover { position: absolute; left: 8px; bottom: 8px; padding: 3px 8px; background: rgba(15,22,32,.8); color: #e8eef6; border-radius: 4px; font-size: 12px; pointer-events: none; }
@@ -50,7 +67,7 @@
     .rsp .reach-map { margin: 4px 0 8px; } .rsp .reach-map svg { display: block; max-width: 100%; height: auto; }
   `;
 
-  const ARCHIVE_PATH = "/nickarmenta/perceptronic/perceptronic-frontend/";
+  const ARCHIVE_PATH = "/advin/perceptronic/perceptronic-frontend/";
   const selfUrl = typeof document !== "undefined" && document.currentScript && document.currentScript.src;
   // pickscript.js (the Pick node's settings + pose math) also serves this node's pick areas and reach:
   // loaded once, by <script>, the first time a node needs it (never at load — tests run this file under node).
@@ -170,6 +187,10 @@
       this._hoverPending = null;
       this._lib = null;
       this._modelAsked = false;
+      this._tab = "camera";
+      this._depth = false; // the picture's toggle: the depth as a heatmap
+      this._logged = "";
+      this._colourWidth = 0;
     }
 
     // -- properties PolyScope X sets -----------------------------------------------
@@ -271,7 +292,10 @@
         this.innerHTML = `
           <style>${CSS}</style>
           <div class="rsp">
-            <h2><span class="dot" data-rsp="dot"></span> Perceptronic <small data-rsp="fps"></small></h2>
+            <h2><span class="dot" data-rsp="dot"></span> Perceptronic <small data-rsp="fps"></small>
+              <span class="tabs" data-rsp="tabs"><button data-tab="camera" class="on">Camera</button><button data-tab="areas">Pick areas</button></span>
+            </h2>
+            <div data-rsp="tab-camera">
             <div class="row">
               <label for="rsp-url">Cockpit</label>
               <input id="rsp-url" type="text" data-rsp="url" placeholder="http://<jetson-or-laptop>:7621 (empty = this host:7621)" />
@@ -282,6 +306,8 @@
               <img data-rsp="img" alt="wrist camera" draggable="false" />
               <div class="mark" data-rsp="mark"></div>
               <div class="hover" data-rsp="hover">hover for depth · click a point</div>
+              <div class="nocam" data-rsp="nocam"><div><b>NO CAMERA CONNECTED</b><span data-rsp="nocam-text">connecting…</span></div></div>
+              <div class="view hidden" data-rsp="view"><button data-view="picture" class="on">Picture</button><button data-view="depth">Depth</button></div>
             </div>
             <div class="status" data-rsp="status">connecting…</div>
             <div class="target" data-rsp="target"></div>
@@ -293,20 +319,21 @@
               <button data-rsp="clear">Clear</button>
             </div>
             <small>Click = segment at the pixel → point in the base frame through the hand-eye → approach pose above it. Reach is checked before a move is offered.</small>
-            <div class="card" data-rsp="areas-card">
-              <h3>Pick areas <small>for the Perceptronic Pick node — touch the table with the fingertips at a corner, along one edge, and on the far side</small></h3>
-              <div data-rsp="areas"></div>
-              <div class="row"><button data-rsp="area-add">New area</button> <small data-rsp="areas-note"></small></div>
             </div>
-            <div class="card reach-card" data-rsp="reach-card">
-              <h3>Reach <small data-rsp="reach-model"></small></h3>
-              <div class="reach-map" data-rsp="reach-map"></div>
-              <div class="row">
-                <label>Tool length <input type="text" inputmode="numeric" data-rsp="tipMm" /> mm</label>
-                <label>Inner margin <input type="text" inputmode="numeric" data-rsp="reachInnerMm" /> mm</label>
-                <label>Outer margin <input type="text" inputmode="numeric" data-rsp="reachOuterMm" /> mm</label>
+            <div class="two hidden" data-rsp="tab-areas">
+              <div class="card" data-rsp="areas-card">
+                <h3>Pick areas <small>for the 3D Pick node — touch the table with the fingertips at a corner, along one edge, and on the far side</small></h3>
+                <div data-rsp="areas"></div>
+                <div class="row"><button data-rsp="area-add">New area</button> <small data-rsp="areas-note"></small></div>
               </div>
-              <small data-rsp="reach-text"></small>
+              <div class="card reach-card" data-rsp="reach-card">
+                <h3>The arm's reach <small data-rsp="reach-model"></small></h3>
+                <div class="reach-map" data-rsp="reach-map"></div>
+                <div class="row">
+                  <label>Tool length <input type="text" inputmode="numeric" data-rsp="tipMm" /> mm</label>
+                </div>
+                <small data-rsp="reach-text"></small>
+              </div>
             </div>
           </div>`;
         this.wire();
@@ -330,6 +357,19 @@
       this.$("bringup").addEventListener("click", () => this.bringUp());
       this.$("stop").addEventListener("click", () => this.stop());
       this.$("clear").addEventListener("click", () => this.clearTarget());
+      this.$("tabs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+        this._tab = b.dataset.tab;
+        this.$("tab-camera").classList.toggle("hidden", this._tab !== "camera");
+        this.$("tab-areas").classList.toggle("hidden", this._tab !== "areas");
+        this.$("tabs").querySelectorAll("button").forEach((t) => t.classList.toggle("on", t.dataset.tab === this._tab));
+      }));
+      // the Picture / Depth toggle, inside the picture's frame
+      this.$("view").querySelectorAll("button").forEach((b) => b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        this._depth = b.dataset.view === "depth";
+        this._seq = 0;
+        this.$("view").querySelectorAll("button").forEach((t) => t.classList.toggle("on", (t.dataset.view === "depth") === this._depth));
+      }));
     }
 
     setStatus(text, kind) {
@@ -347,7 +387,7 @@
       }
     }
 
-    // -- pick areas + reach (what the Perceptronic Pick program node reads from this node) -----------
+    // -- pick areas (what the 3D Pick program node reads from this node), on the arm's reach ---------
     async startAreas() {
       try {
         this._lib = await loadLib();
@@ -356,14 +396,11 @@
         return;
       }
       this.$("area-add").addEventListener("click", () => this.areaAdd());
-      ["tipMm", "reachInnerMm", "reachOuterMm"].forEach((key) => {
-        this.$(key).addEventListener("change", (ev) => {
-          const v = Math.round(parseFloat(String(ev.target.value).replace(",", ".")));
-          const max = key === "tipMm" ? 500 : 1000;
-          this._node[key] = Number.isFinite(v) ? Math.max(0, Math.min(max, v)) : this._node[key];
-          this.persist();
-          this.syncAreas();
-        });
+      this.$("tipMm").addEventListener("change", (ev) => {
+        const v = Math.round(parseFloat(String(ev.target.value).replace(",", ".")));
+        this._node.tipMm = Number.isFinite(v) ? Math.max(0, Math.min(500, v)) : this._node.tipMm;
+        this.persist();
+        this.syncAreas();
       });
       this.syncAreas();
       await this.askRobotModel();
@@ -426,21 +463,19 @@
       });
       this.$("area-add").disabled = areas.length >= P.MAX_AREAS;
       this.$("areas-note").textContent = areas.length ? "" : "no pick area yet: the Pick node finds the table live";
-      ["tipMm", "reachInnerMm", "reachOuterMm"].forEach((key) => {
-        const def = key === "tipMm" ? P.DEFAULT_TIP_MM : 150;
-        this.$(key).value = String(Number.isFinite(node[key]) ? node[key] : def);
-      });
+      this.$("tipMm").value = String(Number.isFinite(node.tipMm) ? node.tipMm : P.DEFAULT_TIP_MM);
       const model = node.robotModel || "";
-      const reach = P.reachLimits(model, node.reachInnerMm, node.reachOuterMm);
       const mr = P.modelReach(model);
-      // the cell from above: the base, the reach ring, every taught area (the PolyScope 5 node's map)
+      const baseR = mr ? mr[0] : 0.064;
+      // the cell from above: the base, how far this arm reaches, every taught area (the PolyScope 5 node's map)
       const drawn = areas.map((a, i) => ({ a, pl: P.plane(a.p0, a.p1, a.p2), i })).filter((x) => x.pl)
         .map((x) => ({ name: x.a.name || `Area ${x.i + 1}`, corners: P.areaCorners(x.pl) }));
-      this.$("reach-map").innerHTML = P.svgReachMap(mr ? mr[0] : 0.064, reach ? reach.min : (mr ? mr[0] : 0.064) + 0.15, reach ? reach.max : 0, drawn, -1, 240, 240);
-      this.$("reach-model").textContent = model ? `robot ${model}` : "robot model unknown";
-      this.$("reach-text").textContent = reach
-        ? `parts are picked between ${(reach.min * 1000).toFixed(0)} mm and ${reach.max ? `${(reach.max * 1000).toFixed(0)} mm` : "any distance"} from the base axis`
-        : "no reach ring for this robot model: the Pick node sends no reach limit";
+      this.$("reach-map").innerHTML = P.svgReachMap(model, baseR, baseR + P.KEEP_OUT_M, mr ? mr[1] : 0, drawn, -1, 300, 300);
+      this.$("reach-model").textContent = mr ? `${model}: ${(mr[1] * 1000).toFixed(0)} mm` : model ? `robot ${model}` : "robot model unknown";
+      const past = mr ? drawn.find((a) => P.farthest(a.corners) > mr[1]) : null;
+      this.$("reach-text").textContent = past
+        ? `${past.name} goes ${Math.round((P.farthest(past.corners) - mr[1]) * 1000)} mm past the arm's reach: parts out there are seen but not picked`
+        : "which parts can be picked is the arm's kinematics' answer, part by part — there are no reach margins to set";
     }
 
     areaAdd() {
@@ -485,6 +520,10 @@
     setLive(live, fps) {
       const dot = this.$("dot");
       if (dot) dot.className = "dot " + (live ? "live" : "dead");
+      const card = this.$("nocam");
+      if (card) card.classList.toggle("hidden", !!live);
+      const view = this.$("view");
+      if (view) view.classList.toggle("hidden", !live);
       const f = this.$("fps");
       if (f) f.textContent = live && fps ? `${Number(fps).toFixed(1)} fps` : "";
     }
@@ -512,11 +551,19 @@
       let announced = false;
       while (!this._stopped && this.isConnected) {
         try {
-          const r = await fetch(`${this.cockpitUrl()}/api/color.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`);
+          const depth = this._depth;
+          const r = await fetch(`${this.cockpitUrl()}/api/${depth ? "depth" : "color"}.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`);
           if (r.status === 503) {
             this.setLive(false);
-            this.setStatus("the cockpit is up but has no frame yet (camera opening?)", "warn");
+            this.noCamera("nopicture", "HTTP 503: the cockpit has no frame", "warn");
             await sleep(500);
+            continue;
+          }
+          if (r.status === 404 && depth) {
+            // a camera computer older than 0.7.0 has no heatmap: the picture instead
+            this._depth = false;
+            this.$("view").querySelectorAll("button").forEach((t) => t.classList.toggle("on", t.dataset.view === "picture"));
+            console.warn(`Perceptronic: ${this.cockpitUrl()} answered 404 on /api/depth.png: it predates the depth view; update it`);
             continue;
           }
           if (!r.ok) {
@@ -532,7 +579,10 @@
           const blob = await r.blob();
           const url = URL.createObjectURL(blob);
           const previous = this._blobUrl;
-          img.onload = () => { if (previous) URL.revokeObjectURL(previous); };
+          img.onload = () => {
+            if (previous) URL.revokeObjectURL(previous);
+            if (!depth) this._colourWidth = img.naturalWidth;
+          };
           img.src = url;
           this._blobUrl = url;
           if (seq) this._seq = seq;
@@ -546,16 +596,31 @@
           let detail = err && err.http ? why : null;
           if (!detail) { try { detail = await this.diagnose(); } catch (e) { detail = null; } }
           const up = detail && detail.includes("is running but");
-          this.setStatus(
-            (detail || `no cockpit at ${this.cockpitUrl()} (${why}).`) +
+          // the screen says what to check; the long story (the URL, the command) goes to the console
+          const long = (detail || `no cockpit at ${this.cockpitUrl()} (${why}).`) +
             (up ? "" : `\nStart one where the camera is:  perceptronics --cell <cell> gui --cors ${location.origin}` +
-              `\nthen set its URL above.`),
-            "err",
-          );
+              `\nthen set its URL above.`);
+          const kind = err && err.http ? "outdated" : up ? "cors"
+            : detail && detail.includes("is not a URL") ? "badurl" : detail && detail.includes("no answer in") ? "silent" : "refused";
+          this.noCamera(kind, long, "err");
           await sleep(1500);
         }
       }
       this._polling = false;
+    }
+
+    /** No picture: what to check, where the picture would be and on the status line; `detail`
+     * (the exception, the URL, the command) only in the console. */
+    noCamera(kind, detail, level) {
+      const P = this._lib || window.PerceptronicPick;
+      const text = P ? P.advise(kind, this.cockpitUrl(), detail).text : detail;
+      const t = this.$("nocam-text");
+      if (t) t.textContent = text;
+      this.setStatus(text, level);
+      if (detail !== this._logged) {
+        this._logged = detail;
+        console.warn(`Perceptronic: ${detail}`);
+      }
     }
 
     // -- pixels -----------------------------------------------------------------------
@@ -563,11 +628,14 @@
       const img = this.$("img");
       const rect = img.getBoundingClientRect();
       if (!img.naturalWidth || !rect.width) return null;
-      const x = Math.round((ev.clientX - rect.left) * (img.naturalWidth / rect.width));
-      const y = Math.round((ev.clientY - rect.top) * (img.naturalHeight / rect.height));
+      // in the colour picture's pixels, whichever view is shown (the depth view is half its size)
+      const cw = this._colourWidth || img.naturalWidth;
+      const ch = Math.round(cw * (img.naturalHeight / img.naturalWidth));
+      const x = Math.round((ev.clientX - rect.left) * (cw / rect.width));
+      const y = Math.round((ev.clientY - rect.top) * (ch / rect.height));
       return {
-        x: Math.max(0, Math.min(img.naturalWidth - 1, x)),
-        y: Math.max(0, Math.min(img.naturalHeight - 1, y)),
+        x: Math.max(0, Math.min(cw - 1, x)),
+        y: Math.max(0, Math.min(ch - 1, y)),
         fx: (ev.clientX - rect.left) / rect.width,
         fy: (ev.clientY - rect.top) / rect.height,
       };

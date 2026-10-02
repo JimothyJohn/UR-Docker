@@ -26,9 +26,11 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-*.txt
       - name: the tag, the manifest and the committed package agree
         id: check
         env:
@@ -39,8 +41,8 @@ jobs:
           python3 -c 'import json, sys; d = json.loads(sys.argv[1]); [print(f"{k}={d[k]}") for k in ("path", "sha256", "version")]' "$out" >> "$GITHUB_OUTPUT"
       - name: the URCap's tests (packaging, the presenters and workers under node, the Pick node's script)
         run: |
-          uv sync --locked
-          uv run pytest -q tests/test_urcap.py tests/test_urcapx_pick.py tests/test_urcap_track.py
+          python -m pip install --require-hashes -r requirements-dev.txt
+          python -m pytest -q tests/test_urcap.py tests/test_urcapx_pick.py tests/test_urcap_track.py
 
   github-release:
     needs: check

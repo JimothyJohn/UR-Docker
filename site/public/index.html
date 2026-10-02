@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Perceptronics: 3D picking for Universal Robots. A URCap for PolyScope 5 and PolyScope X that finds parts by their size with a wrist depth camera and puts the gripper on each one.">
+  <title>Perceptronics · 3D picking for Universal Robots</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none' stroke='%23157a45' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 54V10h14a14 14 0 0 1 0 28H22'/%3E%3Ccircle cx='36' cy='24' r='5' fill='%23157a45' stroke='none'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #f6f7f8; --panel: #ffffff; --ink: #14181d; --muted: #5a6470; --line: #d9dee3;
+      --green: #157a45; --green-soft: #e3f3ea; --on-green: #ffffff;
+      --amber: #8a5a00; --amber-soft: #fdf3d7; --amber-line: #e8c96a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101316; --panel: #181c21; --ink: #e9edf0; --muted: #9aa5b0; --line: #2b323a;
+        --green: #4cc78a; --green-soft: #15291f; --on-green: #08130d;
+        --amber: #f0c45c; --amber-soft: #2a2312; --amber-line: #6b5520;
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 17px; line-height: 1.55; color: var(--ink); background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 68rem; margin: 0 auto; padding: 0 1.5rem; }
+    a { color: var(--green); text-underline-offset: 3px; }
+    a:hover { text-decoration: none; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.86em; }
+    h1, h2, h3 { line-height: 1.2; margin: 0; }
+    p { margin: 0 0 1rem; }
+
+    .top { display: flex; align-items: center; justify-content: space-between; padding-top: 1.25rem; padding-bottom: 1.25rem; }
+    .brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; letter-spacing: 0.01em; }
+    .brand svg { color: var(--green); }
+    .top nav a { margin-left: 1.25rem; color: var(--muted); text-decoration: none; font-size: 0.95rem; }
+    .top nav a:hover { color: var(--ink); }
+
+    .hero { padding-top: 2.5rem; padding-bottom: 3rem; }
+    .hero h1 { font-size: clamp(2.4rem, 6vw, 3.6rem); letter-spacing: -0.02em; }
+    .beta {
+      display: inline-block; vertical-align: middle; margin-left: 0.6rem; padding: 0.15rem 0.55rem;
+      font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--amber); background: var(--amber-soft); border: 1px solid var(--amber-line); border-radius: 4px;
+    }
+    .tagline { font-size: clamp(1.2rem, 2.6vw, 1.5rem); margin: 1rem 0 0.75rem; max-width: 44rem; }
+    .lede { color: var(--muted); max-width: 44rem; }
+
+    .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 2rem 0 1rem; }
+    .sheet { margin: 0 0 2.5rem; color: var(--muted); }
+    .dl { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1.25rem; }
+    .dl h2 { font-size: 1.1rem; }
+    .dl .meta { color: var(--muted); font-size: 0.92rem; margin: 0.25rem 0 1rem; }
+    .btn {
+      display: inline-block; padding: 0.7rem 1.1rem; border-radius: 6px; font-weight: 700;
+      background: var(--green); color: var(--on-green); text-decoration: none;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn, td, .lede, .after { overflow-wrap: anywhere; }
+    .sha { display: block; margin-top: 0.9rem; color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+
+    figure { margin: 0; }
+    figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; }
+    figcaption { color: var(--muted); font-size: 0.88rem; margin-top: 0.5rem; }
+
+    section { padding: 3rem 0; border-top: 1px solid var(--line); }
+    section > .wrap > h2 { font-size: 1.7rem; margin-bottom: 0.5rem; }
+    .intro { color: var(--muted); max-width: 44rem; margin-bottom: 1.75rem; }
+
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--green); border-radius: 8px; padding: 1.25rem; }
+    .card h3 { font-size: 1.05rem; margin-bottom: 0.5rem; }
+    .card p { margin: 0; color: var(--muted); font-size: 0.96rem; }
+    .notfor { margin-top: 1rem; background: var(--amber-soft); border: 1px solid var(--amber-line); border-radius: 8px; padding: 1.25rem; }
+    .notfor h3 { font-size: 1.05rem; color: var(--amber); margin-bottom: 0.5rem; }
+    .notfor ul { margin: 0; padding-left: 1.2rem; }
+    .notfor li { margin: 0.2rem 0; font-size: 0.96rem; }
+
+    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    th, td { text-align: left; vertical-align: top; padding: 0.7rem 1rem; border-top: 1px solid var(--line); font-size: 0.96rem; }
+    tr:first-child th, tr:first-child td { border-top: 0; }
+    tbody th { width: 15rem; font-weight: 600; }
+    thead th { color: var(--muted); font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .two.shots { margin-top: 1.5rem; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1.25rem; }
+    .panel h3 { font-size: 1.05rem; margin-bottom: 0.6rem; }
+    .panel ol { margin: 0; padding-left: 1.25rem; }
+    .panel li { margin: 0.3rem 0; font-size: 0.96rem; }
+    .after { margin-top: 1.25rem; max-width: 52rem; }
+
+    footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: 0.88rem; }
+    footer p { margin: 0 0 0.5rem; max-width: 56rem; }
+
+    @media (max-width: 760px) {
+      .downloads, .cards, .two { grid-template-columns: 1fr; }
+      .top nav a:not(.keep) { display: none; }
+      tbody th { width: 38%; }
+      th, td { padding: 0.6rem 0.75rem; }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap top">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 54V10h14a14 14 0 0 1 0 28H22"/><circle cx="36" cy="24" r="5" fill="currentColor" stroke="none"/></svg>
+      <span>Perceptronics</span>
+    </div>
+    <nav>
+      <a href="#when">When to use it</a>
+      <a href="#need">What you need</a>
+      <a href="#specs">Specs</a>
+      <a href="#install">Install</a>
+      <a class="keep" href="https://github.com/JimothyJohn/perceptronics">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="wrap hero">
+      <h1>Perceptronics <span class="beta">Beta</span></h1>
+      <p class="tagline">3D picking for Universal Robots. Tell the robot the part's size; it finds every one and puts the gripper on it.</p>
+      <p class="lede">Perceptronic is a URCap for PolyScope 5 and PolyScope X. Its <strong>3D Pick</strong> program node uses a depth camera on the wrist to find every part of the size you enter, numbers them in the pick order you choose, and moves the tool to the grip on each one. Your program opens and closes the gripper.</p>
+
+      <div class="downloads" id="download">
+        <div class="dl">
+          <h2>PolyScope 5 <span class="beta">Beta</span></h2>
+          <p class="meta">e-Series · PolyScope {{PS5_RANGE}} · version {{PS5_VERSION}} · {{PS5_SIZE}}</p>
+          <a class="btn" href="/downloads/{{PS5_FILE}}" download>Download {{PS5_FILE}}</a>
+          <span class="sha mono">sha256 {{PS5_SHA256}}</span>
+        </div>
+        <div class="dl">
+          <h2>PolyScope X <span class="beta">Beta</span></h2>
+          <p class="meta">PolyScope X {{PSX_RANGE}} · version {{PSX_VERSION}} · {{PSX_SIZE}}</p>
+          <a class="btn" href="/downloads/{{PSX_FILE}}" download>Download {{PSX_FILE}}</a>
+          <span class="sha mono">sha256 {{PSX_SHA256}}</span>
+        </div>
+      </div>
+
+      <p class="sheet">Need it on paper? <a href="/downloads/{{SHEET_PDF}}">One-page datasheet (PDF)</a>: conservative planning figures to print or send. Also as a <a href="/datasheet.html">web page</a>.</p>
+
+      <figure>
+        <img src="/screens/pick-main.png" width="1000" height="560" alt="The 3D Pick node on the pendant: seven parts outlined in green and numbered in pick order, three more outlined in yellow and labelled cut off by the edge of the picture, too short and too long.">
+        <figcaption>The 3D Pick node on a PolyScope 5 pendant, rendered with a simulated scene. Green parts will be picked, in the numbered order. Yellow ones will not, and each says why.</figcaption>
+      </figure>
+    </div>
+
+    <section id="when">
+      <div class="wrap">
+        <h2>When to use it</h2>
+        <p class="intro">Use it where parts of one known size arrive on a flat surface but not in a known position.</p>
+        <div class="cards">
+          <div class="card">
+            <h3>Loose parts on a table or tray</h3>
+            <p>Parts are set down by hand, in any position and at any angle. The robot finds each one instead of relying on a fixture or a taught grid.</p>
+          </div>
+          <div class="card">
+            <h3>Machine tending infeed</h3>
+            <p>Blanks are placed roughly in front of a CNC or a press. The node puts the gripper on the next blank; the rest of your program loads it.</p>
+          </div>
+          <div class="card">
+            <h3>Instead of a fixture or pallet pattern</h3>
+            <p>When the part changes, enter its new length, width and height on the pendant. There is no nest to machine and no pattern to re-teach.</p>
+          </div>
+        </div>
+        <div class="notfor">
+          <h3>Not for</h3>
+          <ul>
+            <li>Bin picking: parts piled on or leaning against each other. Parts must lie separately on a flat surface.</li>
+            <li>Shapes other than boxes and cylinders standing on end.</li>
+            <li>Transparent or mirror-like parts that a depth camera cannot see.</li>
+            <li>Parts closer than 0.25 m to the camera.</li>
+            <li>Telling apart parts of the same size. It measures; it does not read colour, labels or markings.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="need">
+      <div class="wrap">
+        <h2>What you need</h2>
+        <p class="intro">The URCap is free. It needs a depth camera on the wrist and a small computer beside the robot to read it.</p>
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Detail</th><th>From</th></tr>
+          </thead>
+          <tbody>
+            <tr><th>Robot</th><td>A Universal Robots e-Series arm or UR20, on PolyScope 5 or PolyScope X.</td><td>You</td></tr>
+            <tr><th>Gripper</th><td>Any gripper your program can open and close. The node never drives it.</td><td>You</td></tr>
+            <tr><th>Depth camera</th><td>RealSense D435 on a USB 3 port.</td><td>Kit</td></tr>
+            <tr><th>Camera bracket</th><td>Printed adapter that fits between the tool flange and the gripper. Versions for the e-Series flange (ISO 9409-1-50-4-M6) and the UR20.</td><td>Kit</td></tr>
+            <tr><th>Camera computer</th><td>A small Linux computer beside the robot (Raspberry Pi class, arm64), on the robot's network. It runs the camera software as a service.</td><td>Kit</td></tr>
+            <tr><th>Cables and fasteners</th><td>High-flex USB 3 cable along the arm, shielded Ethernet, DIN-rail power supply, camera and tool bolts.</td><td>Kit</td></tr>
+            <tr><th>URCap</th><td>The download above, free and open source (MIT).</td><td>This page</td></tr>
+          </tbody>
+        </table>
+        <p class="after"><strong>The kit comes from Advin.</strong> To ask for one, write to <a href="mailto:nick@advin.io?subject=Perceptronics%20kit">nick@advin.io</a> with your robot model, PolyScope version and gripper.</p>
+      </div>
+    </section>
+
+    <section id="specs">
+      <div class="wrap">
+        <h2>Specs and limits</h2>
+        <p class="intro">What the node does, and where it stops.</p>
+        <table>
+          <tbody>
+            <tr><th>PolyScope 5</th><td>{{PS5_RANGE}} (e-Series), URCap {{PS5_VERSION}}. One program node (3D Pick), one installation node, one toolbar button with the live picture.</td></tr>
+            <tr><th>PolyScope X</th><td>{{PSX_RANGE}}, URCap {{PSX_VERSION}}. The same 3D Pick node; both write the same URScript.</td></tr>
+            <tr><th>Robots</th><td>UR3e, UR5e, UR7e, UR10e, UR12e, UR16e, UR20.</td></tr>
+            <tr><th>Part shapes</th><td>Box, or cylinder standing on its end.</td></tr>
+            <tr><th>Part size</th><td>5 to 500 mm on each of length, width and height.</td></tr>
+            <tr><th>Size tolerance</th><td>5 to 100 %, default 25 %, never tighter than ±5 mm.</td></tr>
+            <tr><th>Detection</th><td>By volume, from depth alone: whatever stands the part's height above the surface with a top face of its length and width. Colour is not used.</td></tr>
+            <tr><th>Surface</th><td>Flat. Either a pick area taught with three fingertip touches, or the table found live.</td></tr>
+            <tr><th>Picture points</th><td>Up to 12 per node. The arm visits each to look for parts.</td></tr>
+            <tr><th>Pick order</th><td>Eight patterns: by rows or by columns, from any corner.</td></tr>
+            <tr><th>Approach</th><td>Straight down, fingertips 25 mm above the part's top by default, then down to the grip. Fingers close across the short side; a box can be gripped across its long side instead.</td></tr>
+            <tr><th>Grip check</th><td>A part is skipped unless there is 20 mm clear on each side the fingers come down on.</td></tr>
+            <tr><th>Reach</th><td>Checked per part by the arm's kinematics. A part with no joint solution is skipped.</td></tr>
+            <tr><th>Rejected parts</th><td>Shown in yellow with the reason: off size (too long, too short, too wide, too narrow, too tall, too flat), two parts touching, out of reach, no room for a finger, outside the pick area, cut off by the edge of the picture.</td></tr>
+            <tr><th>Camera range</th><td>No closer than 0.25 m to the parts.</td></tr>
+            <tr><th>Program interface</th><td>One node, no child nodes. Sets <code>rs_pick_found</code> when the tool is at the grip and <code>rs_pick_loc</code> to the picture point the part came from.</td></tr>
+            <tr><th>Gripper</th><td>Not controlled. Put your open-gripper node before 3D Pick and your close-gripper node after it.</td></tr>
+            <tr><th>Network</th><td>Robot to camera computer on the cell's own network: TCP 7621 (HTTP) and 7622 (pick requests). No internet connection is needed to run.</td></tr>
+            <tr><th>License</th><td>MIT. Source on <a href="https://github.com/JimothyJohn/perceptronics">GitHub</a>.</td></tr>
+          </tbody>
+        </table>
+        <div class="two shots">
+          <figure>
+            <img src="/screens/pick-options.png" width="1000" height="560" alt="The Options screen, Part tab: box or cylinder, length 50 mm, width 30 mm, height 30 mm, tolerance 25 percent, with a dimensioned drawing of the box.">
+            <figcaption>Options, Part tab: shape, size and tolerance.</figcaption>
+          </figure>
+          <figure>
+            <img src="/screens/installation-areas.png" width="1000" height="560" alt="The installation node's pick areas: one area named Infeed tray taught at three points, drawn on a map of the UR3e's 500 mm reach.">
+            <figcaption>Installation node: pick areas on a map of the arm's reach.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="install">
+      <div class="wrap">
+        <h2>Install</h2>
+        <p class="intro">From a USB stick, on the pendant. Do it once per robot, and again to update.</p>
+        <div class="two">
+          <div class="panel">
+            <h3>PolyScope 5</h3>
+            <ol>
+              <li>Copy <code>{{PS5_FILE}}</code> to the top level of a FAT32 USB stick and plug it into the pendant.</li>
+              <li>☰ → <strong>Settings</strong> → <strong>System</strong> → <strong>URCaps</strong>.</li>
+              <li>Tap <strong>+</strong>, select the file, tap <strong>Open</strong>.</li>
+              <li>Tap <strong>Restart</strong>.</li>
+              <li><strong>Installation</strong> → <strong>URCaps</strong> → <strong>Perceptronic</strong>: enter the camera computer's address, for example <code>http://192.168.3.10:7621</code>. The live picture appears.</li>
+            </ol>
+          </div>
+          <div class="panel">
+            <h3>PolyScope X</h3>
+            <ol>
+              <li>Copy <code>{{PSX_FILE}}</code> to a USB stick and plug it into the pendant.</li>
+              <li>☰ → <strong>System Manager</strong> → <strong>URCaps</strong>, and unlock it with the admin password.</li>
+              <li>Add a URCap and select the file.</li>
+              <li>When it is listed, ☰ → <strong>Reload</strong>.</li>
+              <li><strong>Application</strong> → <strong>Perceptronic</strong>: enter the camera computer's address under <strong>Cockpit</strong> and tap <strong>Save</strong>.</li>
+            </ol>
+          </div>
+        </div>
+        <p class="after">Then add the node to a program: <strong>Program</strong> → <strong>URCaps</strong> → <strong>3D Pick</strong>, inside a loop, with your open-gripper node before it and your close-gripper node after it. Mounting the camera, setting up the camera computer and calibrating are covered in the <a href="https://github.com/JimothyJohn/perceptronics">repository</a>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>&copy; 2026 Nick Armenta · Advin · <a href="mailto:nick@advin.io">nick@advin.io</a> · <a href="https://github.com/JimothyJohn/perceptronics">GitHub</a></p>
+      <p>Perceptronics is an independent product. It is not affiliated with or endorsed by Universal Robots A/S. Universal Robots, PolyScope and URCap are trademarks of Universal Robots A/S; RealSense is a trademark of its owner; other names belong to their owners.</p>
+    </div>
+  </footer>
+</body>
+</html>

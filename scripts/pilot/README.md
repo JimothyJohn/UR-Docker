@@ -17,4 +17,4 @@ are superseded by `perceptronics pick-cycle`.
 | `wiggle.py NAME [dx dy dz]` | jog + re-measure the block offset from the finger axis |
 | `record.py DIR` / `show.py DIR` / `assemble.py DIR out.mp4 [speed]` | record the three feeds, run the captioned pick-and-shuffle, build the subtitled timelapse (ffmpeg + ImageMagick) |
 
-Run from the repo root with `uv run python scripts/pilot/<script>.py …`.
+Run from the repo root with `python3 scripts/pilot/<script>.py …`.

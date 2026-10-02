@@ -30,6 +30,9 @@ for _name, _d, _a in (
     ("UR20", (0.2363, 0, 0, 0.2010, 0.1593, 0.1543), (0, -0.8620, -0.7287, 0, 0, 0)),
 ):
     DH[_name] = (tuple(map(float, _d)), tuple(map(float, _a)), _ALPHA)
+# The UR7e is the UR5e's arm and the UR12e the UR10e's (Nick, 2026-10-01): the same table.
+DH["UR7E"] = DH["UR5E"]
+DH["UR12E"] = DH["UR10E"]
 
 FLANGE_TOLERANCE_M = 0.02
 
