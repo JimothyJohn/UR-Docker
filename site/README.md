@@ -1,0 +1,32 @@
+# The product page: perceptronics.advin.io
+
+One static page for Universal Robots users: what the Perceptronic URCap does, when to use
+it, what it needs, its limits, and the two downloads. Built with the
+[statician](https://github.com/JimothyJohn/statician) skill's stack: a private S3 bucket
+behind CloudFront, a Route53 record and an ACM certificate, with a strict Content Security
+Policy (no inline scripts, nothing loaded from another host).
+
+```
+site/public/        index.html and error.html, with {{PLACEHOLDERS}}
+site/build.py       fills them from the repo and assembles site/_build/ (gitignored)
+site/site.sh        build | preview | validate | deploy | sync | outputs | status
+site/cloudformation/static-site.yaml   statician's template, unchanged
+```
+
+**The page cannot drift from the repo.** `build.py` takes the versions, sizes and sha256
+from the committed `urcap/dist/` files and copies them to `downloads/`, takes the
+supported PolyScope ranges from the CI matrices (`urcap/ps5_matrix.py`,
+`urcap/psx_matrix.py`) and copies the pendant screens from
+`urcap/perceptronic-ps5/screens/`. `tests/test_site.py` builds it and checks the result
+against the CSP.
+
+**The datasheet** (`public/datasheet.html`, one US Letter page) is printed to
+`site/datasheet/perceptronics-datasheet.pdf` by a local Chrome: `site/site.sh datasheet`,
+then commit the PDF and its `datasheet.html.sha256` stamp. CI has no browser, so the test
+compares the stamp with the page as built: a new URCap version or an edit to the datasheet
+fails it until the PDF is printed again. Its performance figures are conservative
+estimates (marked E) drawn from the code's limits and programmed speeds, not measurements;
+replace them as cells are tested and move `SHEET_DATE` in `build.py`.
+
+After a new URCap lands in `urcap/dist/`: `site/site.sh datasheet`, commit, then `site/site.sh sync`. Settings are in `site/.env` (copy `.env.example`); `deploy` is only
+needed when the template changes.
