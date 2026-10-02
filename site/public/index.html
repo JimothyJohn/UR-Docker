@@ -49,7 +49,8 @@
     .tagline { font-size: clamp(1.2rem, 2.6vw, 1.5rem); margin: 1rem 0 0.75rem; max-width: 44rem; }
     .lede { color: var(--muted); max-width: 44rem; }
 
-    .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 2rem 0 2.5rem; }
+    .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 2rem 0 1rem; }
+    .sheet { margin: 0 0 2.5rem; color: var(--muted); }
     .dl { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1.25rem; }
     .dl h2 { font-size: 1.1rem; }
     .dl .meta { color: var(--muted); font-size: 0.92rem; margin: 0.25rem 0 1rem; }
@@ -137,6 +138,8 @@
           <span class="sha mono">sha256 {{PSX_SHA256}}</span>
         </div>
       </div>
+
+      <p class="sheet">Need it on paper? <a href="/downloads/{{SHEET_PDF}}">One-page datasheet (PDF)</a>: conservative planning figures to print or send. Also as a <a href="/datasheet.html">web page</a>.</p>
 
       <figure>
         <img src="/screens/pick-main.png" width="1000" height="560" alt="The 3D Pick node on the pendant: seven parts outlined in green and numbered in pick order, three more outlined in yellow and labelled cut off by the edge of the picture, too short and too long.">

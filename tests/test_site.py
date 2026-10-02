@@ -61,14 +61,14 @@ def pages(built: Path) -> dict[str, _Page]:
 
 
 def test_build_writes_both_pages_with_every_placeholder_filled(built: Path):
-    assert sorted(p.name for p in built.glob("*.html")) == ["error.html", "index.html"]
+    assert sorted(p.name for p in built.glob("*.html")) == ["datasheet.html", "error.html", "index.html"]
     for page in built.glob("*.html"):
         text = page.read_text(encoding="utf-8")
         assert "{{" not in text and "}}" not in text, page.name
 
 
 def test_downloads_are_the_committed_urcaps_byte_for_byte(built: Path):
-    names = sorted(p.name for p in (built / "downloads").iterdir())
+    names = sorted(p.name for p in (built / "downloads").iterdir() if p.suffix != ".pdf")
     committed = sorted(p.name for p in DIST.iterdir() if p.suffix in (".urcap", ".urcapx"))
     assert names == committed
     for name in names:
@@ -77,7 +77,7 @@ def test_downloads_are_the_committed_urcaps_byte_for_byte(built: Path):
 
 def test_each_download_link_shows_its_own_file_version_and_checksum(built: Path, pages):
     text = (built / "index.html").read_text(encoding="utf-8")
-    links = [a["href"] for a in pages["index.html"].all("a") if "download" in a]
+    links = [a["href"] for a in pages["index.html"].all("a") if a["href"].endswith((".urcap", ".urcapx"))]
     assert len(links) == 2
     for href in links:
         target = built / href.lstrip("/")
@@ -123,7 +123,7 @@ def test_nothing_is_loaded_from_another_host(built: Path, pages):
             assert url, name
             if url.startswith("data:"):
                 continue
-            assert url.startswith("/") and not url.startswith("//"), (name, url)
+            assert "//" not in url and ":" not in url, (name, url)  # same host: /root or relative
             assert (built / url.lstrip("/")).is_file(), (name, url)
         assert not [a for a in page.all("link") if a.get("rel") == "stylesheet"], name
         text = (built / name).read_text(encoding="utf-8")
@@ -163,3 +163,28 @@ def test_pages_have_title_description_and_viewport(pages):
         assert metas.get("viewport") == "width=device-width, initial-scale=1", name
         assert metas.get("description"), name
         assert page.all("title"), name
+
+
+def test_datasheet_pdf_is_the_print_of_the_current_page(built: Path):
+    # CI has no browser: the PDF is committed with the sha256 of the page it was printed from.
+    # A new URCap version or an edited datasheet changes the page -> `site/site.sh datasheet`.
+    stamp = site_build.SHEET_STAMP.read_text(encoding="utf-8").strip()
+    assert stamp == site_build.sheet_digest(built), "datasheet changed: run site/site.sh datasheet and commit"
+
+
+def test_datasheet_pdf_is_one_page_and_is_what_the_site_serves(built: Path, pages):
+    pdf = (site_build.SHEET_DIR / site_build.SHEET_PDF).read_bytes()
+    assert pdf.startswith(b"%PDF")
+    assert len(re.findall(rb"/Type\s*/Page\b", pdf)) == 1
+    assert (built / "downloads" / site_build.SHEET_PDF).read_bytes() == pdf
+    assert f"/downloads/{site_build.SHEET_PDF}" in [a["href"] for a in pages["index.html"].all("a")]
+
+
+def test_datasheet_says_its_figures_are_untested_estimates(built: Path):
+    text = (built / "datasheet.html").read_text(encoding="utf-8")
+    assert "Planning figures, not guarantees" in text
+    assert "have not been measured on a production cell" in text
+    assert "Estimate, not a measured or guaranteed value" in text
+    values = site_build.facts()
+    for key in ("PS5_VERSION", "PSX_VERSION", "PS5_RANGE", "PSX_RANGE", "SHEET_DATE"):
+        assert values[key] in text, key

@@ -20,6 +20,13 @@ supported PolyScope ranges from the CI matrices (`urcap/ps5_matrix.py`,
 `urcap/perceptronic-ps5/screens/`. `tests/test_site.py` builds it and checks the result
 against the CSP.
 
-After a new URCap lands in `urcap/dist/`: `site/site.sh sync`. That is the whole release
-step for the page. Settings are in `site/.env` (copy `.env.example`); `deploy` is only
+**The datasheet** (`public/datasheet.html`, one US Letter page) is printed to
+`site/datasheet/perceptronics-datasheet.pdf` by a local Chrome: `site/site.sh datasheet`,
+then commit the PDF and its `datasheet.html.sha256` stamp. CI has no browser, so the test
+compares the stamp with the page as built: a new URCap version or an edit to the datasheet
+fails it until the PDF is printed again. Its performance figures are conservative
+estimates (marked E) drawn from the code's limits and programmed speeds, not measurements;
+replace them as cells are tested and move `SHEET_DATE` in `build.py`.
+
+After a new URCap lands in `urcap/dist/`: `site/site.sh datasheet`, commit, then `site/site.sh sync`. Settings are in `site/.env` (copy `.env.example`); `deploy` is only
 needed when the template changes.

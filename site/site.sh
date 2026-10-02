@@ -3,6 +3,7 @@
 #
 #   site/site.sh build      assemble site/_build/ from public/, urcap/dist/ and the screens
 #   site/site.sh preview    build, then serve it on http://localhost:8000
+#   site/site.sh datasheet  build, then print the one-page datasheet PDF (needs Chrome; commit the result)
 #   site/site.sh validate   check the CloudFormation template parses
 #   site/site.sh deploy     create/update the stack (first run: 5-15 min, certificate + CloudFront)
 #   site/site.sh sync       build, upload to the bucket, invalidate CloudFront
@@ -52,6 +53,9 @@ preview)
     build
     python3 -m http.server 8000 --bind 127.0.0.1 --directory "${BUILD_DIR}"
     ;;
+datasheet)
+    python3 "${SITE_DIR}/build.py" --out "${BUILD_DIR}" --pdf
+    ;;
 validate)
     load_env
     aws cloudformation validate-template --template-body "file://${TEMPLATE}" >/dev/null
@@ -88,7 +92,7 @@ status)
     aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --query 'Stacks[0].StackStatus' --output text
     ;;
 *)
-    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac
