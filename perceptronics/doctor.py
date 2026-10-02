@@ -38,6 +38,9 @@ from .handeye import ENV_BRACKET, ENV_T_FLANGE_CAMERA, HandEye
 
 PROBE_TIMEOUT_S = 2.0
 STREAM_FRAMES = 15
+# How long the doctor waits for a cockpit that answers but hasn't opened its camera yet
+# (a service restarted a moment ago). The open itself takes about 2 s on a Pi 5.
+COCKPIT_OPEN_WAIT_S = 15.0
 
 
 @dataclass
@@ -582,6 +585,12 @@ def cockpit_camera(info: dict | None) -> dict | None:
     return None
 
 
+def _cockpit_is_opening(info: dict | None) -> bool:
+    """A cockpit with a RealSense it has not opened yet and no error from trying."""
+    cam = (info or {}).get("camera") or {}
+    return cam.get("kind") == "realsense" and not cam.get("open") and not (info or {}).get("last_error")
+
+
 def check_cockpit(report: Report, url: str, info: dict | None) -> None:
     if info is None:
         report.add(
@@ -629,6 +638,10 @@ def run_doctor(
     check_host(report, env)
     fake = str(env.get("PERCEPTRONICS_FAKE", "")).strip().lower() in ("1", "true", "yes", "on")
     info = cockpit_info(cockpit_url) if cockpit_url else None
+    deadline = time.monotonic() + COCKPIT_OPEN_WAIT_S
+    while _cockpit_is_opening(info) and time.monotonic() < deadline:
+        time.sleep(0.25)
+        info = cockpit_info(cockpit_url) or info
     held = cockpit_camera(info)
     if camera and not fake:
         if check_sdk(report, library):

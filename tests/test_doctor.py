@@ -243,9 +243,11 @@ def cockpit_info():
 D435 = {"name": "RealSense D435", "serial": "832112072004", "firmware": "5.12.7.100", "usb_type": "3.2"}
 
 
-def _camera_is_busy(monkeypatch):
+def _camera_is_busy(monkeypatch, wait_s: float = 0.0):
     """What librealsense answers a second process while the cockpit streams."""
     from perceptronics import doctor, realsense
+
+    monkeypatch.setattr(doctor, "COCKPIT_OPEN_WAIT_S", wait_s)
 
     def busy(library=None):
         raise realsense.RealSenseError("rs2_create_device(info_list, index:0): failed to set power state")
@@ -296,3 +298,23 @@ def test_camera_is_checked_directly_when_no_cockpit_answers(monkeypatch):
     _camera_is_busy(monkeypatch)
     report = run_doctor(robot=False, cockpit_url=f"http://127.0.0.1:{_closed_port()}", env={})
     assert _by_name(report.as_dict())["camera"]["ok"] is False
+
+
+def test_doctor_waits_for_a_cockpit_that_is_still_opening_the_camera(cockpit_info, monkeypatch):
+    """deploy-pi.sh runs the doctor the second the service restarts: the cockpit
+    answers, its camera isn't open yet, and the device is already claimed."""
+    info, url = cockpit_info
+    info.update(camera={"kind": "realsense", "open": False, "device": None}, fps=0.0, seq=0)
+    _camera_is_busy(monkeypatch, wait_s=10.0)
+
+    def opens():
+        info.update(camera={"kind": "realsense", "open": True, "device": D435}, fps=29.9, seq=12)
+
+    timer = threading.Timer(0.4, opens)
+    timer.start()
+    try:
+        checks = _by_name(run_doctor(robot=False, cockpit_url=url, env={}).as_dict())
+    finally:
+        timer.cancel()
+    assert checks["camera"]["ok"] is True
+    assert "seq 12" in checks["cockpit"]["detail"]
