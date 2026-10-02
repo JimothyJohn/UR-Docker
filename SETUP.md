@@ -53,7 +53,7 @@ changed since 2026-09-28. Everything below that says "verified" was verified bef
 | Machine | Role | Address / access | Notes |
 | --- | --- | --- | --- |
 | **Mac Studio** (M1 Max, arm64, macOS 26 / Darwin 25) | dev host; ran the cockpit for every hardware session so far | cell LAN `192.168.3.10` (bind the cockpit here, not 0.0.0.0); a second interface (`en1`) on the office LAN; Screen Sharing (VNC) on :5900 | Nick works on it **over SSH**: an SSH shell has no sudo credential, no camera access (TCC), and **cannot start Docker Desktop** (`open -a Docker` fails from a login session; start it from the console or Screen Sharing). The camera needs `sudo` (libusb must detach Apple's UVC driver) and a local Terminal; `--rs-lean` is what streams on this Mac (2026-09-25). The app firewall silently dropped pendant → cockpit :7621 until turned off (2026-09-27). `captures/` is root-owned from sudo runs. Two Logitech webcams (`HD Pro Webcam C920`, `Logi Webcam C920e`) are the extra views in `ur3.env`. |
-| **Pick PC** (`deploy/pi/`) | the shipped camera computer: Pi-class arm64 Debian, cockpit as `perceptronics-cockpit.service`, :7621 HTTP + :7622 pick server | example address `192.168.3.10`; `scripts/deploy-pi.sh <user@pc> --cell ur3 --robot-host 192.168.3.3` | **Never run on a board yet** (2026-09-28). Kit hardware in `hardware/BOM.md` (2026-09-29): Raspberry Pi 4 4 GB in a Waveshare DIN case on an industrial microSD, Mean Well HDR-30-5 (KUNBUS RevPi Connect 5 / CompuLab IOT-GATE-RPI5 + HDR-60-24 as the 24 V cabinet alternative), Newnex screw-lock USB cable, L-com Ethernet. |
+| **Pick PC** (`deploy/pi/`) | the shipped camera computer: Pi-class arm64 Debian, cockpit as `perceptronics-cockpit.service`, :7621 HTTP + :7622 pick server | Pi 5 test board `pickpc`: `192.168.3.20` on the cell switch (static, eth0), `10.0.0.56` on the office Wi-Fi for development; `scripts/deploy-pi.sh nick@<ip> --cell ur3 --robot-host 192.168.3.3` | **First run 2026-10-02** on the Pi 5 (trixie): build, hardened service, D435 at 30 fps, reboot verified (`deploy/pi/README.md` § Verified); not yet on the cell with the UR3e. Kit hardware in `hardware/BOM.md` (2026-09-29): Raspberry Pi 4 4 GB in a Waveshare DIN case on an industrial microSD, Mean Well HDR-30-5 (KUNBUS RevPi Connect 5 / CompuLab IOT-GATE-RPI5 + HDR-60-24 as the 24 V cabinet alternative), Newnex screw-lock USB cable, L-com Ethernet. |
 | **Windows work laptop** | demo host candidate (2026-09-27 trial); the D435 streams under WSL2 (verified 2026-09-23) | — | Native Windows path (`scripts/setup-windows.ps1`, `scripts/cockpit.ps1`) never run. |
 | **Jetson** | the on-controller GPU for the PolyScope X future: Orin first, then **AGX Thor** (`feature/perception-thor`, worktree `../UR-utils-thor`, NGC PyTorch 25.08 / CUDA 13) | — | Final deployment (decided 2026-09-25): a Jetson next to a UR running PolyScope X, room for a second on other arms. Not built yet. |
 
@@ -67,7 +67,7 @@ changed since 2026-09-28. Everything below that says "verified" was verified bef
 
 ## 4. Network summary
 
-Cell subnet `192.168.3.0/24`: robot `.3`, cockpit/pick PC `.10`. The UR10 seen earlier in
+Cell subnet `192.168.3.0/24`: robot `.3`, the Mac Studio's cell interface `.10`, the Pi 5 pick PC `.20`. The UR10 seen earlier in
 this repo's history was `192.168.1.50` (another network). Controller ports are in
 `CLAUDE.md` § *Network surface of a UR controller*; the cockpit's are :7621 (HTTP),
 :7622 (pick server socket the PS5 program node opens), :7631 (the retired

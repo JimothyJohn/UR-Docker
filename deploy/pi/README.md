@@ -38,10 +38,12 @@ with a D435 in this repo**. If the camera drops out under load, check the supply
 3. Give it a fixed address on the cell subnet. On Raspberry Pi OS (NetworkManager):
 
        sudo nmcli con mod "Wired connection 1" ipv4.method manual \
-            ipv4.addresses 192.168.3.10/24 ipv4.gateway 192.168.3.1
+            ipv4.addresses 192.168.3.20/24 ipv4.never-default yes
        sudo nmcli con up "Wired connection 1"
 
-   (`nmcli con show` lists the connection names.) On Debian with ifupdown, use
+   No gateway: the cell network has no route out. (`nmcli con show` lists the connection
+   names; on the 2026-10-02 Pi 5 image it was `netplan-eth0`, and the change persisted
+   through NetworkManager's netplan backend and a reboot.) On Debian with ifupdown, use
    `/etc/network/interfaces`. Or reserve the address on the cell's DHCP server.
 4. The first install needs internet access on the PC. apt and the librealsense build
    fetch from Debian mirrors and GitHub (plus sqlite.org), see *Open items*.
@@ -50,11 +52,11 @@ with a D435 in this repo**. If the camera drops out under load, check the supply
 
 From a checkout of this repo on the laptop (it needs `python3` with `pip`, and `ssh`):
 
-    scripts/deploy-pi.sh pi@192.168.3.10 --cell ur3 --robot-host 192.168.3.3
+    scripts/deploy-pi.sh pi@192.168.3.20 --cell ur3 --robot-host 192.168.3.3
 
 This builds the wheel (`python3 -m pip wheel`), copies it and `deploy/pi/`
 to the PC, runs `install.sh` there under `sudo`, and prints `perceptronics doctor` from the
-PC. The first run compiles librealsense, which takes tens of minutes on a Pi 5 and longer on a Pi 4 (not yet timed). Later runs
+PC. The first run compiles librealsense, which took 10.5 minutes on a Pi 5 4 GB (2026-10-02, `-j2`) and longer on a Pi 4 (not yet timed). Later runs
 reuse it. Run from a terminal, and sudo on the PC prompts for your password. Run from an
 agent's shell (no terminal), the PC's sudo must be passwordless (Raspberry Pi OS's first
 user is), or the script stops with sudo's error rather than hanging.
@@ -75,7 +77,7 @@ What `install.sh` does, idempotently:
 ## 3. Point the pendant at it
 
 On the pendant: **Installation** tab → **URCaps** → **Perceptronic** → **Cockpit**:
-type `http://192.168.3.10:7621` (the PC's address) → **Save**. The Pick node uses the
+type `http://192.168.3.20:7621` (the PC's address on the cell network) → **Save**. The Pick node uses the
 same host. It learns the pick port (:7622) from the cockpit. No `--cors` is needed,
 because the node is Java on the controller, not a web page.
 
@@ -86,7 +88,7 @@ because the node is Java on the controller, not a web page.
 | health | `sudo perceptronics-doctor` (add `--json`, `--no-robot`; `--stream` opens the camera, so stop the service first) |
 | logs | `journalctl -u perceptronics-cockpit -f` |
 | stop / start | `sudo systemctl stop perceptronics-cockpit` / `sudo systemctl start perceptronics-cockpit` |
-| the cockpit UI from a laptop | `ssh -L 7621:127.0.0.1:7621 pi@192.168.3.10`, then open http://127.0.0.1:7621 |
+| the cockpit UI from a laptop | `ssh -L 7621:127.0.0.1:7621 pi@192.168.3.20`, then open http://127.0.0.1:7621 |
 | config | edit `/etc/perceptronics/cell.env`, then `sudo systemctl restart perceptronics-cockpit` |
 | calibration | `perceptronics calibrate --apply` saves to `/var/lib/perceptronics/captures/calibration/handeye.json`. Then **delete the `PERCEPTRONICS_T_FLANGE_CAMERA` line** in `cell.env` and restart, because an environment value wins over the file (CLAUDE.md, the stale hand-eye gotcha). |
 | audit | every robot action: `/var/lib/perceptronics/audit.jsonl` |
@@ -130,17 +132,34 @@ cockpit warns and runs without its pick server.
 | Pick node answers `-4` (no fresh frame) over and over | The camera dropped out. The cockpit re-opens it by itself, and `journalctl -u perceptronics-cockpit` says why. Re-plug if it doesn't recover. |
 | service restarts in a loop | `journalctl -u perceptronics-cockpit -b`. A bad value in `cell.env` is the usual cause. Compare it with `perceptronics cells`. |
 
-## Open items (not verified yet)
+## Verified on a board (2026-10-02)
 
-- **Nothing here has run on a Pi yet** (written 2026-09-28). The scripts are checked by
-  `tests/test_deploy_pi.py`: syntax, shellcheck, the unit's command line under the real
-  CLI, the pins, and the cell.env writer. Still unexercised: the librealsense build on
-  arm64 Debian outside Docker, `nft -c` on the rendered firewall, `systemd-analyze
-  verify` on the unit, and the hardened unit actually opening the D435.
-- **Non-root camera access** is expected from the SDK's udev rules (MODE 0666) with the
-  RSUSB backend. It is not yet observed with the D435 on this setup. If the open fails
-  with an access error while root works, look first at the `DeviceAllow=` /
-  `DevicePolicy=` lines in the unit.
+Raspberry Pi 5 Model B 4 GB, Raspberry Pi OS Lite (64-bit) **trixie**, kernel 6.18.50,
+Python 3.13.5, systemd 257, official 27 W supply (`usb_max_current_enable=1`,
+`get_throttled=0x0` throughout), D435 fw 5.12.7.100 on a blue port (USB 3.2).
+
+- **librealsense v2.58.4 builds** on arm64 Debian outside Docker: 10.5 min (`-j2`, the
+  RAM / 1536 MiB rule on 4 GB), 55 °C with the active cooler.
+- **`nft -c` accepts the rendered firewall**; the table loads and survives a reboot.
+- **The unit is valid** (`systemd-analyze verify` silent); `systemd-analyze security`:
+  3.3 OK.
+- **The hardened, non-root unit opens the D435** through the udev rules: 848×480 @ 30,
+  aligned, High Accuracy preset applied. No `DeviceAllow=` change needed.
+- **Stream cost:** `/api/color.png` 27 ms median on the Pi (92 ms from a laptop over
+  Wi-Fi); the cockpit uses ~70 % of one core streaming.
+- **Reboot:** the static cell address, the firewall and the service (camera open,
+  frames advancing) all come back on their own.
+- **The robot side**, with the Pi on the office LAN: against the PolyScope X sim
+  (Robot-API state, RTDE pose at 30 Hz, the sim's controller container opening :7621 and
+  :7622 on the Pi) and against the e-Series sim's URControl in the x86 VM (RTDE pose and
+  Primary TCP readback with the `ur3` cell profile, through an SSH tunnel; that VM's
+  PolyScope crashed twice, so the Dashboard path was not exercised from the Pi).
+
+## Open items
+
+- **The real UR3e from the Pi**: Dashboard, Remote-mode motion and the pendant's URCap
+  reaching `http://192.168.3.20:7621`. Needs the robot powered and the Pi on the cell switch.
+- **A sustained run**: the longest unbroken stream so far is ~7 min.
 - **Build needs internet.** librealsense's CMake fetches nlohmann/json, fastcdr, yaml-cpp
   (GitHub) and sqlite (sqlite.org) during the build (`BUILD_ROSBAG2` defaults ON; left as
   the Dockerfile's verified build does). For an air-gapped PC, build once on an identical
