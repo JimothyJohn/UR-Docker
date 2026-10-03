@@ -323,7 +323,7 @@ def test_depth_flags_reach_the_camera(monkeypatch, tmp_path):
     for bad in ("848", "0x480", "wxh", "-1x2"):
         with pytest.raises(ValueError):
             parse_resolution(bad)
-    assert depth_tuning_from("high_accuracy", "max") == DepthTuning()
+    assert depth_tuning_from("high_density", "max") == DepthTuning()
     assert depth_tuning_from("none", "none") is None and depth_tuning_from("", "") is None
     assert depth_tuning_from("None", "90") == DepthTuning(preset=None, laser_power=90.0, emitter=True)
     assert depth_tuning_from("default", "leave") == DepthTuning(

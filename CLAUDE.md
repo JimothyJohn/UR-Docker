@@ -69,7 +69,7 @@ legacy Windows codepages never crash on unicode.
 with ctypes (no `pyrealsense2`; zero deps kept), streams colour + depth aligned
 to colour (both sensors at the D435's native 848×480 — **mismatched sizes give
 black colour frames** — through the SDK's spatial + temporal filter chain,
-sensor on the High Accuracy preset at full laser; `docs/realsense.md` §Depth
+sensor on the High Density preset at full laser (High Accuracy left holes in dark part tops, 2026-10-03); `docs/realsense.md` §Depth
 quality; `--no-depth-filters` / `--rs-preset none` for raw), and the cockpit (`perceptronics/webapp.py` + `perceptronics/webui/`) does
 hover-to-measure, click-to-segment (`perceptronics/segment.py`: colour+depth
 region growing, or SAM via the `sam` extra), snapshots (`POST /api/snapshot`), and a **Robot** panel that sends the segment's point to
@@ -450,7 +450,8 @@ up the expected part height", "tying [the tolerance] to the distance").** One fr
 Tools: `synthscene.Sensor`/`sense()` (D435 noise model, sized from the real frames below) and
 `scripts/volume_bench.py` (random arm-distance cells vs truth: found / false picks / size bias) — **run
 the bench before and after any detector change**. Real labelled frames: `tests/fixtures/d435/` (4 boxes
-110×70×30 on carpet at 1.3-1.5 m, white labels; carpet with a lump) — the arbiter over the model.
+110×70×30 on carpet at 1.3-1.5 m, white labels; 2 flat + 2 on a side at 0.72-0.81 m, High Density;
+carpet with a lump) — the arbiter over the model.
 Numbers as of this rework: bench (0.28-0.60 m, hand-eye ≤ 1.5°) 99.4 % found, 0 false picks, size bias
 +0.6 mm, heading p95 2.4°; real boxes 4/4 at 1.4 m, wrong sizes 0; ~1 s per frame on the Pi 5.
 
@@ -471,7 +472,9 @@ to process past them:
   (sheets, washers, labels) are invisible in depth.
 - **Surfaces lie.** White labels / bright patches bias depth (one 30 mm box read 21-36 mm across its
   top at 1.4 m); dark, shiny, transparent surfaces drop out or read wrong; sunlight washes out the
-  IR projector.
+  IR projector. **The preset decides how much drops out:** a dark, printed 30 mm-wide top at 0.72 m
+  kept 43 % of its depth on High Accuracy (box missed) and 92 % on High Density (found, 110×31×71 for
+  110×30×70) — hence High Density by default; holes can't be processed back, noise can.
 - **Oblique views hide floor.** A part hides `height·tanθ` of floor behind it (54 mm for 30 mm at 61°)
   and the stereo **fills it with a ramp, not holes** — far edges stretch unless undone.
 - **Averaging frames buys little.** Filtered temporal noise is 0.8 mm at 1.4 m (raw 2.1 mm); the error
