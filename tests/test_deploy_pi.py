@@ -29,6 +29,9 @@ UNIT = PI / "perceptronics-cockpit.service"
 NFT = PI / "nftables.conf"
 TEMPLATE = PI / "cell.env.template"
 DOCTOR = PI / "perceptronics-doctor"
+CELL_DHCP_CONF = PI / "cell-dhcp.conf"
+CELL_DHCP_UNIT = PI / "perceptronics-cell-dhcp.service"
+NM_HOOK = PI / "50-perceptronics-cell"
 DEPLOY = ROOT / "scripts" / "deploy-pi.sh"
 BASH_SCRIPTS = [INSTALL, DEPLOY]
 
@@ -161,7 +164,7 @@ def test_installed_library_is_what_the_template_points_at():
 
 def test_installer_copies_only_files_that_exist():
     m = re.search(r"for f in ([^;]+); do", _text(INSTALL))
-    names = m.group(1).split()
+    names = [n for n in m.group(1).split() if n != "\\"]
     assert names, "copy_deploy_files names no files"
     for name in names:
         assert (PI / name).is_file(), f"install.sh copies {name}, which is not in deploy/pi/"
@@ -354,7 +357,10 @@ def test_firewall_opens_only_ssh_and_the_cockpit_to_the_cell():
     port_rules = [r for r in accepts if "dport" in r and "udp sport 67" not in r]
     assert "tcp dport 22 accept" in port_rules
     cockpit = [r for r in port_rules if r != "tcp dport 22 accept"]
-    assert cockpit == ["ip saddr $CELL_NET tcp dport $COCKPIT_PORTS accept"]
+    assert cockpit == [
+        "iifname $CELL_IF udp dport 67 accept",  # the robot's DHCP request, on the cell port only
+        "ip saddr $CELL_NET tcp dport $COCKPIT_PORTS accept",
+    ]
     assert re.search(
         rf"define COCKPIT_PORTS = \{{ {webapp.DEFAULT_PORT}, {DEFAULT_PICK_PORT} \}}", _text(NFT)
     )
@@ -367,3 +373,77 @@ def test_firewall_subnet_is_substituted_by_the_installer():
     marker = re.search(r'NFT_MARKER="([^"]+)"', _text(INSTALL)).group(1)
     assert marker in _text(NFT), "install.sh recognises its own /etc/nftables.conf by this marker"
     assert "flush ruleset" not in _code(_text(NFT)), "only our own table is replaced"
+
+
+# ----- the cell port: fixed address + one-lease DHCP for a robot nobody configured ----------
+
+
+def _render(path: Path) -> str:
+    """The file as install.sh writes it for the defaults (eth0, the ur3 cell's UR_HOST)."""
+    from perceptronics import cellnet
+
+    return (
+        _text(path)
+        .replace("@CELL_IF@", "eth0")
+        .replace("@ROBOT_ADDRESS@", cellnet.ROBOT_ADDRESS)
+        .replace("@CELL_MASK@", "255.255.255.0")
+    )
+
+
+def test_every_placeholder_in_the_cell_files_is_one_the_installer_fills():
+    filled = set(re.findall(r'-e "s#(@[A-Z_]+@)#', _text(INSTALL)))
+    for path in (CELL_DHCP_CONF, CELL_DHCP_UNIT, NM_HOOK, NFT):
+        used = set(re.findall(r"@[A-Z_]+@", _text(path)))
+        assert used <= filled | {"@CELL_NET@"}, f"{path.name}: {used - filled} never substituted"
+        assert not re.findall(r"@[A-Z_]+@", _render(path).replace("@CELL_NET@", "x"))
+
+
+def test_cell_dhcp_serves_one_address_and_nothing_else():
+    from perceptronics import cellnet
+
+    lines = [ln for ln in _render(CELL_DHCP_CONF).splitlines() if ln and not ln.startswith("#")]
+    assert "port=0" in lines, "no DNS server"
+    assert "interface=eth0" in lines and "except-interface=lo" in lines
+    ranges = [ln for ln in lines if ln.startswith("dhcp-range=")]
+    a = cellnet.ROBOT_ADDRESS
+    assert ranges == [f"dhcp-range={a},{a},255.255.255.0,12h"], "one lease: the robot's address never moves"
+    # an empty option is sent as "none": no default route and no DNS offered, the cell stays offline
+    assert "dhcp-option=option:router" in lines and "dhcp-option=option:dns-server" in lines
+    banned = ("dhcp-authoritative", "server=", "address=", "enable-tftp")
+    assert not any(ln.startswith(banned) for ln in lines)
+
+
+def test_cell_dhcp_only_starts_after_the_probe_heard_no_other_server():
+    unit = _unit(CELL_DHCP_UNIT)
+    assert set(unit) == {"Unit", "Service", "Install"}
+    cond = _one(unit["Service"], "ExecCondition")
+    assert cond == "/opt/perceptronics/current/bin/python -m perceptronics.cellnet probe @CELL_IF@"
+    start = _one(unit["Service"], "ExecStart")
+    assert start == "/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/perceptronics/cell-dhcp.conf"
+    doc = _text(CELL_DHCP_UNIT)
+    assert "stop:" in doc and "journalctl -u perceptronics-cell-dhcp" in doc
+
+
+def test_link_up_re_probes(tmp_path):
+    hook = _render(NM_HOOK)
+    assert hook.startswith("#!/bin/sh")
+    assert "systemctl restart --no-block perceptronics-cell-dhcp.service" in hook
+    assert NM_HOOK.stat().st_mode & 0o111, "NetworkManager only runs an executable hook"
+    script = tmp_path / "hook"
+    script.write_text(hook, encoding="utf-8")
+    subprocess.run(["sh", "-n", str(script)], check=True)
+    if shutil.which("shellcheck"):
+        r = subprocess.run(["shellcheck", "-s", "sh", str(script)], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout
+
+
+def test_installer_defaults_and_its_guards():
+    code = _code(_text(INSTALL))
+    assert 'cell_if="eth0" cell_address="192.168.3.20/24"' in code
+    assert "--cell-if)" in code and "--cell-address)" in code
+    # a port already on another network (the bench's office LAN) is never re-addressed
+    assert re.search(r'if \[ -n "\$have" \]; then\n\s+log "cell port: .* is on another network', code)
+    # the lease must be on the pick PC's network, or nothing is served
+    assert "is not on ${cidr} — not serving" in code
+    assert "/usr/sbin/dnsmasq --test" in code
+    assert "dnsmasq-base" in code

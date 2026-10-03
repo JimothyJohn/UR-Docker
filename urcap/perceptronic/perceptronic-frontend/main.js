@@ -16,6 +16,8 @@
 (() => {
   const TAG = "advin-perceptronic";
   const DEFAULT_COCKPIT_PORT = 7621;
+  // The pick PC's factory address (pickscript.js DEFAULT_COCKPIT_HOST; a test holds them equal).
+  const DEFAULT_COCKPIT_HOST = "192.168.3.20";
   const POLL_TIMEOUT_MS = 1500;
   const HOVER_MS = 150;
   const PROBE_TIMEOUT_MS = 2500;
@@ -214,14 +216,15 @@
       return Perceptronic.cockpitBase(this._node && this._node.cockpitUrl, location);
     }
 
-    // The saved field as an absolute base URL. Shorthand is completed against this page's
+    // The saved field as an absolute base URL. Empty → the pick PC's factory address
+    // (http://192.168.3.20:7621). Shorthand is completed against this page's
     // host — ":7621" / "7621" → http://<page host>:7621, "host[:port]" → http://host[:port],
     // a bare host gets :7621. Anything without a scheme would otherwise be fetched *relative
     // to PolyScope's own page*, and PolyScope's 404 read as "the cockpit is outdated".
     static cockpitBase(saved, loc) {
       const raw = (saved ? String(saved) : "").trim().replace(/\/+$/, "");
       const pageHost = `${loc.protocol}//${loc.hostname}`;
-      if (!raw) return `${pageHost}:${DEFAULT_COCKPIT_PORT}`;
+      if (!raw) return `http://${DEFAULT_COCKPIT_HOST}:${DEFAULT_COCKPIT_PORT}`;
       const port = /^:?(\d{1,5})$/.exec(raw);
       if (port) return `${pageHost}:${port[1]}`;
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return raw;
@@ -298,7 +301,7 @@
             <div data-rsp="tab-camera">
             <div class="row">
               <label for="rsp-url">Cockpit</label>
-              <input id="rsp-url" type="text" data-rsp="url" placeholder="http://<jetson-or-laptop>:7621 (empty = this host:7621)" />
+              <input id="rsp-url" type="text" data-rsp="url" placeholder="the pick PC's address (192.168.3.20 out of the box)" />
               <button data-rsp="save">Save</button>
               <a data-rsp="open" href="#" target="_blank" rel="noopener">Open cockpit</a>
             </div>
@@ -341,7 +344,7 @@
         this.startPolling();
         this.startAreas();
       }
-      this.$("url").value = this._node.cockpitUrl || "";
+      this.$("url").value = this._node.cockpitUrl || DEFAULT_COCKPIT_HOST;
       this.$("open").href = this.cockpitUrl() + "/";
     }
 

@@ -391,6 +391,19 @@ end (decided; a lying one rolls). **The picture: pickable parts green with their
 near misses yellow with why** (still nothing for what is nothing like the part). The closer look
 assumes fingers open 50 mm (`LOOK_STROKE_MM`) when it keeps the part clear of them.
 
+**A robot nobody configured works (Nick, 2026-10-02: "assume their robots are not configured
+network-wise").** The pick PC's cell port is **192.168.3.20/24** (`install.sh --cell-if eth0
+--cell-address`, NetworkManager profile `perceptronics-cell`; a port already on another network
+is left alone) and `perceptronics-cell-dhcp` (dnsmasq, one lease = the cell's `UR_HOST`
+**192.168.3.3**, no route, no DNS) serves a robot left on DHCP — only after
+`python -m perceptronics.cellnet probe` heard no other DHCP server there, re-probed by a
+NetworkManager hook on every link-up. Both URCaps read an **empty Cockpit field as
+192.168.3.20** (PS5 0.9.0, PolyScope X 0.7.0; the field shows it, `:7621` still means the
+controller itself) and, when it is silent, tell the operator to put the robot on DHCP.
+`tests/test_cellnet.py` holds the address equal in the Python, Java, JS and installer. UR's
+factory network setting isn't documented: the manual says "select DHCP to enable networking";
+verified only against the office DHCP server and a cable-less port on the Pi 5 (2026-10-02).
+
 **Settled 2026-10-01 (Nick):** green overlays for pickable parts and yellow for *marginal* ones (the
 server's `near` flag) is the intended picture — nothing is drawn for what is nothing like the part;
 the 3D Pick node's picture carries no watermark; the **UR7e is the UR5e's arm and the UR12e the
