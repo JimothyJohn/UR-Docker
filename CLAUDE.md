@@ -327,7 +327,10 @@ surface with a top face its length × width; the surface is a taught pick area (
 fingertip touches in the Installation node, nudged ≤ 15 mm to the live table) or the table
 found live; each part's min-area rectangle gives the axes, the fingers close across the short
 side. `order_parts` numbers parts in the **picture's** directions (front = bottom of the
-picture). Reach = base outer radius + 150 mm .. rated reach − 150 mm (`Reach.for_model`).
+picture); with the grip check on, `volume.clear_the_way` then reorders them so a part pinned
+only by other parts (one in its finger zone) is picked after them instead of being turned
+away, and the picture's order only breaks ties (Nick, 2026-10-02: "pick the parts that make
+other parts easier to pick"). Reach = base outer radius + 150 mm .. rated reach − 150 mm (`Reach.for_model`).
 **Pick server protocol 2** (`picknode.parse_options`): every request carries
 `part= tol= order= grip= stroke= [reach=] [plane= area=] node= loc= locs= proto=2`, answers
 are 16 numbers; `NEXT` serves the per-node queue (the next part already seen: no trip to the
