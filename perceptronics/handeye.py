@@ -88,6 +88,29 @@ def default_handeye_path(env: Mapping[str, str] | None = None) -> str:
 
 
 ENV_T_FLANGE_CAMERA = "PERCEPTRONICS_T_FLANGE_CAMERA"
+
+
+def seed_calibration_file(path: str | os.PathLike, pose: Sequence[float], *, source: str) -> bool:
+    """Write ``pose`` as the saved hand-eye at ``path`` — the file
+    :meth:`HandEye.from_env` reads and a calibration's Apply overwrites — unless one is
+    already there (a calibration made on this machine is newer than any profile). Returns
+    whether it wrote. A pick PC keeps its hand-eye here, not in the environment: an
+    environment value would win over every later calibration (``deploy/pi/install.sh``)."""
+    vals = [float(v) for v in pose]
+    if len(vals) != 6 or not all(math.isfinite(v) for v in vals):
+        raise ValueError("a hand-eye pose is 6 finite numbers [x, y, z, rx, ry, rz]")
+    target = os.fspath(path)
+    if os.path.exists(target):
+        return False
+    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+    body = {"flange_to_depth_pose": vals, "source": source}
+    tmp = f"{target}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(body, fh, indent=2)
+    os.replace(tmp, target)
+    return True
+
+
 DEFAULT_STANDOFF_M = 0.10
 # What the standoff is measured from:
 #   "fingertip" (the default) — the gripper's fingertips, ``tip_m`` along the

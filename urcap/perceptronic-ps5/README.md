@@ -20,7 +20,7 @@ the same glyph is the toolbar button, every screen's header and a faint watermar
 Installation's and the popup's live picture (`Logo.java` draws it with Java2D; a test holds
 it equal to the SVG).
 
-Download: [`../dist/perceptronic-ps5-0.8.0.urcap`](../dist/perceptronic-ps5-0.8.0.urcap)
+Download: [`../dist/perceptronic-ps5-0.9.0.urcap`](../dist/perceptronic-ps5-0.9.0.urcap)
 
 ## Install on the robot
 
@@ -29,7 +29,7 @@ You need a USB stick and nothing else: no tools, no command line. Two files matt
 
 | File | What it is |
 | --- | --- |
-| [`perceptronic-ps5-0.8.0.urcap`](../dist/perceptronic-ps5-0.8.0.urcap) | The URCap. Always needed. |
+| [`perceptronic-ps5-0.9.0.urcap`](../dist/perceptronic-ps5-0.9.0.urcap) | The URCap. Always needed. |
 | [`urmagic_perceptronic.sh`](../dist/urmagic_perceptronic.sh) | Optional. Lets the robot install the URCap by itself when the stick goes in (B below). |
 
 ### 1. Put the files on a stick
@@ -46,14 +46,14 @@ You need a USB stick and nothing else: no tools, no command line. Two files matt
    Trash) before pulling it out. A stick pulled early can hold a half-written file.
 
 On a Mac, Finder also writes hidden `._…` companions next to each file. They are harmless
-except that PolyScope's file picker lists `._perceptronic-ps5-0.8.0.urcap` too — pick the
+except that PolyScope's file picker lists `._perceptronic-ps5-0.9.0.urcap` too — pick the
 one **without** `._`. `scripts/urcap5-usb.sh` does the whole of this step without them.
 
 ### 2A. Install by hand on the pendant (always works)
 
 1. Plug the stick into the pendant.
 2. Tap ☰ (top right) → **Settings** → **System** → **URCaps**.
-3. Tap **+**, tap `perceptronic-ps5-0.8.0.urcap`, tap **Open**.
+3. Tap **+**, tap `perceptronic-ps5-0.9.0.urcap`, tap **Open**.
 4. Tap **Restart** when PolyScope asks.
 5. After the restart: **Installation** tab → **URCaps** → **Perceptronic**.
 
@@ -120,8 +120,12 @@ listening on the network:
 
     perceptronics --cell ur3 gui --bind 0.0.0.0
 
-and type `http://<that-computer's-ip>:7621` into **Cockpit** (the pendant keyboard opens
-when you tap the field), then **Save** — it is kept in the installation. No `--cors` is
+The **Cockpit** field starts at `192.168.3.20`, the pick PC's address out of the box
+(`deploy/pi/`): with the robot's network on **DHCP** (Settings → System → Network) the pick PC
+gives the robot 192.168.3.3 and there is nothing to type. A camera computer anywhere else:
+type its address (`host`, `host:port` or a URL; the pendant keyboard opens when you tap the
+field), then **Save** — it is kept in the installation. `:7621` alone means a cockpit on the
+controller itself. No `--cors` is
 needed: the node is Java on the controller, not a web page.
 
 ## What is the same as PolyScope X, and what is not

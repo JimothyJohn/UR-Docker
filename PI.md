@@ -5,7 +5,7 @@ The Pi 5 arrives **Thursday 2026-10-01**. It is the **test board** for the pick 
 a possibility later. Part 1 is for Nick (hands on the board, ~15 min). Part 2 is for the
 Claude session (Fable) that does the rest over SSH from the Mac Studio.
 
-The reference for what the installer does is `deploy/pi/README.md`; the procedure is the
+Taking the board to the UR3e afterwards: **`PLUG-AND-PLAY.md`**. The reference for what the installer does is `deploy/pi/README.md`; the procedure is the
 `deploy-pick-pc` skill. **Nothing in `deploy/pi/` has run on a board yet** (written
 2026-09-28, CI-checked only) — Thursday is the first run, so the job is as much to record
 what happens as to get it working.
@@ -213,9 +213,9 @@ is built, and it is far off.
 ### Not in this session (needs the robot and Nick at the pendant)
 
 1. UR3e powered, `sudo perceptronics-doctor` green on `robot.*`.
-2. Pendant: remove RealSense Pilot, install Perceptronic 0.8.0 from the USB stick,
-   **Installation → URCaps → Perceptronic → Cockpit = `http://192.168.3.20:7621` → Save**.
-3. Hand-eye on the Pi (`perceptronics calibrate --apply`), then delete the
-   `PERCEPTRONICS_T_FLANGE_CAMERA` line from `/etc/perceptronics/cell.env` and restart —
-   the environment value beats the saved file.
+2. Pendant: remove RealSense Pilot, install Perceptronic 0.9.0 from the USB stick;
+   **Installation → URCaps → Perceptronic** shows the picture with the Cockpit field at its
+   default `192.168.3.20` (`PLUG-AND-PLAY.md` §3).
+3. Hand-eye on the Pi if the wrist moved since 2026-09-27 (`PLUG-AND-PLAY.md` §6). The solve
+   is saved to the hand-eye file and survives restarts; nothing to delete.
 4. The pick kit's first run on the cell (`TODO.md`, 2026-09-28 entry).

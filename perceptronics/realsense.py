@@ -998,14 +998,16 @@ class DepthTuning:
     fatal). ``None`` for any field leaves the sensor as it is (what you want
     when the camera was tuned in realsense-viewer).
 
-    * ``preset`` — a :data:`VISUAL_PRESETS` key. ``high_accuracy`` raises the
-      stereo confidence threshold: fewer pixels, far fewer wrong ones.
+    * ``preset`` — a :data:`VISUAL_PRESETS` key. ``high_density`` (the default)
+      keeps low-confidence matches: dark or printed tops keep their depth.
+      ``high_accuracy`` raises the stereo confidence threshold: fewer pixels,
+      fewer wrong ones — and holes where a part's top should be.
     * ``laser_power`` — projector power in mW (D435: 0..360, default 150);
       :data:`LASER_MAX` = the sensor's maximum. More texture on flat surfaces.
     * ``emitter`` — projector on/off.
     """
 
-    preset: str | None = "high_accuracy"
+    preset: str | None = "high_density"
     laser_power: float | None = LASER_MAX
     emitter: bool | None = True
 

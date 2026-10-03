@@ -121,6 +121,9 @@ REOPEN_DELAY_S = 1.0
 REOPEN_MAX_DELAY_S = 30.0
 STALL_AFTER_S = 2.0  # no new frame for this long: the stream is stalled, its rate is 0
 EVENT_LOG_SIZE = 500
+MAX_BODY_BYTES = 65536  # a POST body larger than this is refused (400) and its connection closed
+DRAIN_MAX_BYTES = 1 << 20  # ...after reading at most this much of it, so the close is clean
+DRAIN_TIMEOUT_S = 0.5  # ...or until the client goes quiet this long
 
 
 def validate_name(name: str) -> str:
@@ -1513,8 +1516,23 @@ class ViewerHandler(BaseHTTPRequestHandler):
         if self.headers.get("Access-Control-Request-Private-Network", "").lower() == "true":
             self.send_header("Access-Control-Allow-Private-Network", "true")
 
+    def _drain(self, limit: int) -> None:
+        """Read and drop up to ``limit`` bytes of a refused body, giving up after
+        DRAIN_TIMEOUT_S of silence: what has arrived is gone before the close."""
+        self.connection.settimeout(DRAIN_TIMEOUT_S)
+        try:
+            while limit > 0:
+                chunk = self.rfile.read1(min(limit, 65536))
+                if not chunk:
+                    break
+                limit -= len(chunk)
+        except OSError:
+            pass
+
     def _send(self, body: bytes, ctype: str, status: int = 200, headers: dict | None = None) -> None:
         self.send_response(status)
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -1544,9 +1562,18 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=500)
 
     def _body(self) -> dict:
-        length = int(self.headers.get("Content-Length", "0") or 0)
-        if length > 65536:
-            raise ValueError("request body too large")
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = -1
+        if length < 0 or length > MAX_BODY_BYTES:
+            # Refuse, and don't leave the client's bytes unread on a kept-alive connection:
+            # closing over unread data is a reset, and a client still sending (macOS, a
+            # 70 kB body) loses the 400. A negative length used to reach rfile.read(-1),
+            # which reads until the client hangs up.
+            self.close_connection = True
+            self._drain(length if 0 < length <= DRAIN_MAX_BYTES else DRAIN_MAX_BYTES)
+            raise ValueError("request body too large" if length > MAX_BODY_BYTES else "bad Content-Length")
         raw = self.rfile.read(length) if length else b""
         payload = json.loads(raw or b"{}")
         if not isinstance(payload, dict):
@@ -2056,7 +2083,7 @@ def add_camera_args(ap) -> None:
         "--rs-preset",
         default=None,
         help=f"depth visual preset at open: {'|'.join(sorted(VISUAL_PRESETS))}|none "
-        "(default: $PERCEPTRONICS_RS_PRESET, high_accuracy; none = leave the sensor as is)",
+        "(default: $PERCEPTRONICS_RS_PRESET, high_density; none = leave the sensor as is)",
     )
     ap.add_argument(
         "--laser-power",

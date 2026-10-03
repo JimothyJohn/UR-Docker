@@ -18,7 +18,7 @@ runtime is stdlib-only Python plus librealsense, which the installer builds from
 | Board | **Raspberry Pi 4 Model B, 4 GB** (the kit board, `hardware/BOM.md` K1; Nick, 2026-09-29: efficient compute), a Pi 5, or a CM4/CM5 industrial box — any **arm64** board with a **USB 3** port and Ethernet. Not a Pi 3 (USB 2 only). 2 GB boards work: the installer adds a temporary swapfile for the build. |
 | OS | **Debian arm64** (the target — Nick, 2026-09-28), bookworm (12) or trixie (13), minimal, no desktop; Raspberry Pi OS Lite (64-bit) is Debian and works the same. A RevPi Connect 5 gets a Debian image, not RevPi OS. Needs Python ≥ 3.10 (bookworm has 3.11, trixie 3.13) and systemd. |
 | Camera | One Intel RealSense **D435** (USB ID `8086:0b07`), connected **straight to a USB 3 port** (blue) with a short cable, no hub. |
-| Network | Ethernet on the robot's subnet. A static address is easiest to type into the pendant. |
+| Network | The Ethernet port goes to the robot (directly or through the cell switch). `install.sh` gives it **192.168.3.20/24** and serves the robot **192.168.3.3** over DHCP, so a robot left on DHCP needs no setup and the URCap needs nothing typed (§3). Office access, if any, over Wi-Fi. |
 | Robot | UR e-Series on PolyScope 5 with the Perceptronic URCap (`urcap/dist/perceptronic-ps5-*.urcap`, see `urcap/perceptronic-ps5/README.md`). |
 
 **Power:** the D435 is powered from the USB port. Raspberry Pi's documentation gives a
@@ -35,16 +35,13 @@ with a D435 in this repo**. If the camera drops out under load, check the supply
    **Raspberry Pi OS Lite (64-bit)** is Debian too: set the user, public-key SSH and host
    name in its OS customisation settings.)
 2. Plug in Ethernet on the robot's network and the D435 (USB 3), then boot.
-3. Give it a fixed address on the cell subnet. On Raspberry Pi OS (NetworkManager):
-
-       sudo nmcli con mod "Wired connection 1" ipv4.method manual \
-            ipv4.addresses 192.168.3.20/24 ipv4.never-default yes
-       sudo nmcli con up "Wired connection 1"
-
-   No gateway: the cell network has no route out. (`nmcli con show` lists the connection
-   names; on the 2026-10-02 Pi 5 image it was `netplan-eth0`, and the change persisted
-   through NetworkManager's netplan backend and a reboot.) On Debian with ifupdown, use
-   `/etc/network/interfaces`. Or reserve the address on the cell's DHCP server.
+3. The cell address is the installer's job (§2, *cell port*): nothing to do here. Reach the
+   PC for the deploy over Wi-Fi or a second network — `install.sh` never re-addresses a port
+   that is already on another network, so deploying over the Ethernet port on the office LAN
+   leaves it there; re-run on the cell to give it 192.168.3.20. By hand, on Raspberry Pi OS
+   (NetworkManager): `sudo nmcli con mod <name> ipv4.method manual ipv4.addresses
+   192.168.3.20/24 ipv4.never-default yes` (on the 2026-10-02 Pi 5 image the profile was
+   `netplan-eth0`; it persisted through the netplan backend and a reboot).
 4. The first install needs internet access on the PC. apt and the librealsense build
    fetch from Debian mirrors and GitHub (plus sqlite.org), see *Open items*.
 
@@ -71,14 +68,18 @@ What `install.sh` does, idempotently:
 | user | system user `perceptronics` in `plugdev` + `video`, state in `/var/lib/perceptronics` |
 | app | a venv per wheel under `/opt/perceptronics/releases/<version>-<sha>`, `pip install --no-index --no-deps` (nothing fetched), `/opt/perceptronics/current` and `previous` symlinks, the three newest releases kept |
 | config | `/etc/perceptronics/cell.env` from the shipped cell (`perceptronics/cells/<cell>.env`) minus the Mac's webcam lines, plus `cell.env.template`, plus `--robot-host`. Written only when missing or with `--reconfigure` (`--cell` / `--robot-host` on `deploy-pi.sh` imply it). The old file is kept as `cell.env.<timestamp>`. |
-| firewall | `/etc/nftables.conf` (the original is kept as `.pre-perceptronics`). Inbound traffic is dropped except loopback, replies, ICMP, SSH, and :7621/:7622 from the cell subnet (`--allow-from CIDR`, default `UR_HOST`'s /24). |
+| firewall | `/etc/nftables.conf` (the original is kept as `.pre-perceptronics`). Inbound traffic is dropped except loopback, replies, ICMP, SSH, :7621/:7622 from the cell subnet (`--allow-from CIDR`, default `UR_HOST`'s /24) and DHCP requests on the cell port. |
+| cell port | `--cell-if` (default `eth0`; `none` skips this row) gets `--cell-address` (default `192.168.3.20/24`, no gateway) as the NetworkManager profile `perceptronics-cell` — unless the port is already on another network, which is left alone. `perceptronics-cell-dhcp.service` (dnsmasq, already on Raspberry Pi OS Lite) hands **one** lease, the cell's `UR_HOST` (192.168.3.3), with no route and no DNS; it starts only when `python -m perceptronics.cellnet probe <port>` heard **no other DHCP server** there, and a NetworkManager hook re-probes every time the port comes up — so plugged into a plant network by mistake it stays quiet. A `UR_HOST` off the cell subnet: no DHCP, the robot needs a static address. |
 | service | `perceptronics-cockpit.service` enabled and restarted, plus `/usr/local/bin/perceptronics-doctor` |
 
 ## 3. Point the pendant at it
 
-On the pendant: **Installation** tab → **URCaps** → **Perceptronic** → **Cockpit**:
-type `http://192.168.3.20:7621` (the PC's address on the cell network) → **Save**. The Pick node uses the
-same host. It learns the pick port (:7622) from the cockpit. No `--cors` is needed,
+Out of the box, nothing: an empty **Cockpit** field (**Installation** tab → **URCaps** →
+**Perceptronic**) means `192.168.3.20`, the address the installer gives the PC's cell port,
+and the field shows it. The robot has to be on that network: **Settings → System → Network →
+DHCP → Apply** (UR's recommended setting — the PC hands it 192.168.3.3), or a static
+`192.168.3.x`, mask `255.255.255.0`. A PC deployed with another `--cell-address`: type that
+address in the field → **Save**. The Pick node uses the same host. It learns the pick port (:7622) from the cockpit. No `--cors` is needed,
 because the node is Java on the controller, not a web page.
 
 ## Day-to-day
@@ -90,7 +91,7 @@ because the node is Java on the controller, not a web page.
 | stop / start | `sudo systemctl stop perceptronics-cockpit` / `sudo systemctl start perceptronics-cockpit` |
 | the cockpit UI from a laptop | `ssh -L 7621:127.0.0.1:7621 pi@192.168.3.20`, then open http://127.0.0.1:7621 |
 | config | edit `/etc/perceptronics/cell.env`, then `sudo systemctl restart perceptronics-cockpit` |
-| calibration | `perceptronics calibrate --apply` saves to `/var/lib/perceptronics/captures/calibration/handeye.json`. Then **delete the `PERCEPTRONICS_T_FLANGE_CAMERA` line** in `cell.env` and restart, because an environment value wins over the file (CLAUDE.md, the stale hand-eye gotcha). |
+| calibration | `perceptronics calibrate --apply` saves to `/var/lib/perceptronics/captures/calibration/handeye.json` and takes effect at once. `install.sh` keeps `PERCEPTRONICS_T_FLANGE_CAMERA` out of `cell.env` (it seeds that file from the profile instead), because an environment value would win over every calibration at the next restart. Command: `PLUG-AND-PLAY.md` §6. |
 | audit | every robot action: `/var/lib/perceptronics/audit.jsonl` |
 
 **Update:** run the same `scripts/deploy-pi.sh pi@<ip>` from a newer checkout. It
@@ -144,7 +145,7 @@ Python 3.13.5, systemd 257, official 27 W supply (`usb_max_current_enable=1`,
 - **The unit is valid** (`systemd-analyze verify` silent); `systemd-analyze security`:
   3.3 OK.
 - **The hardened, non-root unit opens the D435** through the udev rules: 848×480 @ 30,
-  aligned, High Accuracy preset applied. No `DeviceAllow=` change needed.
+  aligned, High Density preset applied. No `DeviceAllow=` change needed.
 - **Stream cost:** `/api/color.png` 27 ms median on the Pi (92 ms from a laptop over
   Wi-Fi); the cockpit uses ~70 % of one core streaming.
 - **Reboot:** the static cell address, the firewall and the service (camera open,

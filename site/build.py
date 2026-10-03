@@ -37,7 +37,7 @@ SHEET_DIR = SITE / "datasheet"
 SHEET_PDF = "perceptronics-datasheet.pdf"
 SHEET_STAMP = SHEET_DIR / "datasheet.html.sha256"
 # the datasheet's revision date: move it when its figures or wording change
-SHEET_DATE = "2026-10-02"
+SHEET_DATE = "2026-10-03"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PLACEHOLDER = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
 

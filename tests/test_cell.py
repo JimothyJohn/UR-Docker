@@ -128,3 +128,34 @@ def test_cli_cells_export_is_shell_safe(capsys):
     assert "export UR_HOST=localhost" in out and "export UR_CELL=sim" in out
     assert all(line.startswith("export ") and "=" in line for line in out)
     assert main(["cells", "--export", "nope"]) == 2
+
+
+# -- without_key: the pick PC moves the hand-eye out of its cell.env ------------------------------
+
+
+def test_without_key_removes_every_line_of_it_and_returns_the_last_value():
+    from perceptronics.cell import without_key
+
+    text = (
+        "# a comment naming PERCEPTRONICS_T_FLANGE_CAMERA=[stays]\n"
+        "UR_HOST=192.168.3.3\n"
+        "PERCEPTRONICS_T_FLANGE_CAMERA=[1,2,3,4,5,6]\n"
+        "PERCEPTRONICS_TIP_M=0.163\n"
+        'export PERCEPTRONICS_T_FLANGE_CAMERA="[0.1,0,0,0,0,0]"\n'
+        "PERCEPTRONICS_T_FLANGE_CAMERA_X=keep\n"
+    )
+    rest, value = without_key(text, "PERCEPTRONICS_T_FLANGE_CAMERA")
+    assert value == "[0.1,0,0,0,0,0]"  # the last one, unquoted the way the parser reads it
+    assert rest == (
+        "# a comment naming PERCEPTRONICS_T_FLANGE_CAMERA=[stays]\n"
+        "UR_HOST=192.168.3.3\n"
+        "PERCEPTRONICS_TIP_M=0.163\n"
+        "PERCEPTRONICS_T_FLANGE_CAMERA_X=keep\n"
+    )
+
+
+def test_without_key_leaves_a_file_without_it_unchanged():
+    from perceptronics.cell import without_key
+
+    text = "UR_HOST=192.168.3.3\n# PERCEPTRONICS_T_FLANGE_CAMERA=x\n"
+    assert without_key(text, "PERCEPTRONICS_T_FLANGE_CAMERA") == (text, None)

@@ -80,8 +80,10 @@ scripts/deploy-pi.sh <user@pc> --cell ur3 --robot-host <robot-ip>
   doesn't on a real e-Series until the pendant is set to Remote. That is expected, not a
   deploy fault.
 - `approach`: must name the tool length Nick measured (`PERCEPTRONICS_TIP_M`).
-- `handeye`: `env:` means `PERCEPTRONICS_T_FLANGE_CAMERA` from `cell.env`. After a new
-  `perceptronics calibrate --apply`, delete that line and restart, or the old value wins.
+- `handeye`: should read `file:/var/lib/perceptronics/captures/calibration/handeye.json`
+  (`install.sh` moves the profile's pose there; `calibrate --apply` replaces it and it
+  survives restarts). `env:` means a `PERCEPTRONICS_T_FLANGE_CAMERA` line came back into
+  `cell.env` by hand: re-run the deploy, which takes it out again.
 
 Report the doctor's failures verbatim, each with its fix. Don't paraphrase them into
 "mostly fine".
@@ -115,7 +117,7 @@ laptop is inside the cell subnet (the firewall). Otherwise tunnel:
 | `no RealSense device enumerated` while `lsusb -d 8086:0b07` lists it | udev rules not applied to a camera that was already plugged in: have it re-plugged. Check `/etc/udev/rules.d/99-realsense-libusb.rules` exists and `id perceptronics` shows `plugdev`. |
 | `RS2_USB_STATUS_ACCESS` / `claim usb interface` in the journal | Same as above. If `sudo perceptronics-doctor` can't open it either, check nothing else holds it (`ss`, `ps aux \| grep perceptronics`). One process owns the camera. |
 | Camera on USB 2 | The cockpit negotiates 640×480 @ 15 by itself (`describe()["negotiated"]`). The fix is physical: a blue port, a short cable, no hub, and adequate PSU current on a Pi 5. |
-| Pendant: cockpit unreachable / feed blank | `ssh <pc> sudo nft list ruleset`: the controller's IP must fall inside `CELL_NET`. Re-deploy with `--allow-from <subnet>`. Also check the Cockpit field says `http://<pc-ip>:7621`, not `:7621` (that means the controller itself). |
+| Pendant: cockpit unreachable / feed blank | `ssh <pc> sudo nft list ruleset`: the controller's IP must fall inside `CELL_NET`. Re-deploy with `--allow-from <subnet>`. Also check the Cockpit field says the PC's cell address (empty / `192.168.3.20` is the default), not `:7621` (that means the controller itself), and that the robot is on the cell network: its Network screen on DHCP got 192.168.3.3 from `perceptronics-cell-dhcp` (`cat /var/lib/misc/perceptronics-cell.leases`); `journalctl -u perceptronics-cell-dhcp` says when it stood down because another DHCP server answered. |
 | Pick node loops on status −4 | The D435 dropped out (frames frozen). The cockpit re-opens it. Check the journal for `Frame didn't arrive`, and re-plug if it doesn't recover. It is not a hang. |
 | Cockpit log: pick port busy / runs without pick server | Something else holds :7622 (a sidecar). `pkill -f "pick-server --bind"`, then `sudo systemctl restart perceptronics-cockpit`. |
 | Service in a restart loop | `journalctl -u perceptronics-cockpit -b --no-pager \| tail -50`. Usually a bad `cell.env` value. Compare with the shipped cell, fix it, restart. |

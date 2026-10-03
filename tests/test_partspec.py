@@ -54,13 +54,35 @@ def test_a_measurement_is_the_part_within_tolerance_and_says_why_not_otherwise()
     assert spec.why_not(0.080, 0.040, 0.030) == "too long"
     assert spec.why_not(0.060, 0.050, 0.030) == "too wide"
     assert spec.why_not(0.040, 0.040, 0.030) == "too short"
-    assert spec.why_not(0.060, 0.025, 0.030) == "too narrow"
+    assert spec.why_not(0.060, 0.015, 0.030) == "too narrow"  # narrower than every face
+    # 60 x 25 is within the 60 x 30 face, which stands 40 tall: that is the face to complain about
+    assert spec.why_not(0.060, 0.025, 0.030) == "too flat"
     assert spec.why_not(0.060, 0.040, 0.040) == "too tall"
     assert spec.why_not(0.060, 0.040, 0.010) == "too flat"
     assert spec.why_not(0.120, 0.040, 0.030) == "2 parts touching?"
     # a small part is never held to less than the measurement's own ±5 mm
     tiny = PartSpec.from_mm(10, 8, tol_pct=5)
     assert tiny.why_not(0.014, 0.012, None) is None
+
+
+def test_a_box_is_the_part_lying_on_any_of_its_faces():
+    spec = PartSpec.from_mm(60, 40, 30, tol_pct=10)
+    assert spec.poses() == [(0.06, 0.04, 0.03), (0.06, 0.03, 0.04), (0.04, 0.03, 0.06)]
+    assert spec.why_not(0.060, 0.040, 0.030) is None  # flat
+    assert spec.why_not(0.060, 0.030, 0.040) is None  # on its long side
+    assert spec.why_not(0.040, 0.030, 0.060) is None  # on its end
+    assert spec.why_not(0.040, 0.030, 0.030) == "too flat"  # the end face, but only 30 tall
+    assert spec.heights() == [0.03, 0.04, 0.06]
+    assert spec.near_miss(0.040, 0.030, 0.050)
+
+
+def test_a_cube_has_one_pose_and_a_cylinder_stands_on_its_end():
+    assert PartSpec.from_mm(30, 30, 30).poses() == [(0.03, 0.03, 0.03)]
+    can = PartSpec.from_mm(40, 40, 60, shape="cyl")
+    assert can.poses() == [(0.04, 0.04, 0.06)]
+    assert can.why_not(0.060, 0.040, 0.040) == "too long"  # a can on its side is not this part
+    flat = PartSpec.from_mm(60, 40)  # no height: as given
+    assert flat.poses() == [(0.06, 0.04, None)] and flat.heights() == []
 
 
 @pytest.mark.parametrize(
@@ -201,7 +223,8 @@ def test_without_a_spec_the_foam_block_gate_is_unchanged():
 def test_a_spec_keeps_only_the_part_that_size():
     found, rejects = detect([BLOCK, SMALL, LONG], PartSpec.from_mm(54, 40, 40, tol_pct=15))
     assert [(round(b.major_m * 1000), round(b.minor_m * 1000)) for b in found] == [(54, 40)]
-    assert sorted(r["why"] for r in rejects) == ["2 parts touching?", "too short"]
+    # SMALL's footprint fits the 40 x 40 face, which stands 54 tall (a box lies on any face)
+    assert sorted(r["why"] for r in rejects) == ["2 parts touching?", "too flat"]
 
 
 def test_a_spec_can_ask_for_a_part_bigger_than_a_foam_block():

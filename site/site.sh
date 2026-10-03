@@ -4,6 +4,9 @@
 #   site/site.sh build      assemble site/_build/ from public/, urcap/dist/ and the screens
 #   site/site.sh preview    build, then serve it on http://localhost:8000
 #   site/site.sh datasheet  build, then print the one-page datasheet PDF (needs Chrome; commit the result)
+#                           Over SSH, Chrome can't print (no display: CVDisplayLink fails, no PDF);
+#                           use Playwright's headless shell, which needs none:
+#                           CHROME=$(ls -d ~/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell | tail -1) site/site.sh datasheet
 #   site/site.sh validate   check the CloudFormation template parses
 #   site/site.sh deploy     create/update the stack (first run: 5-15 min, certificate + CloudFront)
 #   site/site.sh sync       build, upload to the bucket, invalidate CloudFront
