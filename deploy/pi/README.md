@@ -145,7 +145,7 @@ Python 3.13.5, systemd 257, official 27 W supply (`usb_max_current_enable=1`,
 - **The unit is valid** (`systemd-analyze verify` silent); `systemd-analyze security`:
   3.3 OK.
 - **The hardened, non-root unit opens the D435** through the udev rules: 848×480 @ 30,
-  aligned, High Accuracy preset applied. No `DeviceAllow=` change needed.
+  aligned, High Density preset applied. No `DeviceAllow=` change needed.
 - **Stream cost:** `/api/color.png` 27 ms median on the Pi (92 ms from a laptop over
   Wi-Fi); the cockpit uses ~70 % of one core streaming.
 - **Reboot:** the static cell address, the firewall and the service (camera open,
