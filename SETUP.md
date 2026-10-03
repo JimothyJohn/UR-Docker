@@ -19,7 +19,7 @@ changed since 2026-09-28. Everything below that says "verified" was verified bef
 
 ### The UR3e cell, as built
 
-**Putting the Pi pick PC on it: `PLUG-AND-PLAY.md`** (three cables, the URCap, nothing typed).
+**Putting the Pi pick PC on it: `PLUG-AND-PLAY.md`** (three cables, the URCap, nothing typed). 2026-10-02 22:24: pickpc deployed for it (cell `ur3`, hand-eye in the file, cell DHCP armed); its Ethernet is not yet on the cell switch.
 
 - The arm stands on a ~12 in pedestal; **the parts sit ~0.27 m below the base** (the
   09-25 hand-eye solved a block top at base z = −0.270). The table is flat and parallel

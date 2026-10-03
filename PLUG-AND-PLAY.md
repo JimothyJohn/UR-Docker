@@ -134,6 +134,15 @@ What the pendant says (the URCap names the cause first, most likely first):
 | `3D Pick: no pick - …` popup | It names the reason; the node's screen shows the parts in green / yellow |
 | The robot got no address (DHCP) | `journalctl -u perceptronics-cell-dhcp`: *another DHCP server answered* means the Pi is on a network that has one, so it stays quiet. Give the robot a static 192.168.3.3 |
 
+## Verified 2026-10-02 (pickpc, no cable to the robot yet)
+
+`scripts/deploy-pi.sh nick@10.0.0.56 --cell ur3` from this branch: the installer kept
+Raspberry Pi OS's own `netplan-eth0` profile (it already gives eth0 192.168.3.20/24) instead of
+adding a second, seeded the hand-eye file from the profile (the cockpit's `/api/info` says
+`file:/var/lib/perceptronics/captures/calibration/handeye.json`), started the DHCP server
+waiting for eth0, installed the link-up hook; the D435 streams at 30 fps on USB 3.2; the
+doctor's `network` line reads *reached from 10.0.0.56, not on its network* — right, no cable.
+
 ## Not verified yet (2026-10-02)
 
 - The Pi has never run against the real UR3e: Dashboard / RTDE from the Pi, the pendant
