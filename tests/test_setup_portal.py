@@ -252,7 +252,12 @@ def test_a_wrong_manifest_is_refused(bundle, change):
         admin.verify_bundle(bundle)
 
 
-@pytest.mark.parametrize("blob", [b"", b"not a tar at all", b"\x1f\x8b\x08\x00gzip", b"\x00" * 10240])
+# explicit ids: pytest puts the test id in an environment variable, and Windows refuses a NUL in one
+@pytest.mark.parametrize(
+    "blob",
+    [b"", b"not a tar at all", b"\x1f\x8b\x08\x00gzip", b"\x00" * 10240],
+    ids=["empty", "text", "truncated-gzip", "10k-nuls"],
+)
 def test_things_that_are_not_bundles(tmp_path, blob):
     p = tmp_path / "x.tar"
     p.write_bytes(blob)
