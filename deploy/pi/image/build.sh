@@ -131,7 +131,9 @@ fi
 stage="${root}/tmp/perceptronics-image"
 mkdir -p "$stage"
 cp "${DEPLOY_DIR}"/install.sh "${DEPLOY_DIR}"/perceptronics-cockpit.service "${DEPLOY_DIR}"/nftables.conf \
-    "${DEPLOY_DIR}"/cell.env.template "${DEPLOY_DIR}"/perceptronics-doctor "${DEPLOY_DIR}"/README.md "$stage/"
+    "${DEPLOY_DIR}"/cell.env.template "${DEPLOY_DIR}"/perceptronics-doctor "${DEPLOY_DIR}"/README.md \
+    "${DEPLOY_DIR}"/cell-dhcp.conf "${DEPLOY_DIR}"/perceptronics-cell-dhcp.service \
+    "${DEPLOY_DIR}"/50-perceptronics-cell "$stage/"
 cp "$wheel" "$stage/"
 install_args=(--image --wheel "/tmp/perceptronics-image/$(basename "$wheel")" --cell "$cell")
 [ -n "$robot_host" ] && install_args+=(--robot-host "$robot_host")
