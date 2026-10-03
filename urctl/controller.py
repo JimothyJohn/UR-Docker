@@ -7,8 +7,9 @@ Two structural interfaces (``typing.Protocol``, so nothing has to inherit):
   path / trajectory motion, stop, freedrive, program load/play/pause, a native
   script. :class:`urctl.robot.Robot` is the UR implementation (e-Series over
   Dashboard + Primary, PolyScope X over the Robot-API + Primary — one class,
-  selected by ``RobotConfig.platform``). A Fanuc (or any other arm) is a second
-  class satisfying the same protocol; ``isinstance(x, Controller)`` checks it.
+  selected by ``RobotConfig.platform``). :class:`urctl.ufactory.UFactoryArm` is
+  the second vendor (UFACTORY 850 / xArm / Lite 6, ``platform="ufactory"``);
+  :func:`make_controller` picks between them. ``isinstance(x, Controller)`` checks it.
 * :class:`Gripper` — status / open / close / move / activate with one result
   shape. :class:`RobotiqUrcapGripper` adapts :meth:`Robot.gripper` (the Robotiq
   URCap daemon on the controller's loopback, driven from URScript).
@@ -100,4 +101,20 @@ class RobotiqUrcapGripper:
         return self.robot.gripper("activate")
 
 
-__all__ = ["Controller", "Gripper", "RobotiqUrcapGripper"]
+def make_controller(config=None, **kwargs) -> Controller:
+    """The controller ``config.platform`` names: a :class:`urctl.ufactory.UFactoryArm`
+    for ``ufactory``, a UR :class:`urctl.robot.Robot` otherwise. ``kwargs``
+    (``dry_run``, ``safety``, ``audit``) go to the constructor."""
+    from .config import RobotConfig
+
+    config = config or RobotConfig.from_env()
+    if config.is_ufactory():
+        from .ufactory import UFactoryArm
+
+        return UFactoryArm(config, **kwargs)
+    from .robot import Robot
+
+    return Robot(config, **kwargs)
+
+
+__all__ = ["Controller", "Gripper", "RobotiqUrcapGripper", "make_controller"]

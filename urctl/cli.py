@@ -22,8 +22,8 @@ import argparse
 import json
 import sys
 
-from .config import RobotConfig
-from .robot import Robot
+from .config import PLATFORMS, RobotConfig
+from .controller import make_controller
 from .tools import ToolError, call_tool, get_tool_schemas
 
 
@@ -224,10 +224,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--host", default=None, help="controller host/IP (default: $UR_HOST or localhost)")
     ap.add_argument(
         "--platform",
-        choices=["e-series", "polyscopex"],
+        choices=list(PLATFORMS),
         default=None,
-        help="controller software: e-series (Dashboard) or polyscopex (REST Robot-API). "
-        "Default: $UR_PLATFORM or e-series.",
+        help="controller software: e-series (Dashboard), polyscopex (REST Robot-API) or "
+        "ufactory (a UFACTORY 850 / xArm / Lite 6). Default: $UR_PLATFORM or e-series.",
     )
     ap.add_argument(
         "--robot-api-port",
@@ -478,12 +478,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.robot_api_port is not None:
         overrides["robot_api_port"] = args.robot_api_port
     config = RobotConfig.from_env(host=args.host, **overrides)
-    robot = Robot(config, dry_run=args.dry_run)
+    robot = make_controller(config, dry_run=args.dry_run)
     if args.audit_log:
         from .audit import AuditLog
 
         robot.audit = AuditLog(path=args.audit_log)
 
+    if config.is_ufactory() and args.cmd in ("snapshot", "programs", "guided", "inspect"):
+        return _emit(
+            {"action": args.cmd, "ok": False, "error": f"{args.cmd} needs a UR controller (PolyScope)"}
+        )
     if args.cmd == "state":
         return _emit(robot.get_state())
     if args.cmd == "rtde-state":
