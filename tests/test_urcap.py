@@ -86,7 +86,7 @@ def test_manifest_reader_rejects_bad_ids_and_missing_fields():
 
 def test_package_is_a_gzipped_tar_with_the_manifest_first(tmp_path):
     out = urcapx.package(URCAP, tmp_path)
-    assert out.name == "perceptronic-0.6.0.urcapx"
+    assert out.name == "perceptronic-0.7.0.urcapx"
     with tarfile.open(out, "r:gz") as tar:
         names = tar.getnames()
     assert names[0] == "manifest.yaml"
@@ -122,7 +122,7 @@ def test_package_is_reproducible_and_normalised(tmp_path):
     a = urcapx.package(URCAP, tmp_path / "a").read_bytes()
     b = urcapx.package(URCAP, tmp_path / "b").read_bytes()
     assert a == b
-    with tarfile.open(tmp_path / "a" / "perceptronic-0.6.0.urcapx", "r:gz") as tar:
+    with tarfile.open(tmp_path / "a" / "perceptronic-0.7.0.urcapx", "r:gz") as tar:
         infos = tar.getmembers()
     assert {(i.uid, i.gid, i.uname, i.gname) for i in infos} == {(0, 0, "", "")}
     assert len({i.mtime for i in infos}) == 1 and infos[0].mtime > 1_600_000_000
@@ -321,10 +321,10 @@ def test_cli_list_and_package(tmp_path, urservice, capsys):
     assert urcapx.main(["list", "--host", host, "--port", str(port)]) == 0
     assert "universal-robots/web-frontend-app  1.2.0" in capsys.readouterr().out
     assert urcapx.main(["package", str(URCAP), "--out", str(tmp_path)]) == 0
-    assert (tmp_path / "perceptronic-0.6.0.urcapx").is_file()
+    assert (tmp_path / "perceptronic-0.7.0.urcapx").is_file()
     assert (
         urcapx.main(
-            ["install", str(tmp_path / "perceptronic-0.6.0.urcapx"), "--host", host, "--port", str(port)]
+            ["install", str(tmp_path / "perceptronic-0.7.0.urcapx"), "--host", host, "--port", str(port)]
         )
         == 0
     )
@@ -646,8 +646,8 @@ def test_cockpit_field_shorthand_is_never_fetched_relative_to_polyscope(tmp_path
     harness = tmp_path / "harness.js"
     harness.write_text(COCKPIT_BASE_HARNESS, encoding="utf-8")
     cases = {
-        "": "http://localhost:7621",
-        None: "http://localhost:7621",
+        "": "http://192.168.3.20:7621",  # the pick PC's factory address
+        None: "http://192.168.3.20:7621",
         ":7621": "http://localhost:7621",
         "7621": "http://localhost:7621",
         " :7622/ ": "http://localhost:7622",
@@ -774,3 +774,20 @@ def test_cors_drops_entries_that_are_not_an_origin(capsys):
     assert app.cors_origins == ["http://localhost:8000", "https://[::1]:8443"]
     err = capsys.readouterr().err
     assert "\r" not in err and err.count("CORS: ignoring") == 3  # logged escaped, never raw
+
+
+def test_every_request_to_the_camera_computer_can_time_out():
+    # Regression (2026-10-02): an empty Cockpit field means 192.168.3.20, and a fetch to an
+    # address nothing answers on waited for TCP to give up — the e2e's feed never went live.
+    # Every fetch carries an AbortController signal, set in the call or in the init it gets
+    # (within the few lines before it), and that controller has a setTimeout that aborts it.
+    for js in sorted(FRONTEND.glob("*.js")):
+        lines = js.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            if "fetch(" not in line or line.lstrip().startswith("//"):
+                continue
+            window = "\n".join(lines[max(0, i - 12) : i + 2])
+            assert "signal" in window, f"{js.name}:{i + 1}: fetch without an abort signal"
+            assert re.search(r"setTimeout\(\(\) => ctl\.abort\(\)", window), (
+                f"{js.name}:{i + 1}: its AbortController is never aborted by a timer"
+            )

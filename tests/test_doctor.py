@@ -334,3 +334,50 @@ def test_doctor_waits_for_a_cockpit_that_is_still_opening_the_camera(cockpit_inf
         timer.cancel()
     assert checks["camera"]["ok"] is True
     assert "seq 12" in checks["cockpit"]["detail"]
+
+
+# -- network: on the robot's network, and what the pendant's Cockpit field needs ----------------
+
+
+def _network(host: str, local: str | None) -> dict | None:
+    from perceptronics.doctor import check_network
+
+    rep = Report()
+    check_network(rep, RobotConfig(host=host), source=lambda _h: local)
+    found = [c for c in rep.as_dict()["checks"] if c["name"] == "network"]
+    return found[0] if found else None
+
+
+def test_the_pick_pc_at_its_factory_address_needs_nothing_typed():
+    c = _network("192.168.3.3", "192.168.3.20")
+    assert c["ok"] is True and "can stay empty" in c["detail"]
+    assert c["data"]["pendant_default"] is True
+
+
+def test_another_address_on_the_cell_is_what_the_pendant_must_be_given():
+    c = _network("192.168.3.3", "192.168.3.10")
+    assert c["ok"] is True and "Cockpit = 192.168.3.10" in c["detail"]
+
+
+def test_a_robot_reached_through_a_router_is_flagged_with_the_fix():
+    # the Mac Studio with its cell interface down: the route to .3 goes out of the office LAN
+    c = _network("192.168.3.3", "10.0.0.16")
+    assert c["ok"] is False and c["severity"] == "warn"
+    assert "10.0.0.16" in c["detail"] and "192.168.3.0/24" in c["detail"]
+    assert "192.168.3.20/24" in c["fix"]
+
+
+def test_no_route_is_flagged():
+    c = _network("192.168.3.3", None)
+    assert c["ok"] is False and "no route" in c["detail"]
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "ursim.local", ""])
+def test_no_network_line_for_a_local_sim_a_name_or_no_host(host):
+    assert _network(host, "10.0.0.16") is None
+
+
+def test_source_address_names_a_local_address_without_sending_anything():
+    from perceptronics.doctor import source_address
+
+    assert source_address("127.0.0.1") == "127.0.0.1"

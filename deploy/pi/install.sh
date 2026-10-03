@@ -5,6 +5,7 @@
 #
 #   sudo ./install.sh --wheel ur_docker-0.1.0-py3-none-any.whl [--cell ur3] \
 #                     [--robot-host 192.168.3.3] [--allow-from 192.168.3.0/24] [--reconfigure]
+#                     [--cell-if eth0|none] [--cell-address 192.168.3.20/24]
 #   sudo /opt/perceptronics/deploy/install.sh --rollback        # back to the previous release
 #   sudo /opt/perceptronics/deploy/install.sh --uninstall [--purge]
 #
@@ -17,6 +18,13 @@
 # the PolyScope Pick node's pick server on TCP :7622.
 #   stop:  sudo systemctl stop perceptronics-cockpit     logs: journalctl -u perceptronics-cockpit -f
 # A `perceptronics pick-server` sidecar also binds :7622 — stop it before (re)starting the unit.
+#
+# The cell port (--cell-if, default eth0) is set up for a robot nobody has configured: it
+# holds --cell-address (default 192.168.3.20/24, what the URCap's empty Cockpit field means)
+# and perceptronics-cell-dhcp.service hands a robot on DHCP the cell's UR_HOST (192.168.3.3)
+# — but only when no other DHCP server answers there. A port already on another network
+# (the bench's office LAN) is left alone. --cell-if none skips all of it.
+#   stop:  sudo systemctl disable --now perceptronics-cell-dhcp   logs: journalctl -u perceptronics-cell-dhcp
 set -euo pipefail
 
 # ---- pins ----------------------------------------------------------------------------
@@ -61,6 +69,10 @@ readonly NFT_CONF="/etc/nftables.conf"
 readonly NFT_BACKUP="/etc/nftables.conf.pre-perceptronics"
 readonly NFT_MARKER="# perceptronics-cockpit firewall"
 readonly BUILD_ROOT="/var/tmp/perceptronics-build"
+readonly CELL_DHCP_UNIT="perceptronics-cell-dhcp.service"
+readonly CELL_DHCP_CONF="${ETC_DIR}/cell-dhcp.conf"
+readonly NM_HOOK="/etc/NetworkManager/dispatcher.d/50-perceptronics-cell"
+readonly NM_CELL_CON="perceptronics-cell"
 readonly KEEP_RELEASES=3
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,12 +95,15 @@ usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' 
 #                          recommended") — the cockpit re-opens a camera that dropped out
 #   nftables               the inbound firewall below
 #   usbutils               `lsusb`, the deploy skill's "is the D435 (8086:0b07) there?" check
+#   dnsmasq-base           the cell port's one-lease DHCP server (only the binary; already
+#                          on Raspberry Pi OS Lite trixie, where NetworkManager pulls it in)
 readonly APT_PACKAGES=(
     python3 python3-venv
     git ca-certificates
     cmake build-essential pkg-config
     libusb-1.0-0-dev libudev-dev
     nftables usbutils
+    dnsmasq-base
 )
 
 apt_install() {
@@ -305,8 +320,9 @@ lines = [
     "# /etc/perceptronics/cell.env - written by /opt/perceptronics/deploy/install.sh",
     f"# from the shipped cell {cell!r} + cell.env.template. Read by perceptronics-cockpit.service",
     "# (EnvironmentFile=) and by `perceptronics --cell /etc/perceptronics/cell.env ...`.",
-    "# After `perceptronics calibrate --apply` on this PC, delete the PERCEPTRONICS_T_FLANGE_CAMERA",
-    "# line and restart: an environment value wins over the saved hand-eye file.",
+    "# The hand-eye is not here: install.sh moves the profile's PERCEPTRONICS_T_FLANGE_CAMERA into",
+    "# PERCEPTRONICS_HANDEYE_FILE, which `perceptronics calibrate --apply` replaces (an environment",
+    "# value would win over every calibration made on this PC).",
 ]
 for key, value in values.items():
     if bad & set(value):
@@ -322,6 +338,46 @@ PY
 }
 
 cell_value() { sed -n "s/^$1=//p" "$CELL_ENV" | tail -n 1; }
+
+# The hand-eye lives in PERCEPTRONICS_HANDEYE_FILE, never in cell.env: HandEye.from_env takes
+# the environment first, so a PERCEPTRONICS_T_FLANGE_CAMERA line would silently undo every
+# `perceptronics calibrate --apply` on this PC at the next restart. The profile's value seeds
+# the file when there is none; a file already there is a calibration made here and is kept.
+# Runs on every install, so a cell.env written before this rule is fixed too.
+handeye_out_of_env() {
+    local py="${CURRENT}/bin/python" file result
+    file="$(cell_value PERCEPTRONICS_HANDEYE_FILE)"
+    [ -n "$file" ] || { log "hand-eye: no PERCEPTRONICS_HANDEYE_FILE in ${CELL_ENV}: left as is"; return; }
+    result="$("$py" - "$CELL_ENV" "$file" "${CELL_ENV}.new" <<'PY'
+import sys
+from pathlib import Path
+
+from perceptronics.cell import without_key
+from perceptronics.handeye import ENV_T_FLANGE_CAMERA, parse_pose_text, seed_calibration_file
+
+cell_env, file, out = sys.argv[1:4]
+rest, raw = without_key(Path(cell_env).read_text(encoding="utf-8"), ENV_T_FLANGE_CAMERA)
+if raw is None:
+    print("none")
+    sys.exit(0)
+wrote = seed_calibration_file(file, parse_pose_text(raw), source=f"cell profile, seeded by install.sh from {cell_env}")
+Path(out).write_text(rest, encoding="utf-8")
+print("seeded" if wrote else "kept")
+PY
+)"
+    case "$result" in
+        none) return ;;
+        seeded) log "hand-eye: the profile's pose seeded ${file} (calibrate --apply replaces it)" ;;
+        kept) log "hand-eye: kept ${file} (a calibration made on this PC); dropped the profile's pose" ;;
+        *) die "hand-eye: could not move PERCEPTRONICS_T_FLANGE_CAMERA out of ${CELL_ENV}" ;;
+    esac
+    cp -p "$CELL_ENV" "${CELL_ENV}.$(date +%Y%m%d-%H%M%S)"
+    chown root:"$SVC_USER" "${CELL_ENV}.new"
+    chmod 0640 "${CELL_ENV}.new"
+    mv "${CELL_ENV}.new" "$CELL_ENV"
+    chown "$SVC_USER":"$SVC_USER" "$file"
+    chmod 0640 "$file"
+}
 
 # ---- firewall --------------------------------------------------------------------------
 cell_net() {
@@ -339,11 +395,11 @@ cell_net() {
 }
 
 install_firewall() {
-    local net="$1"
+    local net="$1" cell_if="$2"
     [[ "$net" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]] || die "--allow-from ${net}: expected an IPv4 CIDR"
     local rendered
     rendered="$(mktemp)"
-    sed "s#@CELL_NET@#${net}#g" "${HERE}/nftables.conf" >"$rendered"
+    sed -e "s#@CELL_NET@#${net}#g" -e "s#@CELL_IF@#${cell_if}#g" "${HERE}/nftables.conf" >"$rendered"
     nft -c -f "$rendered" || die "nftables.conf failed nft's syntax check"
     if [ -f "$NFT_CONF" ] && ! grep -qF "$NFT_MARKER" "$NFT_CONF" && [ ! -f "$NFT_BACKUP" ]; then
         cp -p "$NFT_CONF" "$NFT_BACKUP"
@@ -353,7 +409,112 @@ install_firewall() {
     rm -f "$rendered"
     systemctl enable -q nftables.service
     systemctl restart nftables.service
-    log "firewall: inbound SSH from anywhere; :7621/:7622 from ${net} only; everything else dropped"
+    log "firewall: inbound SSH from anywhere; :7621/:7622 from ${net} only; DHCP on ${cell_if}; everything else dropped"
+}
+
+# ---- the cell port ---------------------------------------------------------------------
+ip_to_int() {
+    local a b c d
+    IFS=. read -r a b c d <<<"$1"
+    echo $(((a << 24) | (b << 16) | (c << 8) | d))
+}
+
+prefix_mask() {
+    local p="$1" m
+    m=$(((0xffffffff << (32 - p)) & 0xffffffff))
+    echo "$((m >> 24 & 255)).$((m >> 16 & 255)).$((m >> 8 & 255)).$((m & 255))"
+}
+
+# Give the cell port its fixed address with NetworkManager. Never touches a port that is
+# already on another network: on the bench that is the office LAN this install runs over.
+configure_cell_address() {
+    local cell_if="$1" cidr="$2" have con
+    if ! command -v nmcli >/dev/null || ! nmcli -t general status >/dev/null 2>&1; then
+        log "cell port: NetworkManager not running — give ${cell_if} ${cidr} (no gateway) by hand"
+        return
+    fi
+    have="$(ip -4 -o addr show dev "$cell_if" 2>/dev/null | awk '{print $4}')"
+    if printf '%s\n' "$have" | grep -qx "$cidr"; then
+        log "cell port: ${cell_if} already has ${cidr}"
+        return
+    fi
+    if [ -n "$have" ]; then
+        log "cell port: ${cell_if} is on another network ($(echo "$have" | tr '\n' ' ')) — left alone;" \
+            "on the cell, re-run with that port free (or set ${cidr} by hand)"
+        return
+    fi
+    # A profile of someone else's for this port that already carries the address (the
+    # bench's hand-made one): keep it rather than add a second. "For this port" = it names the
+    # port, or it is an Ethernet profile that names none (netplan's `match: {}`, as Raspberry
+    # Pi OS writes it: it applies to any Ethernet port).
+    local bound
+    while IFS=: read -r con; do
+        if [ -z "$con" ] || [ "$con" = "$NM_CELL_CON" ]; then continue; fi
+        bound="$(nmcli -g connection.interface-name,connection.type connection show "$con" 2>/dev/null \
+            | tr '\n' ' ')"
+        case "$bound" in
+            "${cell_if} "* | " 802-3-ethernet "*) ;;
+            *) continue ;;
+        esac
+        if nmcli -g ipv4.addresses connection show "$con" 2>/dev/null | grep -qF "$cidr"; then
+            log "cell port: NetworkManager profile ${con} already gives ${cell_if} ${cidr} — kept"
+            return
+        fi
+    done < <(nmcli -t -f NAME connection show)
+    if nmcli -t -f NAME connection show | grep -qx "$NM_CELL_CON"; then
+        nmcli connection modify "$NM_CELL_CON" connection.interface-name "$cell_if" \
+            ipv4.method manual ipv4.addresses "$cidr" ipv4.gateway "" ipv4.never-default yes
+    else
+        nmcli connection add type ethernet con-name "$NM_CELL_CON" ifname "$cell_if" \
+            connection.autoconnect yes connection.autoconnect-priority 100 \
+            ipv4.method manual ipv4.addresses "$cidr" ipv4.never-default yes ipv6.method link-local >/dev/null
+    fi
+    if [ "$(cat "/sys/class/net/${cell_if}/carrier" 2>/dev/null)" = 1 ]; then
+        nmcli connection up "$NM_CELL_CON" >/dev/null || log "cell port: ${NM_CELL_CON} did not come up — check nmcli"
+    fi
+    log "cell port: ${cell_if} = ${cidr} (NetworkManager profile ${NM_CELL_CON}; up when a cable is in)"
+}
+
+# One DHCP lease, the cell's UR_HOST, on the cell port — started only after no other DHCP
+# server answered there (perceptronics.cellnet probe).
+install_cell_dhcp() {
+    local cell_if="$1" cidr="$2" robot prefix
+    robot="$(cell_value UR_HOST)"
+    prefix="${cidr#*/}"
+    if ! [[ "$robot" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] \
+        || [ $(($(ip_to_int "$robot") >> (32 - prefix))) -ne $(($(ip_to_int "${cidr%/*}") >> (32 - prefix))) ]; then
+        log "cell DHCP: UR_HOST=${robot:-<empty>} is not on ${cidr} — not serving (the robot needs a static address)"
+        remove_cell_dhcp
+        return
+    fi
+    local tpl
+    for tpl in cell-dhcp.conf "$CELL_DHCP_UNIT" 50-perceptronics-cell; do
+        sed -e "s#@CELL_IF@#${cell_if}#g" -e "s#@ROBOT_ADDRESS@#${robot}#g" \
+            -e "s#@CELL_MASK@#$(prefix_mask "$prefix")#g" "${HERE}/${tpl}" >"${BUILD_ROOT}.${tpl}"
+    done
+    install -m 0644 "${BUILD_ROOT}.cell-dhcp.conf" "$CELL_DHCP_CONF"
+    /usr/sbin/dnsmasq --test --conf-file="$CELL_DHCP_CONF" >/dev/null 2>&1 \
+        || die "cell-dhcp.conf failed dnsmasq's syntax check"
+    install -m 0644 "${BUILD_ROOT}.${CELL_DHCP_UNIT}" "/etc/systemd/system/${CELL_DHCP_UNIT}"
+    if [ -d "$(dirname "$NM_HOOK")" ]; then
+        install -m 0755 "${BUILD_ROOT}.50-perceptronics-cell" "$NM_HOOK"
+    fi
+    rm -f "${BUILD_ROOT}.cell-dhcp.conf" "${BUILD_ROOT}.${CELL_DHCP_UNIT}" "${BUILD_ROOT}.50-perceptronics-cell"
+    systemctl daemon-reload
+    systemctl enable -q "$CELL_DHCP_UNIT"
+    systemctl restart "$CELL_DHCP_UNIT"
+    if systemctl is-active -q "$CELL_DHCP_UNIT"; then
+        log "cell DHCP: serving ${robot} on ${cell_if}"
+    else
+        log "cell DHCP: not serving now (another DHCP server answered, or ${cell_if} has no cable);" \
+            "it re-checks whenever ${cell_if} comes up — journalctl -u ${CELL_DHCP_UNIT}"
+    fi
+}
+
+remove_cell_dhcp() {
+    systemctl disable --now "$CELL_DHCP_UNIT" 2>/dev/null || true
+    rm -f "/etc/systemd/system/${CELL_DHCP_UNIT}" "$CELL_DHCP_CONF" "$NM_HOOK"
+    systemctl daemon-reload
 }
 
 # ---- systemd ---------------------------------------------------------------------------
@@ -369,11 +530,12 @@ install_units() {
 copy_deploy_files() {
     mkdir -p "$DEPLOY_COPY"
     local f
-    for f in install.sh perceptronics-cockpit.service nftables.conf cell.env.template perceptronics-doctor README.md; do
+    for f in install.sh perceptronics-cockpit.service nftables.conf cell.env.template perceptronics-doctor README.md \
+        cell-dhcp.conf perceptronics-cell-dhcp.service 50-perceptronics-cell; do
         [ "${HERE}/${f}" -ef "${DEPLOY_COPY}/${f}" ] && continue
         install -m 0644 "${HERE}/${f}" "${DEPLOY_COPY}/${f}"
     done
-    chmod 0755 "${DEPLOY_COPY}/install.sh" "${DEPLOY_COPY}/perceptronics-doctor"
+    chmod 0755 "${DEPLOY_COPY}/install.sh" "${DEPLOY_COPY}/perceptronics-doctor" "${DEPLOY_COPY}/50-perceptronics-cell"
 }
 
 # ---- rollback / uninstall -------------------------------------------------------------
@@ -393,6 +555,7 @@ uninstall() {
     local purge="$1"
     systemctl disable --now "$UNIT" 2>/dev/null || true
     rm -f "/etc/systemd/system/${UNIT}" /usr/local/bin/perceptronics-doctor
+    remove_cell_dhcp
     systemctl daemon-reload
     if [ -f "$NFT_CONF" ] && grep -qF "$NFT_MARKER" "$NFT_CONF"; then
         if [ -f "$NFT_BACKUP" ]; then
@@ -404,13 +567,14 @@ uninstall() {
         systemctl restart nftables.service 2>/dev/null || true
     fi
     rm -rf "$APP_ROOT"
-    log "removed ${UNIT}, the firewall table and ${APP_ROOT}"
+    log "removed ${UNIT}, the cell DHCP server, the firewall table and ${APP_ROOT}"
     if [ "$purge" = 1 ]; then
         rm -rf "$ETC_DIR" "$STATE_DIR" "$LIBREALSENSE_PREFIX" "$LIBREALSENSE_LINK" "$LDCONF" "$UDEV_RULES"
         ldconfig
         udevadm control --reload-rules
         userdel "$SVC_USER" 2>/dev/null || true
-        log "purged ${ETC_DIR}, ${STATE_DIR} (calibrations, snapshots), librealsense, udev rules, user"
+        nmcli connection delete "$NM_CELL_CON" >/dev/null 2>&1 || true
+        log "purged ${ETC_DIR}, ${STATE_DIR} (calibrations, snapshots), librealsense, udev rules, user, the ${NM_CELL_CON} profile"
     else
         log "kept ${ETC_DIR}, ${STATE_DIR} (calibrations), librealsense and the ${SVC_USER} user (--purge removes them)"
     fi
@@ -419,12 +583,15 @@ uninstall() {
 # ---- main ------------------------------------------------------------------------------
 main() {
     local wheel="" cell="ur3" robot_host="" allow_from="" reconfigure=0 action=install purge=0
+    local cell_if="eth0" cell_address="192.168.3.20/24"
     while [ $# -gt 0 ]; do
         case "$1" in
             --wheel) wheel="${2:?--wheel needs a path}"; shift 2 ;;
             --cell) cell="${2:?--cell needs a name}"; shift 2 ;;
             --robot-host) robot_host="${2:?--robot-host needs an address}"; shift 2 ;;
             --allow-from) allow_from="${2:?--allow-from needs a CIDR}"; shift 2 ;;
+            --cell-if) cell_if="${2:?--cell-if needs an interface or none}"; shift 2 ;;
+            --cell-address) cell_address="${2:?--cell-address needs a CIDR}"; shift 2 ;;
             --reconfigure) reconfigure=1; shift ;;
             --rollback) action=rollback; shift ;;
             --uninstall) action=uninstall; shift ;;
@@ -436,6 +603,9 @@ main() {
     if [ -n "$robot_host" ] && ! [[ "$robot_host" =~ ^[A-Za-z0-9.:-]+$ ]]; then
         die "--robot-host ${robot_host}: expected an IP address or host name"
     fi
+    [[ "$cell_if" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || die "--cell-if ${cell_if}: expected an interface name or none"
+    [[ "$cell_address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/([89]|[12][0-9]|30)$ ]] \
+        || die "--cell-address ${cell_address}: expected an IPv4 CIDR such as 192.168.3.20/24"
     [ "$(id -u)" -eq 0 ] || die "run as root (sudo $0 ...)"
     case "$action" in
         rollback) rollback; return ;;
@@ -455,11 +625,19 @@ main() {
     else
         log "kept ${CELL_ENV} (--reconfigure rewrites it from the cell profile)"
     fi
+    handeye_out_of_env
     local net
     net="$(cell_net "$allow_from")"
-    install_firewall "$net"
+    install_firewall "$net" "$cell_if"
     copy_deploy_files
     install_units
+    if [ "$cell_if" = none ]; then
+        remove_cell_dhcp
+        log "cell port: --cell-if none — no cell address, no DHCP server"
+    else
+        configure_cell_address "$cell_if" "$cell_address"
+        install_cell_dhcp "$cell_if" "$cell_address"
+    fi
     log "done. Check it: sudo perceptronics-doctor"
 }
 

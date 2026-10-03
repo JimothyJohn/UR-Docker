@@ -127,7 +127,7 @@ public class PilotView implements SwingInstallationNodeView<PilotContribution> {
         JLabel label = new JLabel("Cockpit");
         label.setForeground(INK);
         url.setFont(url.getFont().deriveFont(16f));
-        url.setToolTipText("http://<camera-computer-ip>:7621 (empty = this controller:7621)");
+        url.setToolTipText("The pick PC's address: " + Cockpit.DEFAULT_HOST + " out of the box — type another if you changed it");
         url.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -221,11 +221,12 @@ public class PilotView implements SwingInstallationNodeView<PilotContribution> {
 
     // -- setters the contribution calls from any thread ------------------------------------------
 
+    /** The saved address, or (nothing saved) the pick PC's factory one, in the field to edit. */
     void showUrl(final String value) {
         onEdt(new Runnable() {
             @Override
             public void run() {
-                url.setText(value);
+                url.setText(value == null || value.trim().isEmpty() ? Cockpit.DEFAULT_HOST : value);
             }
         });
     }

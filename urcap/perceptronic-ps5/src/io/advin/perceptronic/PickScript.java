@@ -40,7 +40,7 @@ import java.util.Map;
  * </ol>
  */
 final class PickScript {
-    static final String VERSION = "0.8.0";
+    static final String VERSION = "0.9.0";
     static final int DEFAULT_PICK_PORT = 7622;
     static final String SOCKET = "rs_pick";
     static final int MAX_POINTS = 12;

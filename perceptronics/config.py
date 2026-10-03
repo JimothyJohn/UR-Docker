@@ -56,7 +56,10 @@ DEFAULT_RS_DEPTH_HEIGHT = 480
 DEFAULT_RS_FILTERS = True
 # Depth-sensor options at open: a visual preset name ("none" = leave the sensor
 # as configured) and projector power ("max", "none", or mW).
-DEFAULT_RS_PRESET = "high_accuracy"
+# High Density, not High Accuracy (2026-10-03): High Accuracy dropped 57 % of a dark, printed
+# 30 mm-wide box top at 0.72 m and the detector missed it; High Density kept 92 % and found 4 of 4
+# (tests/fixtures/d435). For picking, a hole costs more than a less confident pixel.
+DEFAULT_RS_PRESET = "high_density"
 DEFAULT_RS_LASER_POWER = "max"
 # Lean open: the fewest USB handle opens per start (no USB-type probe, no mode
 # enumeration, no preset/laser writes, global time off). A macOS experiment —

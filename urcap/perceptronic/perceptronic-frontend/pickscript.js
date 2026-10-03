@@ -20,9 +20,16 @@
 
   const APP_TYPE = "advin-perceptronic";
   const PICK_TYPE = "advin-perceptronic-pick";
-  const VERSION = "0.6.0";
+  const VERSION = "0.7.0";
   const DEFAULT_PICK_PORT = 7622;
   const DEFAULT_COCKPIT_PORT = 7621;
+  // The pick PC's factory address on its cell port (perceptronics.cellnet.PICK_PC_ADDRESS,
+  // Cockpit.DEFAULT_HOST): what an empty Cockpit field means. It hands a robot left on DHCP
+  // ROBOT_DEFAULT_HOST, so an unconfigured robot needs nothing typed. A test holds them equal.
+  const DEFAULT_COCKPIT_HOST = "192.168.3.20";
+  const ROBOT_DEFAULT_HOST = "192.168.3.3";
+  const CHECK_ROBOT_NETWORK = "Robot network: Settings → Connection → Network → DHCP → Apply (the pick PC gives the robot "
+    + ROBOT_DEFAULT_HOST + "), or a static address 192.168.3.x, mask 255.255.255.0. A pick PC given another address: type it in the Cockpit field";
   const DEFAULT_TIP_MM = 163; // Hand-E 157 mm + 6 mm adapter
   const SOCKET = "rs_pick";
   const MAX_POINTS = 12;
@@ -209,12 +216,13 @@
 
   // -- the application node (cockpit URL, areas, the robot's model) ---------------------------
 
-  /** The saved Cockpit field as an absolute base URL (the presenter's page host completes
-   * shorthand: ":7621" → http://<pageHost>:7621, "host" → http://host:7621). */
+  /** The saved Cockpit field as an absolute base URL: empty → the pick PC's factory address
+   * (http://192.168.3.20:7621); the presenter's page host completes shorthand: ":7621" →
+   * http://<pageHost>:7621, "host" → http://host:7621. */
   function cockpitBase(saved, pageHost) {
     const raw = (saved ? String(saved) : "").trim().replace(/\/+$/, "");
     const host = pageHost || "http://127.0.0.1";
-    if (!raw) return `${host}:${DEFAULT_COCKPIT_PORT}`;
+    if (!raw) return `http://${DEFAULT_COCKPIT_HOST}:${DEFAULT_COCKPIT_PORT}`;
     const port = /^:?(\d{1,5})$/.exec(raw);
     if (port) return `${host}:${port[1]}`;
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return raw;
@@ -712,7 +720,8 @@
   const CHECK_CABLES = "Cables: the camera computer is powered and its network cable is plugged in at both ends (link lights on)";
   const CHECK_FIREWALL = `Firewall: the camera computer must let this robot in on TCP ports ${DEFAULT_COCKPIT_PORT} and ${DEFAULT_PICK_PORT}`;
   const CHECK_USB = "Camera cable: the camera's USB cable seated at both ends, in a blue (USB 3) port — unplug it and plug it back in";
-  const checkAddress = (base) => `IP address: is ${hostOf(base) || base} the camera computer's, and on the same network as the robot?`;
+  const checkAddress = (base) => (hostOf(base) === DEFAULT_COCKPIT_HOST ? CHECK_ROBOT_NETWORK
+    : `IP address: is ${hostOf(base) || base} the camera computer's, and on the same network as the robot?`);
 
   /**
    * Why the camera computer gave no picture, as the operator should read it: one plain line,
@@ -764,7 +773,8 @@
 
   root.PerceptronicPick = {
     orderGrid, svgOrderTile, svgPart, svgApproach, areaCorners, farthest, svgReachMap,
-    APP_TYPE, PICK_TYPE, VERSION, DEFAULT_PICK_PORT, DEFAULT_COCKPIT_PORT, DEFAULT_TIP_MM,
+    APP_TYPE, PICK_TYPE, VERSION, DEFAULT_PICK_PORT, DEFAULT_COCKPIT_PORT, DEFAULT_COCKPIT_HOST, ROBOT_DEFAULT_HOST,
+    DEFAULT_TIP_MM,
     SOCKET, MAX_POINTS, MAX_AREAS, ORDERS, ORDER_TILES, SHAPES, REASONS,
     SPEED, SETTLE_S, MAX_ATTEMPTS, LOOK_STROKE_MM, KEEP_OUT_M,
     NUMBERS, BY_KEY, FOUND_VARIABLE, LOC_VARIABLE,
