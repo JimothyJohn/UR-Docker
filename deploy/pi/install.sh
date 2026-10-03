@@ -5,6 +5,7 @@
 #
 #   sudo ./install.sh --wheel ur_docker-0.1.0-py3-none-any.whl [--cell ur3] \
 #                     [--robot-host 192.168.3.3] [--allow-from 192.168.3.0/24] [--reconfigure]
+#   sudo ./install.sh --wheel ... --image        # into an image root under chroot (no live system)
 #   sudo /opt/perceptronics/deploy/install.sh --rollback        # back to the previous release
 #   sudo /opt/perceptronics/deploy/install.sh --uninstall [--purge]
 #
@@ -17,7 +18,13 @@
 # the PolyScope Pick node's pick server on TCP :7622.
 #   stop:  sudo systemctl stop perceptronics-cockpit     logs: journalctl -u perceptronics-cockpit -f
 # A `perceptronics pick-server` sidecar also binds :7622 — stop it before (re)starting the unit.
+#
+# --image: the root is an image being built (deploy/pi/image/build.sh runs this under chroot),
+# not a running PC. Units are enabled but nothing is started or reloaded: no udev reload (no
+# udevd in a chroot), and no firewall load, which would land in the BUILD host's kernel.
 set -euo pipefail
+
+IMAGE=0
 
 # ---- pins ----------------------------------------------------------------------------
 # perceptronics/realsense.py binds the C API with ctypes and checks enum ordinals written
@@ -195,8 +202,10 @@ install_librealsense() {
     # 0b07): with them a normal user opens the camera over libusb — no root in the service.
     if ! cmp -s "${LIBREALSENSE_PREFIX}/99-realsense-libusb.rules" "$UDEV_RULES"; then
         install -m 0644 "${LIBREALSENSE_PREFIX}/99-realsense-libusb.rules" "$UDEV_RULES"
-        udevadm control --reload-rules
-        udevadm trigger --subsystem-match=usb
+        if [ "$IMAGE" = 0 ]; then
+            udevadm control --reload-rules
+            udevadm trigger --subsystem-match=usb
+        fi
         log "udev: installed ${UDEV_RULES} (re-plug the camera if it was already attached)"
     fi
 }
@@ -352,7 +361,7 @@ install_firewall() {
     install -m 0644 "$rendered" "$NFT_CONF"
     rm -f "$rendered"
     systemctl enable -q nftables.service
-    systemctl restart nftables.service
+    [ "$IMAGE" = 1 ] || systemctl restart nftables.service
     log "firewall: inbound SSH from anywhere; :7621/:7622 from ${net} only; everything else dropped"
 }
 
@@ -360,6 +369,11 @@ install_firewall() {
 install_units() {
     install -m 0644 "${HERE}/${UNIT}" "/etc/systemd/system/${UNIT}"
     install -m 0755 "${HERE}/perceptronics-doctor" /usr/local/bin/perceptronics-doctor
+    if [ "$IMAGE" = 1 ]; then
+        systemctl enable -q "$UNIT"
+        log "systemd: ${UNIT} enabled (image: starts on the first boot)"
+        return
+    fi
     systemctl daemon-reload
     systemctl enable -q "$UNIT"
     systemctl restart "$UNIT"
@@ -426,6 +440,7 @@ main() {
             --robot-host) robot_host="${2:?--robot-host needs an address}"; shift 2 ;;
             --allow-from) allow_from="${2:?--allow-from needs a CIDR}"; shift 2 ;;
             --reconfigure) reconfigure=1; shift ;;
+            --image) IMAGE=1; shift ;;
             --rollback) action=rollback; shift ;;
             --uninstall) action=uninstall; shift ;;
             --purge) purge=1; shift ;;
@@ -460,7 +475,11 @@ main() {
     install_firewall "$net"
     copy_deploy_files
     install_units
-    log "done. Check it: sudo perceptronics-doctor"
+    if [ "$IMAGE" = 1 ]; then
+        log "done (image root)"
+    else
+        log "done. Check it: sudo perceptronics-doctor"
+    fi
 }
 
 main "$@"

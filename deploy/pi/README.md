@@ -27,6 +27,11 @@ HDR-30-5, trimmed to 5.1 V). A Pi 5 limits USB to 600 mA unless it runs on the 5
 supply (or `usb_max_current_enable=1` is set in `config.txt`). Neither has **been tested
 with a D435 in this repo**. If the camera drops out under load, check the supply first.
 
+**Faster: flash the prebuilt image.** `image/README.md` builds one image with all of this
+already installed, flashes it and seeds each board (host name, key, address, robot) without
+a compile or internet on the PC. The steps below are the from-scratch path, and the update
+path for a running board.
+
 ## 1. Flash and first boot
 
 1. Flash **Debian arm64** (for a Raspberry Pi or a CM4/CM5 box: Debian's Raspberry Pi
