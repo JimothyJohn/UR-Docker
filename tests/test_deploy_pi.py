@@ -431,7 +431,10 @@ def test_link_up_re_probes(tmp_path):
     # NetworkManager only runs an executable hook: what ships is git's mode, not the checkout's
     # (a Windows checkout has no exec bit at all)
     staged = subprocess.run(
-        ["git", "ls-files", "--stage", str(NM_HOOK.relative_to(ROOT))], cwd=ROOT, capture_output=True, text=True
+        ["git", "ls-files", "--stage", str(NM_HOOK.relative_to(ROOT))],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     )
     if staged.returncode == 0 and staged.stdout:
         assert staged.stdout.startswith("100755 "), staged.stdout
