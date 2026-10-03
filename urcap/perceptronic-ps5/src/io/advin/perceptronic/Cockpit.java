@@ -30,6 +30,15 @@ import javax.imageio.ImageIO;
  */
 final class Cockpit {
     static final int DEFAULT_PORT = 7621;
+    /**
+     * The pick PC's factory address on its cell port (``perceptronics.cellnet.PICK_PC_ADDRESS``,
+     * ``deploy/pi/install.sh --cell-address``): what an empty Cockpit field means. The pick PC
+     * also hands a robot left on DHCP its address on the same network, so an unconfigured
+     * robot needs nothing typed here. A test holds the three equal.
+     */
+    static final String DEFAULT_HOST = "192.168.3.20";
+    /** The robot's address the pick PC's DHCP hands out (``perceptronics.cellnet.ROBOT_ADDRESS``). */
+    static final String ROBOT_DEFAULT_HOST = "192.168.3.3";
     private static final Charset UTF8 = Charset.forName("UTF-8");
     private static final Pattern PORT_ONLY = Pattern.compile("^:?(\\d{1,5})$");
     private static final Pattern HAS_SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://.*");
@@ -42,13 +51,15 @@ final class Cockpit {
 
     /**
      * The saved field as an absolute base URL — the PolyScope X node's rules, with "this
-     * host" being the controller: empty or ":7621" / "7621" → http://127.0.0.1:7621,
-     * "host[:port]" → http://host[:port], a bare host gets :7621, a URL is kept.
+     * host" being the controller: empty → the pick PC's factory address
+     * (http://192.168.3.20:7621), ":7621" / "7621" → http://127.0.0.1:7621 (a cockpit on the
+     * controller itself), "host[:port]" → http://host[:port], a bare host gets :7621, a URL
+     * is kept.
      */
     static String base(String saved) {
         String raw = saved == null ? "" : saved.trim();
         while (raw.endsWith("/")) raw = raw.substring(0, raw.length() - 1);
-        if (raw.isEmpty()) return "http://127.0.0.1:" + DEFAULT_PORT;
+        if (raw.isEmpty()) return "http://" + DEFAULT_HOST + ":" + DEFAULT_PORT;
         Matcher port = PORT_ONLY.matcher(raw);
         if (port.matches()) return "http://127.0.0.1:" + port.group(1);
         if (HAS_SCHEME.matcher(raw).matches()) return raw;
@@ -229,9 +240,15 @@ final class Cockpit {
     }
 
     private static String checkAddress(String base) {
+        if (DEFAULT_HOST.equals(host(base))) return CHECK_ROBOT_NETWORK;
         return "IP address: is " + host(base) + " the camera computer's, and on the same network as the robot"
                 + " (the robot's own is under Settings → System → Network)?";
     }
+
+    /** The pick PC is at its factory address: the robot must be on its network. */
+    static final String CHECK_ROBOT_NETWORK = "Robot network: Settings → System → Network → DHCP → Apply (the pick PC"
+            + " gives the robot " + ROBOT_DEFAULT_HOST + "), or a static address 192.168.3.x, mask 255.255.255.0."
+            + " A pick PC given another address: type it in the Cockpit field";
 
     /**
      * Why a request to the camera computer failed, as the operator should read it: what

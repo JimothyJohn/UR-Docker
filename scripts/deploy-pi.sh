@@ -5,11 +5,15 @@
 #   scripts/deploy-pi.sh pi@192.168.3.10                      # cell ur3 (the default)
 #   scripts/deploy-pi.sh pi@192.168.3.10 --cell ur3 --robot-host 192.168.3.3
 #   scripts/deploy-pi.sh pi@192.168.3.10 --allow-from 192.168.3.0/24
+#   scripts/deploy-pi.sh pi@10.0.0.56 --cell-if eth0 --cell-address 192.168.3.20/24   # the defaults
+#   scripts/deploy-pi.sh pi@10.0.0.56 --cell-if none          # leave the PC's network alone
 #   scripts/deploy-pi.sh pi@192.168.3.10 --doctor-only
 #   scripts/deploy-pi.sh pi@192.168.3.10 --rollback            # previous release, restart
 #
 # --cell / --robot-host rewrite /etc/perceptronics/cell.env on the PC (the old one is kept
-# beside it); without them an existing cell.env is left alone. Authentication is your
+# beside it); without them an existing cell.env is left alone. --cell-if / --cell-address
+# set the cell port up for a robot nobody configured (install.sh: a fixed address, and a
+# one-lease DHCP server for the robot when no other DHCP server answers there). Authentication is your
 # SSH key (or ssh's own password prompt); sudo on the PC prompts on the terminal (ssh -t),
 # or, run without a terminal (an agent), must be passwordless (`sudo -n`, fails fast).
 # Nothing here reads, stores or echoes a password.
@@ -33,7 +37,7 @@ mode=deploy
 reconfigure=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --cell | --robot-host | --allow-from)
+        --cell | --robot-host | --allow-from | --cell-if | --cell-address)
             [ $# -ge 2 ] || die "$1 needs a value"
             install_args+=("$1" "$2")
             case "$1" in --cell | --robot-host) reconfigure=1 ;; esac
@@ -113,5 +117,13 @@ ssh "${ssh_opts[@]}" "$target" "$(remote_cmd rm -rf "$stage_remote")" || true
 [ "$status" -eq 0 ] || die "install.sh failed on ${target} (exit ${status})"
 
 run_doctor
-host="${target#*@}"
-log "done. On the pendant: Installation -> URCaps -> Perceptronic -> Cockpit = http://${host}:7621 -> Save"
+cell_address=192.168.3.20
+for ((i = 0; i < ${#install_args[@]}; i++)); do
+    [ "${install_args[$i]}" = --cell-address ] && cell_address="${install_args[$((i + 1))]%/*}"
+done
+if [ "$cell_address" = 192.168.3.20 ]; then
+    log "done. On the pendant nothing to type: the URCap's Cockpit field defaults to this PC's cell address 192.168.3.20;" \
+        "set the robot's network to DHCP (Settings -> System -> Network) and it gets 192.168.3.3 from this PC"
+else
+    log "done. On the pendant: Installation -> URCaps -> Perceptronic -> Cockpit = ${cell_address} -> Save"
+fi

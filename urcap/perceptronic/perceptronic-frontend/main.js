@@ -16,7 +16,12 @@
 (() => {
   const TAG = "advin-perceptronic";
   const DEFAULT_COCKPIT_PORT = 7621;
+  // The pick PC's factory address (pickscript.js DEFAULT_COCKPIT_HOST; a test holds them equal).
+  const DEFAULT_COCKPIT_HOST = "192.168.3.20";
   const POLL_TIMEOUT_MS = 1500;
+  // One feed request, connect + long poll + picture: an address nothing answers on (the pick
+  // PC's default before it is plugged in) must fail in seconds, not after TCP gives up.
+  const FEED_TIMEOUT_MS = POLL_TIMEOUT_MS + 3500;
   const HOVER_MS = 150;
   const PROBE_TIMEOUT_MS = 2500;
   const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -214,14 +219,15 @@
       return Perceptronic.cockpitBase(this._node && this._node.cockpitUrl, location);
     }
 
-    // The saved field as an absolute base URL. Shorthand is completed against this page's
+    // The saved field as an absolute base URL. Empty → the pick PC's factory address
+    // (http://192.168.3.20:7621). Shorthand is completed against this page's
     // host — ":7621" / "7621" → http://<page host>:7621, "host[:port]" → http://host[:port],
     // a bare host gets :7621. Anything without a scheme would otherwise be fetched *relative
     // to PolyScope's own page*, and PolyScope's 404 read as "the cockpit is outdated".
     static cockpitBase(saved, loc) {
       const raw = (saved ? String(saved) : "").trim().replace(/\/+$/, "");
       const pageHost = `${loc.protocol}//${loc.hostname}`;
-      if (!raw) return `${pageHost}:${DEFAULT_COCKPIT_PORT}`;
+      if (!raw) return `http://${DEFAULT_COCKPIT_HOST}:${DEFAULT_COCKPIT_PORT}`;
       const port = /^:?(\d{1,5})$/.exec(raw);
       if (port) return `${pageHost}:${port[1]}`;
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return raw;
@@ -298,7 +304,7 @@
             <div data-rsp="tab-camera">
             <div class="row">
               <label for="rsp-url">Cockpit</label>
-              <input id="rsp-url" type="text" data-rsp="url" placeholder="http://<jetson-or-laptop>:7621 (empty = this host:7621)" />
+              <input id="rsp-url" type="text" data-rsp="url" placeholder="the pick PC's address (192.168.3.20 out of the box)" />
               <button data-rsp="save">Save</button>
               <a data-rsp="open" href="#" target="_blank" rel="noopener">Open cockpit</a>
             </div>
@@ -341,7 +347,7 @@
         this.startPolling();
         this.startAreas();
       }
-      this.$("url").value = this._node.cockpitUrl || "";
+      this.$("url").value = this._node.cockpitUrl || DEFAULT_COCKPIT_HOST;
       this.$("open").href = this.cockpitUrl() + "/";
     }
 
@@ -532,6 +538,9 @@
       const value = this.$("url").value.trim();
       this._node.cockpitUrl = value;
       this._seq = 0;
+      // a request still waiting on the old address is dropped: the feed asks the new one now
+      this._urlChanged = true;
+      if (this._pollCtl) this._pollCtl.abort();
       this.$("open").href = this.cockpitUrl() + "/";
       try {
         if (this._api && this._api.applicationNodeService) {
@@ -552,7 +561,19 @@
       while (!this._stopped && this.isConnected) {
         try {
           const depth = this._depth;
-          const r = await fetch(`${this.cockpitUrl()}/api/${depth ? "depth" : "color"}.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`);
+          this._urlChanged = false;
+          const ctl = typeof AbortController === "function" ? new AbortController() : null;
+          this._pollCtl = ctl;
+          const timer = ctl ? setTimeout(() => ctl.abort(), FEED_TIMEOUT_MS) : 0;
+          let r, blob;
+          try {
+            r = await fetch(`${this.cockpitUrl()}/api/${depth ? "depth" : "color"}.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`,
+              ctl ? { signal: ctl.signal } : undefined);
+            if (r.ok) blob = await r.blob();
+          } finally {
+            clearTimeout(timer);
+            this._pollCtl = null;
+          }
           if (r.status === 503) {
             this.setLive(false);
             this.noCamera("nopicture", "HTTP 503: the cockpit has no frame", "warn");
@@ -576,7 +597,6 @@
             throw e;
           }
           const seq = Number(r.headers.get("X-Seq") || 0);
-          const blob = await r.blob();
           const url = URL.createObjectURL(blob);
           const previous = this._blobUrl;
           img.onload = () => {
@@ -590,6 +610,7 @@
           if (!announced) { this.setStatus(`live from ${this.cockpitUrl()}`, "ok"); announced = true; }
         } catch (err) {
           announced = false;
+          if (this._urlChanged) continue; // aborted by Save: straight on to the new address
           this.setLive(false);
           const why = err && err.message ? err.message : String(err);
           // Only a network-level failure is ambiguous; an HTTP status already says what happened.

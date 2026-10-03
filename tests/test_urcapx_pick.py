@@ -172,7 +172,7 @@ def test_the_script_is_one_move_sequence_from_the_survey_to_the_grip():
     assert out["problem"] is None
     text = out["script"]
     assert text.isascii() and balanced(text)
-    assert text.startswith("# 3D Pick 0.6.0 ")
+    assert text.startswith("# 3D Pick 0.7.0 ")
     order = [
         "global rs_pick_found = False",
         "set_tcp(p[0, 0, 0, 0, 0, 0])",
@@ -771,7 +771,7 @@ def test_cockpit_shorthand_and_node_ids():
         cmd="misc", cockpit=["", ":7621", "7777", "jetson", "jetson:8080", "http://x:1/", "https://pi.local"]
     )
     assert out["cockpit"] == [
-        "http://10.0.0.5:7621",
+        "http://192.168.3.20:7621",  # empty: the pick PC's factory address, not the page's host
         "http://10.0.0.5:7621",
         "http://10.0.0.5:7777",
         "http://jetson:7621",
@@ -987,7 +987,7 @@ def test_the_pick_worker_speaks_the_protocol_and_answers_script_builders():
     assert "camera computer's address" in result(by, "noapp")["errorMessageKey"]
     before = result(by, "before")
     assert before["type"] == "$$ScriptBuilder" and before["currentIndent"] == 0
-    assert before["script"].startswith("# 3D Pick 0.6.0") and before["script"].rstrip().endswith("end")
+    assert before["script"].startswith("# 3D Pick 0.7.0") and before["script"].rstrip().endswith("end")
     assert balanced(before["script"])  # the whole program is here: nothing is left for after the children
     assert 'socket_open("192.168.3.10", 7622, "rs_pick")' in before["script"]
     assert "arm=UR3e" in before["script"] and "reach=" not in before["script"]
