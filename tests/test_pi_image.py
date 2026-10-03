@@ -400,3 +400,28 @@ def test_any_robot_host_is_quoted_or_refused(host):
     cmd = data["runcmd"][-1][2]
     assert re.fullmatch(r"[A-Za-z0-9.:-]+", host)
     assert f"--robot-host {host}" in cmd
+
+
+def test_unseeded_image_gets_the_cell_port_without_networkmanager_running():
+    # an image board must come up plug-and-play with no seed: the cell address is a keyfile
+    # written into the image, and the DHCP unit is enabled but never started in the chroot
+    text = INSTALL.read_text()
+    addr = _function(text, "configure_cell_address")
+    assert re.search(r'if \[ "\$IMAGE" = 1 \]; then\s+write_cell_keyfile', addr)
+    keyfile = _function(text, "write_cell_keyfile")
+    assert "nmcli" not in keyfile
+    for line in ("method=manual", "address1=${cidr}", "never-default=true", "interface-name=${cell_if}"):
+        assert line in keyfile, line
+    assert "chmod 0600" in keyfile  # NetworkManager ignores a keyfile others can read
+    dhcp = _function(text, "install_cell_dhcp")
+    image_branch = dhcp.split('if [ "$IMAGE" = 1 ]; then', 1)[1].split("\n    fi\n", 1)[0]
+    assert "systemctl enable" in image_branch and "return" in image_branch
+    assert "restart" not in image_branch and "daemon-reload" not in image_branch
+
+
+def test_builder_stages_every_template_the_installer_renders():
+    staged = _code(BUILD.read_text())
+    templates = ["cell-dhcp.conf", "perceptronics-cell-dhcp.service", "50-perceptronics-cell"]
+    templates.append("nftables.conf")
+    for tpl in templates:
+        assert f'"${{DEPLOY_DIR}}"/{tpl}' in staged, tpl
