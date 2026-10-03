@@ -1,0 +1,57 @@
+name: ufactory-sim
+
+# UFactoryArm against UFACTORY's firmware simulator, started as an 850
+# (scripts/ufactory-sim.sh). Runs when the UFACTORY code or this job changes,
+# and weekly, so a firmware/image drift shows up without a code change. Not a
+# required check.
+on:
+  pull_request:
+    paths:
+      - urctl/xarm.py
+      - urctl/ufactory.py
+      - urctl/controller.py
+      - urctl/safety.py
+      - tests/test_ufactory_sim.py
+      - scripts/ufactory-sim.sh
+      - .github/workflows/ufactory-sim.yml
+  push:
+    branches: [dev]
+    paths:
+      - urctl/xarm.py
+      - urctl/ufactory.py
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ufactory-sim-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+      - name: install deps
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+      - name: start the 850 simulator
+        run: scripts/ufactory-sim.sh up
+      - name: simulator tests
+        env:
+          UFACTORY_SIM_HOST: 127.0.0.1
+        run: python -m pytest -m ufactory_sim -v
+      - name: simulator log on failure
+        if: failure()
+        run: docker logs --tail 200 perceptronics-ufactory-sim || true
+      - name: tear down
+        if: always()
+        run: scripts/ufactory-sim.sh down || true
