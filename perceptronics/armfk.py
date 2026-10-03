@@ -8,8 +8,10 @@ wrong table (or a wrong ``UR_ROBOT_MODEL``) from ever drawing a wrong arm.
 
 The UR3e row was checked on the cell 2026-09-27: 0.84 mm from the controller's
 flange at the picture pose (the nominal table; the controller's own calibration
-accounts for the rest). The other rows are UR's published nominal values,
-unverified on hardware here — the flange check guards them.
+accounts for the rest). The other rows are UR's published nominal values
+("DH parameters for calculations of kinematics and dynamics", universal-robots.com;
+UR30 and UR15 read 2026-10-02), unverified on hardware here — the flange check
+guards them.
 """
 
 from __future__ import annotations
@@ -28,6 +30,8 @@ for _name, _d, _a in (
     ("UR10E", (0.1807, 0, 0, 0.17415, 0.11985, 0.11655), (0, -0.6127, -0.57155, 0, 0, 0)),
     ("UR16E", (0.1807, 0, 0, 0.17415, 0.11985, 0.11655), (0, -0.4784, -0.36, 0, 0, 0)),
     ("UR20", (0.2363, 0, 0, 0.2010, 0.1593, 0.1543), (0, -0.8620, -0.7287, 0, 0, 0)),
+    ("UR30", (0.2363, 0, 0, 0.2010, 0.1593, 0.1543), (0, -0.6370, -0.5037, 0, 0, 0)),
+    ("UR15", (0.2186, 0, 0, 0.1824, 0.1361, 0.1434), (0, -0.6475, -0.5164, 0, 0, 0)),
 ):
     DH[_name] = (tuple(map(float, _d)), tuple(map(float, _a)), _ALPHA)
 # The UR7e is the UR5e's arm and the UR12e the UR10e's (Nick, 2026-10-01): the same table.

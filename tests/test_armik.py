@@ -65,7 +65,7 @@ def test_the_ur3e_cell_reaches_its_parts_where_the_datasheet_ring_said_no():
     assert armik.has_solution([0.56, 0.0, -0.107, math.pi, 0.0, 0.0], "UR3") is False
 
 
-@pytest.mark.parametrize("model", [None, "", "UR30", "Fanuc", "UR3; rm -rf"])
+@pytest.mark.parametrize("model", [None, "", "UR8", "Fanuc", "UR3; rm -rf"])
 def test_an_arm_the_table_lacks_is_nobodys_to_judge(model):
     assert armik.has_solution([0.3, 0.0, 0.2, 0.0, math.pi, 0.0], model) is None
     if model:
@@ -97,3 +97,24 @@ def test_the_ur7e_and_ur12e_are_the_ur5e_and_ur10e(model, same_as):
     assert armik.solutions(pose, model) == armik.solutions(pose, same_as)
     reach = sum(abs(v) for v in armfk.DH[armfk.model_key(same_as)][1]) + 0.6
     assert armik.has_solution([reach, 0.0, 0.2, 0.0, 3.14159, 0.0], model) is False
+
+
+@pytest.mark.parametrize(
+    ("model", "d", "a"),
+    [
+        # UR's published DH table ("DH parameters for calculations of kinematics and dynamics",
+        # universal-robots.com, read 2026-10-02)
+        ("UR30", (0.2363, 0, 0, 0.2010, 0.1593, 0.1543), (0, -0.6370, -0.5037, 0, 0, 0)),
+        ("UR15", (0.2186, 0, 0, 0.1824, 0.1361, 0.1434), (0, -0.6475, -0.5164, 0, 0, 0)),
+    ],
+)
+def test_the_ur30_and_ur15_are_judged_by_their_own_kinematics(model, d, a):
+    """TODO 2026-10-01: a UR30 got no camera-side reach check. Both arms are in UR's table."""
+    assert armfk.DH[armfk.model_key(model)][:2] == (d, a)
+    # straight up (all joints 0 but the shoulder at -90°) the flange is d1 - a2 - a3 + d5 high
+    up = armfk.frames([0.0, -math.pi / 2, 0.0, -math.pi / 2, 0.0, 0.0], model)[-1]
+    assert up[2] == pytest.approx(d[0] - a[1] - a[2] + d[4], abs=1e-9)
+    # a bent, dexterous pose (the integration tests' READY_JOINTS) is reachable; straight up is singular
+    ready = armfk.frames([0.0, -1.0, 1.2, -1.8, -math.pi / 2, 0.0], model)[-1]
+    assert armik.has_solution(ready, model) is True
+    assert armik.has_solution([0.0, 0.0, 3.0, 0.0, math.pi, 0.0], model) is False  # 3 m up: out of reach
