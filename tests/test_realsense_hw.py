@@ -97,7 +97,7 @@ def _temporal_noise(frames, box=40) -> float:
 
 
 def test_filtered_depth_is_steadier_than_raw(devices):
-    """The post-processing chain + native depth mode + High Accuracy preset must
+    """The post-processing chain + native depth mode + the default preset must
     cut frame-to-frame jitter on a static scene, and the chain must still hand
     back Z16 depth aligned to the colour grid (i.e. the disparity round-trip
     and the filter→align order are wired right)."""
