@@ -29,7 +29,8 @@
     .lede { font-size: 10pt; line-height: 1.38; margin: 8pt 0 6pt; }
     .warn { margin: 6pt 0 4pt; padding: 5pt 8pt; background: #fdf3d7; border: 0.6pt solid #e8c96a; border-radius: 3pt; }
     .warn strong { color: #8a5a00; }
-    .step { margin-top: 12pt; }
+    .step { margin-top: 9pt; }
+    .keep { break-after: avoid; break-inside: avoid; }
     h2, h3 { break-after: avoid; }
     tr, .two, .box, pre, figure, li { break-inside: avoid; }
     h2 { display: flex; align-items: center; gap: 7pt; font-size: 11.5pt; margin-bottom: 4pt; padding-top: 5pt; border-top: 0.5pt solid #d9dee3; }
@@ -51,10 +52,11 @@
     pre { font-size: 7.8pt; line-height: 1.35; background: #f6f7f8; border-left: 2pt solid #157a45; padding: 4pt 7pt; margin: 4pt 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     .prog { font-size: 8.2pt; }
     .note { color: #5a6470; font-size: 8pt; }
-    figure { margin: 6pt 0 0; width: 4.6in; }
+    figure { margin: 6pt 0 0; width: 3.4in; }
+    pre { break-before: avoid; }
     figure img { display: block; width: 100%; height: auto; border: 0.5pt solid #d9dee3; border-radius: 3pt; }
     figcaption { color: #5a6470; font-size: 7.4pt; margin-top: 2pt; }
-    .foot { margin-top: 14pt; padding-top: 6pt; border-top: 0.5pt solid #d9dee3; color: #5a6470; font-size: 7pt; line-height: 1.4; break-inside: avoid; }
+    .foot { margin-top: 10pt; padding-top: 6pt; border-top: 0.5pt solid #d9dee3; color: #5a6470; font-size: 7pt; line-height: 1.4; break-inside: avoid; }
     .foot p + p { margin-top: 3pt; }
     .foot strong { color: #14181d; }
   </style>
@@ -79,10 +81,10 @@
         <tbody>
           <tr><th>Robot</th><td>A Universal Robots e-Series arm on PolyScope {{PS5_RANGE}}, or an arm on PolyScope X {{PSX_RANGE}}.</td></tr>
           <tr><th>Gripper</th><td>Any gripper with its own open and close program nodes. Perceptronics never drives it.</td></tr>
-          <tr><th>Kit</th><td>RealSense D435 camera, camera bracket and bolts, camera computer with its power supply, high-flex USB 3 cable, Ethernet cable.</td></tr>
+          <tr><th>Kit</th><td>RealSense D435 camera, camera bracket and bolts, camera computer (ready to use) with its power supply, high-flex USB 3 cable, Ethernet cable.</td></tr>
           <tr><th>USB stick</th><td>Formatted FAT32 (most sticks up to 32 GB are). The pendant does not read exFAT or NTFS.</td></tr>
           <tr><th>The URCap</th><td><code>{{PS5_FILE}}</code> for PolyScope 5 or <code>{{PSX_FILE}}</code> for PolyScope X, from perceptronics.advin.io.</td></tr>
-          <tr><th>A laptop</th><td>With SSH, only to set up the camera computer (step 2) and to calibrate (step 5).</td></tr>
+          <tr><th>A laptop</th><td>With SSH, to calibrate (step 5) and to check the camera computer.</td></tr>
         </tbody>
       </table>
     </div>
@@ -107,13 +109,9 @@
           <tr><th>Power</th><td>The kit's supply. A weaker supply browns out the camera: on a Raspberry Pi 5 that is the 27 W (5.1 V, 5 A) supply.</td></tr>
         </tbody>
       </table>
-      <p>Power-up order does not matter. Give the computer a minute after power-on. It runs the camera software as a service, gives itself <strong>192.168.3.20</strong> on the robot's cable, and gives the robot <strong>192.168.3.3</strong> if the robot asks for an address (DHCP). It stays quiet if another DHCP server is already on that network.</p>
+      <p>The camera computer comes set up: nothing to install on it. Power-up order does not matter. Give it a minute after power-on. It runs the camera software as a service, gives itself <strong>192.168.3.20</strong> on the robot's cable, and gives the robot <strong>192.168.3.3</strong> if the robot asks for an address (DHCP). It stays quiet if another DHCP server is already on that network.</p>
 
-      <h3>Setting up a camera computer yourself</h3>
-      <p>Skip this if yours came set up. Flash Raspberry Pi OS Lite (64-bit) or Debian arm64 with a user and your laptop's SSH key, connect it to the internet for the first install, then from a checkout of the repository on the laptop:</p>
-      <pre>scripts/deploy-pi.sh &lt;user&gt;@&lt;computer-address&gt; --cell ur3 --robot-host 192.168.3.3</pre>
-      <p>Use <code>--cell ur3</code> for an e-Series arm or <code>--cell ur20</code> for a UR20. The first run builds the camera library: about 10 minutes on a Raspberry Pi 5, longer on a Pi 4. It ends with a check of camera, network, robot, calibration and tool length, each failure with its fix.</p>
-      <p><strong>Tool length.</strong> The camera computer approaches by the fingertips. Set the distance from the flange face to the fingertips, in metres, as <code>PERCEPTRONICS_TIP_M</code> in <code>/etc/perceptronics/cell.env</code> (and <code>UR_ROBOT_MODEL</code> to your arm), then <code>sudo systemctl restart perceptronics-cockpit</code>. The UR3e profile's 0.163 is a Robotiq Hand-E on a 6 mm adapter.</p>
+      <p><strong>Changing the gripper later.</strong> The camera computer approaches by the fingertips, so it knows the distance from the flange face to them for the gripper on your order. For a different gripper, set that distance in metres as <code>PERCEPTRONICS_TIP_M</code> in <code>/etc/perceptronics/cell.env</code> on the camera computer, then <code>sudo systemctl restart perceptronics-cockpit</code>.</p>
     </div>
 
     <div class="step">
@@ -173,7 +171,7 @@
 
     <div class="step">
       <h2><span class="n">7</span>Write the first pick program</h2>
-      <p>The 3D Pick node is one line with no children. It looks, finds the next part, and ends with the fingertips at the grip. It does not touch the gripper, so your gripper's nodes go around it. Program tab, inside a loop:</p>
+      <p class="keep">The 3D Pick node is one line with no children. It looks, finds the next part, and ends with the fingertips at the grip. It does not touch the gripper, so your gripper's nodes go around it. Program tab, inside a loop:</p>
       <pre class="prog">Open gripper        ← your gripper's node
 3D Pick             ← Program → URCaps → 3D Pick
 Close gripper       ← your gripper's node

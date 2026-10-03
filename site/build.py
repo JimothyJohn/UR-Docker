@@ -43,7 +43,7 @@ PRINTS = {
 SHEET_PDF = PRINTS["datasheet.html"]
 QUICKSTART_PDF = PRINTS["quickstart-ur.html"]
 # the datasheet's revision date: move it when its figures or wording change
-SHEET_DATE = "2026-10-02"
+SHEET_DATE = "2026-10-03"
 # the UR Quickstart's revision date
 QUICKSTART_DATE = "2026-10-03"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
