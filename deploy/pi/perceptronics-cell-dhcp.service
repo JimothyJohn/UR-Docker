@@ -1,0 +1,28 @@
+# The pick PC's cell DHCP server: one lease (the robot's) on the cell port, so a robot on
+# its default DHCP setting gets the address the cockpit expects. Installed by
+# deploy/pi/install.sh (skipped with --cell-if none).
+#
+# Long-lived process: dnsmasq on UDP 67 of the cell port only.
+#   stop:   sudo systemctl disable --now perceptronics-cell-dhcp
+#   logs:   journalctl -u perceptronics-cell-dhcp -f
+#   leases: cat /var/lib/misc/perceptronics-cell.leases
+# It starts only when no other DHCP server answers on the port (a plant network has its
+# own; two servers fight over leases). The NetworkManager hook
+# /etc/NetworkManager/dispatcher.d/50-perceptronics-cell restarts it, and so re-probes,
+# every time the cell port comes up.
+
+[Unit]
+Description=Cell DHCP for the robot (one lease, @CELL_IF@ only)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+# exit 1 (another server answered) or 2 (could not probe) skips the start without failing
+ExecCondition=/opt/perceptronics/current/bin/python -m perceptronics.cellnet probe @CELL_IF@
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/perceptronics/cell-dhcp.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

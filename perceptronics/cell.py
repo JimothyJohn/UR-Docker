@@ -95,6 +95,23 @@ def parse_env_text(text: str) -> dict[str, str]:
     return out
 
 
+def without_key(text: str, key: str) -> tuple[str, str | None]:
+    """``text`` (a cell / env file) with every ``key=`` line removed, and the value the last
+    of them held (``None`` when there was none). Everything else, comments included, is
+    kept byte for byte; values are read the way :func:`parse_env_text` reads them."""
+    kept: list[str] = []
+    value: str | None = None
+    for raw in text.splitlines(keepends=True):
+        line = raw.strip()
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        if not line.startswith("#") and "=" in line and line.split("=", 1)[0].strip() == key:
+            value = parse_env_text(line).get(key, "")
+            continue
+        kept.append(raw)
+    return "".join(kept), value
+
+
 def load_cell(name_or_path: str) -> dict[str, str]:
     """Read a cell file → its variables (nothing applied)."""
     path = cell_path(name_or_path)

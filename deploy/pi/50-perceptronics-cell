@@ -1,0 +1,12 @@
+#!/bin/sh
+# NetworkManager dispatcher hook, installed by deploy/pi/install.sh as
+# /etc/NetworkManager/dispatcher.d/50-perceptronics-cell. When the cell port comes up
+# (cable plugged in, boot), restart the cell DHCP server: its start probes for another
+# DHCP server first, so the pick PC plugged into a network that has one stays quiet.
+CELL_IF=@CELL_IF@
+[ "$1" = "$CELL_IF" ] || exit 0
+case "$2" in
+    up) systemctl restart --no-block perceptronics-cell-dhcp.service ;;
+    down) systemctl stop --no-block perceptronics-cell-dhcp.service ;;
+esac
+exit 0

@@ -661,9 +661,10 @@ def java_client(tmp_path_factory):
 
 
 def test_cockpit_url_rules_match_the_polyscope_x_node(java_client):
-    # The PolyScope X node's cockpitBase table, with "this host" = the controller.
+    # The PolyScope X node's cockpitBase table, with "this host" = the controller; empty is
+    # the pick PC's factory address, so a robot nobody configured needs nothing typed.
     cases = {
-        "": "http://127.0.0.1:7621",
+        "": "http://192.168.3.20:7621",
         ":7621": "http://127.0.0.1:7621",
         "7621": "http://127.0.0.1:7621",
         " :7622/ ": "http://127.0.0.1:7622",
@@ -759,6 +760,11 @@ def test_a_lost_camera_computer_says_what_to_check_and_the_long_story_goes_to_th
     assert "not the camera program" in remote["summary"]
     assert [c.split(":")[0] for c in remote["checks"]] == ["IP address", "Camera program", "Firewall"]
     assert "loopback" in remote["detail"]
+    # the pick PC at its factory address and silent: the robot is probably not on its network
+    factory = java_client("explain", "timeout", "http://192.168.3.20:7621")
+    robot_net = [c for c in factory["checks"] if c.startswith("Robot network:")]
+    assert len(robot_net) == 1 and "DHCP" in robot_net[0] and "192.168.3.3" in robot_net[0]
+    assert not any(c.startswith("IP address:") for c in factory["checks"])
     dns = java_client("explain", "dns", "http://jetson:7621")
     assert "jetson" in dns["summary"] and dns["checks"][0].startswith("IP address:")
     assert "is not an address" in java_client("explain", "url", "ht!tp://x")["summary"]

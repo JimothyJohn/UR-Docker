@@ -40,7 +40,7 @@ this repository). The pendant shows the cockpit's picture over the cell network.
 
 ## Quick start
 
-1. **Download** [`dist/perceptronic-0.6.0.urcapx`](dist/perceptronic-0.6.0.urcapx)
+1. **Download** [`dist/perceptronic-0.7.0.urcapx`](dist/perceptronic-0.7.0.urcapx)
    (on GitHub: open the file, then the download button). The single file is the
    whole URCap.
 2. **Install it** on the robot (see [Install the URCap](#1-install-the-urcap)).
@@ -76,11 +76,11 @@ Pick one of the two ways. You only do this once per robot (and again to update).
 
 ### A. On the pendant, from a USB stick
 
-1. Copy `perceptronic-0.6.0.urcapx` onto a USB stick and plug it into the
+1. Copy `perceptronic-0.7.0.urcapx` onto a USB stick and plug it into the
    teach pendant.
 2. Open the **☰ menu** (top-left) → **System Manager** → **URCaps**, and
    unlock it with the **admin password**.
-3. Add a URCap and pick `perceptronic-0.6.0.urcapx` from the USB stick.
+3. Add a URCap and pick `perceptronic-0.7.0.urcapx` from the USB stick.
 4. When it's listed, open **☰ → Reload**.
    **Perceptronic** now appears under **Application**.
 
@@ -90,7 +90,7 @@ Pick one of the two ways. You only do this once per robot (and again to update).
 to install. Download it next to the `.urcapx` and run:
 
 ```bash
-python3 urcapx.py install perceptronic-0.6.0.urcapx --host <robot-ip> --port 80
+python3 urcapx.py install perceptronic-0.7.0.urcapx --host <robot-ip> --port 80
 ```
 
 It posts the package to the same endpoint PolyScope's System Manager uses, which
@@ -102,7 +102,7 @@ Other commands from the same file:
 
 ```bash
 python3 urcapx.py list --host <robot-ip> --port 80                                          # what's installed
-python3 urcapx.py install perceptronic-0.6.0.urcapx --host <robot-ip> --port 80 --replace   # update
+python3 urcapx.py install perceptronic-0.7.0.urcapx --host <robot-ip> --port 80 --replace   # update
 python3 urcapx.py delete advin perceptronic --host <robot-ip> --port 80        # uninstall
 ```
 
@@ -200,8 +200,8 @@ hand-eye**. See [docs/realsense.md §Hand-eye](../docs/realsense.md).
 
 ## 5. Pick with the **3D Pick** node
 
-The same node as the PolyScope 5 kit's, for PolyScope X, at functional parity (0.6.0 here
-= 0.8.0 there; a test holds the two nodes' URScript line for line): **one move sequence
+The same node as the PolyScope 5 kit's, for PolyScope X, at functional parity (0.7.0 here
+= 0.9.0 there; a test holds the two nodes' URScript line for line): **one move sequence
 with no children** that starts with the survey and ends with the tool at the grip on the
 next part in the order you choose. **It does not control the gripper** — your program
 opens it before the node and closes it after ([`../docs/pick-kit.md`](../docs/pick-kit.md) for the

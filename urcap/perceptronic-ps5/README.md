@@ -120,8 +120,12 @@ listening on the network:
 
     perceptronics --cell ur3 gui --bind 0.0.0.0
 
-and type `http://<that-computer's-ip>:7621` into **Cockpit** (the pendant keyboard opens
-when you tap the field), then **Save** — it is kept in the installation. No `--cors` is
+The **Cockpit** field starts at `192.168.3.20`, the pick PC's address out of the box
+(`deploy/pi/`): with the robot's network on **DHCP** (Settings → System → Network) the pick PC
+gives the robot 192.168.3.3 and there is nothing to type. A camera computer anywhere else:
+type its address (`host`, `host:port` or a URL; the pendant keyboard opens when you tap the
+field), then **Save** — it is kept in the installation. `:7621` alone means a cockpit on the
+controller itself. No `--cors` is
 needed: the node is Java on the controller, not a web page.
 
 ## What is the same as PolyScope X, and what is not

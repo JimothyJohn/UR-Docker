@@ -637,12 +637,12 @@ def test_default_tuning_sets_preset_then_emitter_then_max_laser():
         assert cam.describe()["depth"]["tuning_applied"] is applied
     sensor_sets = [e for e in api.log if e.startswith("set:sensor")]
     assert sensor_sets == [
-        f"set:sensor#1:{OPTION_VISUAL_PRESET}={VISUAL_PRESETS['high_accuracy']}",
+        f"set:sensor#1:{OPTION_VISUAL_PRESET}={VISUAL_PRESETS['high_density']}",
         f"set:sensor#1:{OPTION_EMITTER_ENABLED}=1",
         f"set:sensor#1:{OPTION_LASER_POWER}=360",  # LASER_MAX resolved against the sensor's range
     ]
     assert applied == {
-        "preset": {"ok": True, "value": "high_accuracy"},
+        "preset": {"ok": True, "value": "high_density"},
         "emitter": {"ok": True, "value": True},
         "laser_power": {"ok": True, "value": 360.0},
     }
