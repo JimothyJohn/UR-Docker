@@ -64,6 +64,7 @@ from .xarm import (
     Version,
     XArmClient,
     XArmError,
+    XArmTimeout,
     error_text,
     warning_text,
 )
@@ -73,6 +74,8 @@ HOME_JOINTS = [0.0] * 6  # the controller's own home (MOVE_HOME) on the 850 / xA
 POLL_S = 0.05
 # Firmware that takes the general MOVE_LINE (axis-angle + blend radius + only_check).
 COMMON_MOVE_LINE = (1, 11, 100)
+PLANNER_SPEED = 24  # a planner verdict: "Speed Exceeds Limit"
+PLANNER_INVALID = 25  # an INVALID or short reply to a check reads as "Planning Error"
 
 ENV_CONTROL_PORT = "UFACTORY_CONTROL_PORT"
 ENV_REPORT_PORT = "UFACTORY_REPORT_PORT"
@@ -167,6 +170,7 @@ class UFactoryArm:
             timeout=self.config.timeout,
         )
         self._version: Version | None = None
+        self.last_planner: list[dict] = []  # the last refused check's reasons
 
     # ----- plumbing --------------------------------------------------------------------
 
@@ -330,7 +334,7 @@ class UFactoryArm:
         try:
             if self.client.get_state() in (STATE_MOVING, STATE_PAUSED) or self.client.get_cmdnum():
                 self._wait_idle(timeout)
-            self.client.set_tcp_offset(offset_to_wire(off))
+            self._write_tcp_offset(off)
             deadline = time.monotonic() + 2.0
             while True:
                 active = offset_from_wire(self.client.read_report().tcp_offset_rpy_mm)
@@ -362,7 +366,14 @@ class UFactoryArm:
                 )
             self.client.clean_error()
             self.client.clean_warn()
-            self.client.motion_enable(True)
+            unanswered = False
+            try:
+                self.client.motion_enable(True)
+            except XArmTimeout:
+                # UFACTORY's simulator (v2.4.0) acts on MOTION_EN without replying, and
+                # the SDK carries on past the timeout too. The report's enable bits
+                # below are the verdict either way.
+                unanswered = True
             self.client.set_mode(MODE_POSITION, self.version())
             self.client.set_state(STATE_READY)
             deadline = time.monotonic() + timeout
@@ -374,7 +385,12 @@ class UFactoryArm:
                 time.sleep(POLL_S * 4)
         except XArmError as exc:
             return self._unreachable("bring_up", {}, exc)
-        result = {"robot_mode": mode, "error_code": report.error_code, "error": error_text(report.error_code)}
+        result = {
+            "robot_mode": mode,
+            "error_code": report.error_code,
+            "error": error_text(report.error_code),
+            "motion_enable_unanswered": unanswered,
+        }
         return self._log("bring_up", {}, ok=mode == "RUNNING", result=result)
 
     def power_off(self) -> dict:
@@ -449,25 +465,48 @@ class UFactoryArm:
     ) -> list[bool | None]:
         """The controller's planner on a chain of linear moves from the live pose,
         nothing moved (``only_check_type`` 1 → 3 → 2: start from the actual state,
-        chain, restore). ``None`` per pose when the firmware can't check."""
+        chain, restore). The first check is always 1: 2 and 3 plan from the
+        controller's intermediate state, which goes stale as soon as the arm moves.
+        ``None`` per pose when the firmware can't check."""
+        self.last_planner = []
         if self.dry_run or not poses:
             return [None] * len(poses)
         try:
             if not self._common_move_line():
                 return [None] * len(poses)
             if tcp is not None:
-                self.client.set_tcp_offset(offset_to_wire(tcp))
+                self._write_tcp_offset(tcp)
             out: list[bool | None] = []
             for i, pose in enumerate(poses):
-                if len(poses) == 1:
-                    check = 2
-                else:
-                    check = 1 if i == 0 else 2 if i == len(poses) - 1 else 3
-                reply = self.client.move_line_aa(pose_to_wire(pose), 100.0, 1000.0, only_check=check)
-                out.append(len(reply.data) >= 3 and reply.data[2] == 0 and not reply.invalid)
+                check = 1 if i == 0 else 2 if i == len(poses) - 1 else 3
+                code = self._check(pose, check)
+                if code == PLANNER_SPEED and i == 0:
+                    # From rest, "speed exceeds limit" is the planner's stale state, not
+                    # the path: UFACTORY's simulator answers it to the first check after a
+                    # finished move and clears it on the same check asked again.
+                    code = self._check(pose, check)
+                if code:
+                    self.last_planner.append({"code": code, "reason": error_text(code)})
+                out.append(code == 0)
             return out
         except XArmError:
             return [None] * len(poses)
+
+    def _write_tcp_offset(self, offset: Sequence[float]) -> None:
+        """SET_TCP_OFFSET, then re-arm: the firmware drops to state 5 on a configuration
+        write and refuses every check (255) and move until ``set_state(0)``. An arm that
+        was already stopped stays stopped."""
+        armed = self.client.get_state() < STATE_STOPPED
+        self.client.set_tcp_offset(offset_to_wire(offset))
+        if armed:
+            self.client.set_state(STATE_READY)
+
+    def _check(self, pose: Sequence[float], check: int) -> int:
+        """One planner check: 0 clear, else the controller error code it would raise."""
+        reply = self.client.move_line_aa(pose_to_wire(pose), 100.0, 1000.0, only_check=check)
+        if reply.invalid or len(reply.data) < 3:
+            return PLANNER_INVALID
+        return reply.data[2]
 
     # ----- motion ----------------------------------------------------------------------
 
@@ -543,6 +582,7 @@ class UFactoryArm:
             return self._unreachable("move_tcp", args, exc)
         target = list(pose)
         clear = None
+        self.last_planner = []
         if (
             not self.dry_run
             and len(pose) == 6
@@ -550,7 +590,7 @@ class UFactoryArm:
         ):
             try:
                 if tcp is not None:
-                    self.client.set_tcp_offset(offset_to_wire(tcp))
+                    self._write_tcp_offset(tcp)
                 if relative:
                     live = pose_from_wire(self.client.get_pose_aa())
                     rot = matrix_to_rotvec(_matmul(rotvec_to_matrix(pose[3:6]), rotvec_to_matrix(live[3:6])))
@@ -575,7 +615,8 @@ class UFactoryArm:
                 ],
             )
         if not verdict.ok:
-            return self._log("move_tcp", args, ok=False, safety=verdict.as_dict())
+            refused = {"planner": self.last_planner} if self.last_planner else None
+            return self._log("move_tcp", args, ok=False, safety=verdict.as_dict(), result=refused)
         if self.dry_run:
             return self._log(
                 "move_tcp", args, ok=True, safety=verdict.as_dict(), result={"reply": "(dry-run)"}
@@ -661,7 +702,8 @@ class UFactoryArm:
             violations += [{"leg": idx, **d} for d in v.as_dict()["violations"]]
         safety = {"ok": not violations, "violations": violations}
         if violations:
-            return self._log("move_tcp_path", args, ok=False, safety=safety)
+            refused = {"planner": self.last_planner} if self.last_planner else None
+            return self._log("move_tcp_path", args, ok=False, safety=safety, result=refused)
         if self.dry_run:
             return self._log("move_tcp_path", args, ok=True, safety=safety, result={"reply": "(dry-run)"})
         try:
@@ -762,9 +804,11 @@ class UFactoryArm:
             return self._log("freedrive", args, ok=True, result={"reply": "(dry-run)"})
         want = MODE_JOINT_TEACH if enable else MODE_POSITION
         try:
-            self.client.set_mode(want, self.version())
+            # The controller can refuse the mode outright (INVALID): UFACTORY's simulator
+            # does for joint teaching. Say so now instead of waiting out the poll.
+            refused = self.client.set_mode(want, self.version()).invalid
             self.client.set_state(STATE_READY)
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + (0.0 if refused else 2.0)
             report = self.client.read_report()
             while report.mode != want and time.monotonic() < deadline:
                 time.sleep(0.1)
@@ -772,9 +816,10 @@ class UFactoryArm:
         except XArmError as exc:
             return self._unreachable("freedrive", args, exc)
         confirmed = report.mode == want
-        return self._log(
-            "freedrive", args, ok=confirmed, result={"confirmed": confirmed, "control_mode": report.mode_name}
-        )
+        result = {"confirmed": confirmed, "refused": refused, "control_mode": report.mode_name}
+        if refused:
+            result["error"] = f"the controller refused {'joint-teaching' if enable else 'position'} mode"
+        return self._log("freedrive", args, ok=confirmed, result=result)
 
     # ----- programs / I/O --------------------------------------------------------------
 

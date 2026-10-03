@@ -35,6 +35,16 @@ class FakeXArm:
         self.busy_until = 0.0
         self.requests: list[tuple[int, bytes]] = []
         self.refuse_moves_with_error = 0  # latch this error on the next move
+        # registers that are acted on but never answered: UFACTORY's simulator (v2.4.0)
+        # never replies to MOTION_EN, to the SDK either
+        self.unanswered: set[int] = set()
+        self.enable_takes = True  # False: MOTION_EN is accepted and changes nothing
+        # modes SET_MODE answers INVALID to: the simulator refuses joint teaching (2)
+        self.refused_modes: set[int] = set()
+        # verdicts the planner gives before its real one: the simulator's first check
+        # after a move can answer 24 (Speed Exceeds Limit) with the arm at rest
+        self.check_verdicts: list[int] = []
+        self._invalid = False
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self.control = self._listen()
@@ -122,10 +132,14 @@ class FakeXArm:
             self.warn = 0
             return b""
         if register == xarm.REG_MOTION_EN:
-            self.enabled = bool(p[1]) and not self.error
+            if self.enable_takes:
+                self.enabled = bool(p[1]) and not self.error
             return b""
         if register == xarm.REG_SET_MODE:
-            self.mode = p[0]
+            if p[0] in self.refused_modes:
+                self._invalid = True
+            else:
+                self.mode = p[0]
             return b""
         if register == xarm.REG_SET_STATE:
             if p[0] == xarm.STATE_STOPPED:
@@ -141,7 +155,10 @@ class FakeXArm:
         if register == xarm.REG_GET_TCP_POSE_AA:
             return fp32_le(self.pose)
         if register == xarm.REG_SET_TCP_OFFSET:
+            # the firmware drops to state 5 on a configuration write: not ready until
+            # set_state(0) (seen on UFACTORY's simulator, v2.4.0)
             self.offset_rpy = from_fp32_le(p, 6)
+            self.state = xarm.STATE_CONFIG_STOPPED
             return b""
         if register == xarm.REG_SLEEP_INSTT:
             if self.queue:
@@ -158,8 +175,12 @@ class FakeXArm:
             target = from_fp32_le(p, 6)
             check = p[42] if len(p) > 42 else 0
             if check:
+                if self._status() & xarm.STATUS_NOT_READY:
+                    return bytes([0, 0, 255])  # what the simulator answers when not armed
+                if self.check_verdicts:
+                    return bytes([0, 0, self.check_verdicts.pop(0)])
                 reach = math.dist(target[:3], (0.0, 0.0, 0.0))
-                return bytes([0, 0, 0 if reach <= 850.0 else 1])
+                return bytes([0, 0, 0 if reach <= 850.0 else 25])
             self._enqueue("line", target)
             return bytes(3)
         if register == xarm.REG_CGPIO_SET_DIGIT:
@@ -182,7 +203,10 @@ class FakeXArm:
                     tid, _prot, _len, reg = struct.unpack(">HHHB", f[:7])
                     with self._lock:
                         data = self.handle(reg, f[7:])
-                        status = self._status()
+                        status = self._status() | (xarm.STATUS_INVALID if self._invalid else 0)
+                        self._invalid = False
+                    if reg in self.unanswered:
+                        continue
                     conn.sendall(struct.pack(">HHHB", tid, 2, len(data) + 2, reg) + bytes([status]) + data)
 
     def report_frame(self) -> bytes:

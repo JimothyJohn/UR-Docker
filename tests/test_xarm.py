@@ -276,7 +276,7 @@ def test_a_closed_connection_is_an_xarm_error_and_reconnects_next_time():
 
 
 def test_unreachable_controller_raises_xarm_error_not_a_raw_oserror():
-    client = xarm.XArmClient("127.0.0.1", port=1, timeout=0.5)
+    client = xarm.XArmClient("127.0.0.1", port=1, report_port=1, timeout=0.5)
     with pytest.raises(XArmError):
         client.get_state()
     with pytest.raises(XArmError):

@@ -79,6 +79,7 @@ STATE_MOVING = 1
 STATE_SLEEPING = 2  # idle: queue empty, motors enabled
 STATE_PAUSED = 3
 STATE_STOPPED = 4
+STATE_CONFIG_STOPPED = 5  # after a configuration write (TCP offset): set_state(0) re-arms
 STATE_NAMES = {0: "READY", 1: "MOVING", 2: "SLEEPING", 3: "PAUSED", 4: "STOPPED", 5: "STOPPED"}
 
 # Control mode (SET_MODE, report byte 4 high nibble).
@@ -153,6 +154,10 @@ DEVICE_TYPES = {(5, 5): "xArm5", (6, 6): "xArm6", (7, 7): "xArm7", (6, 9): "Lite
 
 class XArmError(OSError):
     """The controller could not be reached or answered something unusable."""
+
+
+class XArmTimeout(XArmError):
+    """The connection held but no reply came in time (the request may still have acted)."""
 
 
 def error_text(code: int) -> str:
@@ -433,12 +438,12 @@ class XArmClient:
                 return reply
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise XArmError(f"no reply to register {register} within {timeout:.1f} s")
+                raise XArmTimeout(f"no reply to register {register} within {timeout:.1f} s")
             sock.settimeout(remaining)
             try:
                 chunk = sock.recv(4096)
             except TimeoutError as exc:
-                raise XArmError(f"no reply to register {register} within {timeout:.1f} s") from exc
+                raise XArmTimeout(f"no reply to register {register} within {timeout:.1f} s") from exc
             if not chunk:
                 raise XArmError("controller closed the connection")
             self._buffer += chunk

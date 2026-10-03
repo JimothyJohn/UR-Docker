@@ -124,9 +124,18 @@ def test_stop_flushes_the_queue_and_the_next_move_rearms(arm):
     assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
 
 
-def test_freedrive_toggles_teaching_mode(arm):
-    assert arm.freedrive(True)["control_mode"] == "JOINT_TEACHING"
-    assert arm.freedrive(False)["control_mode"] == "POSITION"
+def test_freedrive_toggles_teaching_mode_or_says_it_was_refused(arm):
+    # UFACTORY's simulator (v2.4.0) answers joint-teaching mode INVALID — the SDK gets
+    # code 10 too; a real arm takes it. Either way the answer is explicit and the arm
+    # ends in position mode, ready to move.
+    on = arm.freedrive(True)
+    if on["ok"]:
+        assert on["control_mode"] == "JOINT_TEACHING"
+    else:
+        assert on["refused"] is True and on["control_mode"] == "POSITION", on
+    off = arm.freedrive(False)
+    assert off["ok"] and off["control_mode"] == "POSITION", off
+    assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
 
 
 def test_report_stream_and_control_port_agree_on_the_joints(arm):
@@ -135,3 +144,32 @@ def test_report_stream_and_control_port_agree_on_the_joints(arm):
         assert c.read_report().joints[:6] == pytest.approx(c.get_joints()[:6], abs=1e-3)
     finally:
         c.close()
+
+
+def test_the_three_point_touch_off_finds_the_plane_the_tcp_touched(arm, tmp_path, monkeypatch):
+    """The workcell calls on the 850's firmware: a 100 mm TCP, three touches on a
+    plane at a known height, a saved position driven back to."""
+    from urctl import workcell
+
+    monkeypatch.setenv("URCTL_CELL_STORE", str(tmp_path / "cell.json"))
+    tool = [0.0, 0.0, 0.1, 0.0, 0.0, 0.0]
+    assert workcell.tcp_offset(arm, "set", offset=tool)["ok"]
+    assert workcell.tcp_offset(arm, "get")["tcp_offset"] == pytest.approx(tool, abs=1e-4)
+    s = arm.get_state()["tcp"]
+    z0 = s[2] - 0.02
+    corners = [(0.0, 0.0), (0.06, 0.0), (0.0, 0.06)]
+    for i, (dx, dy) in enumerate(corners, start=1):
+        assert arm.move_tcp([s[0] + dx, s[1] + dy, z0, *s[3:]], velocity=0.1, acceleration=1.0)["ok"]
+        touched = workcell.workplane(arm, "touch", name="table", index=i)
+        assert touched["ok"], touched
+    plane = workcell.workplane(arm, "get", name="table")
+    assert plane["table_z"] == pytest.approx(z0, abs=0.001)
+    assert plane["tilt_deg"] == pytest.approx(0.0, abs=0.1)
+    assert plane["tcp_offset"] == pytest.approx(tool, abs=1e-4)
+
+    assert workcell.position(arm, "save", name="last-touch")["ok"]
+    assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
+    back = workcell.position(arm, "move_to", name="last-touch", velocity=1.0, acceleration=3.0)
+    assert back["ok"] and arm.get_state()["tcp"][:3] == pytest.approx([s[0], s[1] + 0.06, z0], abs=0.002)
+    assert workcell.tcp_offset(arm, "set", offset=[0.0] * 6)["ok"]
+    assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
