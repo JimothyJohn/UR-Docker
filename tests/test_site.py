@@ -214,3 +214,45 @@ def test_datasheet_says_its_figures_are_untested_estimates(built: Path):
     values = site_build.facts()
     for key in ("PS5_VERSION", "PSX_VERSION", "PS5_RANGE", "PSX_RANGE", "SHEET_DATE"):
         assert values[key] in text, key
+
+
+def test_describe_image_measures_both_the_download_and_what_it_writes(tmp_path):
+    import lzma
+
+    raw = bytes(range(256)) * 4096 + b"\0" * 12345
+    img = tmp_path / "pickpc-test.img.xz"
+    img.write_bytes(lzma.compress(raw, format=lzma.FORMAT_XZ))
+    info = site_build.describe_image(img, "2026-10-03")
+    assert info["file"] == "pickpc-test.img.xz"
+    assert info["extract_size"] == len(raw)
+    assert info["extract_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert info["image_download_size"] == img.stat().st_size
+    assert info["image_download_sha256"] == hashlib.sha256(img.read_bytes()).hexdigest()
+    with pytest.raises(SystemExit):
+        site_build.describe_image(tmp_path / "card.img", "2026-10-03")
+
+
+def test_imager_list_is_one_pi5_image_with_no_settings(built: Path):
+    import json
+
+    image = json.loads(site_build.PICKPC.read_text(encoding="utf-8"))
+    repo = json.loads((built / "imager.json").read_text(encoding="utf-8"))
+    assert [d["tags"] for d in repo["imager"]["devices"]] == [["pi5-64bit"]]
+    (entry,) = repo["os_list"]
+    assert entry["devices"] == ["pi5-64bit"]
+    # no init_format: Imager offers no settings, so it writes no cloud-init seed of its own
+    assert "init_format" not in entry
+    assert entry["url"] == f"https://perceptronics.advin.io/images/{image['file']}"
+    for key in ("extract_size", "image_download_size"):
+        assert isinstance(entry[key], int) and entry[key] > 0
+    for key in ("extract_sha256", "image_download_sha256"):
+        assert re.fullmatch(r"[0-9a-f]{64}", entry[key])
+    assert entry["extract_size"] > entry["image_download_size"]  # it is compressed
+    text = (built / "index.html").read_text(encoding="utf-8")
+    assert f'href="/images/{image["file"]}"' in text
+    assert "--repo https://perceptronics.advin.io/imager.json" in text
+
+
+def test_sync_never_deletes_the_published_images():
+    sync = (SITE / "site.sh").read_text(encoding="utf-8").split("\nsync)", 1)[1].split(";;", 1)[0]
+    assert "--delete" in sync and '--exclude "images/*"' in sync

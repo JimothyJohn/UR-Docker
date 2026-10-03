@@ -10,6 +10,8 @@
 #   site/site.sh validate   check the CloudFormation template parses
 #   site/site.sh deploy     create/update the stack (first run: 5-15 min, certificate + CloudFront)
 #   site/site.sh sync       build, upload to the bucket, invalidate CloudFront
+#   site/site.sh image F    publish pick PC image F (.img.xz): record it in pickpc-image.json, upload
+#                           it to images/, upload imager.json (Raspberry Pi Imager --repo); commit the json
 #   site/site.sh outputs    the stack's outputs (SiteURL, bucket, distribution)
 #   site/site.sh status     the stack's status
 #
@@ -81,10 +83,30 @@ sync)
     BUCKET="$(output BucketName)"
     DISTRIBUTION_ID="$(output DistributionId)"
     echo "Uploading to s3://${BUCKET}..."
-    aws s3 sync "${BUILD_DIR}" "s3://${BUCKET}" --delete --cache-control "max-age=3600" --exclude ".DS_Store"
+    # images/ is published by `image`, never part of _build/: keep --delete away from it
+    aws s3 sync "${BUILD_DIR}" "s3://${BUCKET}" --delete --cache-control "max-age=3600" \
+        --exclude ".DS_Store" --exclude "images/*"
     echo "Invalidating CloudFront..."
     aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --paths "/*" \
         --query 'Invalidation.Id' --output text
+    ;;
+image)
+    IMAGE_FILE="${2:?usage: site/site.sh image <file>.img.xz}"
+    [ -f "${IMAGE_FILE}" ] || { echo "no such file: ${IMAGE_FILE}" >&2; exit 1; }
+    load_env
+    echo "Measuring ${IMAGE_FILE} (decompresses it once)..."
+    python3 "${SITE_DIR}/build.py" --describe-image "${IMAGE_FILE}"
+    build
+    BUCKET="$(output BucketName)"
+    DISTRIBUTION_ID="$(output DistributionId)"
+    # the name carries the build, so the object never changes: cache it for good
+    aws s3 cp "${IMAGE_FILE}" "s3://${BUCKET}/images/$(basename "${IMAGE_FILE}")" \
+        --content-type application/x-xz --cache-control "public, max-age=31536000, immutable"
+    aws s3 cp "${BUILD_DIR}/imager.json" "s3://${BUCKET}/imager.json" \
+        --content-type application/json --cache-control "max-age=300"
+    aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --paths "/imager.json" \
+        --query 'Invalidation.Id' --output text
+    echo "Published. Commit site/pickpc-image.json; the page links it on the next sync."
     ;;
 outputs)
     load_env
@@ -95,7 +117,7 @@ status)
     aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --query 'Stacks[0].StackStatus' --output text
     ;;
 *)
-    sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

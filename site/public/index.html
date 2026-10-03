@@ -95,6 +95,10 @@
     tbody th { width: 15rem; font-weight: 600; }
     thead th { color: var(--muted); font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; }
     .after { margin-top: 1.25rem; max-width: 52rem; }
+    .reflash { margin-top: 1.5rem; max-width: 52rem; }
+    .reflash h3 { font-size: 1.05rem; margin-bottom: 0.4rem; }
+    .reflash p { color: var(--muted); font-size: 0.96rem; overflow-wrap: anywhere; }
+    .reflash pre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 0.7rem 0.9rem; overflow-x: auto; margin: 0 0 1rem; }
 
     footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: 0.88rem; }
     footer p { margin: 0 0 0.5rem; max-width: 56rem; }
@@ -234,6 +238,12 @@
             <tr><th>Connector</th><td>For Universal Robots, the URCap above: free and open source (MIT).</td><td>This page</td></tr>
           </tbody>
         </table>
+        <div class="reflash" id="reflash">
+          <h3>Re-flashing a camera computer</h3>
+          <p>Kits ship set up. To start a Raspberry Pi 5 camera computer over on a fresh card, use Raspberry Pi Imager (raspberrypi.com/software) with this site's image list:</p>
+          <pre><code>open -a "Raspberry Pi Imager" --args --repo https://perceptronics.advin.io/imager.json</code></pre>
+          <p>That is macOS; on Windows or Linux, start Imager with the same <code>--repo</code> option. Choose <strong>Raspberry Pi 5</strong>, <strong>Perceptronics pick PC</strong> and the card, and write it. There is nothing to configure: the card boots as a camera computer at 192.168.3.20. Image of {{PICKPC_DATE}}: <a href="/images/{{PICKPC_FILE}}">{{PICKPC_FILE}}</a>.</p>
+        </div>
         <p class="after"><strong>The kit comes from Advin.</strong> To ask for one, write to <a href="mailto:nick@advin.io?subject=Perceptronics%20kit">nick@advin.io</a> with your robot model, controller version and gripper.</p>
       </div>
     </section>
