@@ -71,6 +71,16 @@ cmd_build() {
     ssh "${ssh_opts[@]}" "$target" 'rm -rf ~/pi-image/stage && mkdir -p ~/pi-image/stage/deploy ~/pi-image/out ~/pi-image/cache'
     scp -q -r "${ssh_opts[@]}" "${repo}/deploy/pi" "${target}:pi-image/stage/deploy/"
     scp -q "${ssh_opts[@]}" "$wheel" "${target}:pi-image/stage/"
+    # A freshly flashed builder has no cache: hand it the laptop's librealsense build so the
+    # rewrite loop doesn't recompile (install.sh still checks the tarball's build stamp).
+    local tar
+    for tar in "${out_dir}"/cache/librealsense-*.tar; do
+        [ -f "$tar" ] || continue
+        if ! ssh "${ssh_opts[@]}" "$target" "$(remote_cmd test -f "pi-image/cache/$(basename "$tar")")"; then
+            log "seeding the builder's cache with $(basename "$tar")"
+            scp -q "${ssh_opts[@]}" "$tar" "${target}:pi-image/cache/"
+        fi
+    done
 
     local tty_opt=(-T) sudo_cmd=(sudo -n)
     if [ -t 0 ]; then tty_opt=(-t); sudo_cmd=(sudo); fi
@@ -92,6 +102,9 @@ cmd_build() {
     log "fetching ${name} into ${out_dir}"
     scp -q "${ssh_opts[@]}" "${target}:pi-image/out/${name}.*" "$out_dir/"
     (cd "$out_dir" && shasum -a 256 -c "$(ls "${name}".img*.sha256)") || die "fetched image fails its sha256"
+    mkdir -p "${out_dir}/cache"
+    scp -q "${ssh_opts[@]}" "${target}:pi-image/cache/librealsense-*.tar" "${out_dir}/cache/" \
+        || log "no librealsense tarball to keep (the next fresh builder compiles it)"
     local image="${out_dir}/${name}.img.xz"
     [ -f "$image" ] || image="${out_dir}/${name}.img"
     log "done: ${image}"

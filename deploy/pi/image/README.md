@@ -22,7 +22,8 @@ scripts/pi-image.sh seed /Volumes/bootfs --hostname … ─▶ user-data, networ
 
 The Pi needs to be aarch64 with passwordless sudo (or run the command from a terminal so sudo
 can prompt), about 12 GB free and internet access. `~/pi-image/cache` on the Pi keeps the base
-download and a tarball of the built librealsense, so only the first build compiles it. The
+download and a tarball of the built librealsense, so only the first build compiles it. The laptop keeps a copy in `target/pi-image/cache/` and hands it to a freshly
+flashed builder, so rewriting the build board doesn't cost another compile. The
 image, its `.sha256` and a `.manifest.txt` land in `target/pi-image/`. The manifest lists the
 base image, the wheel, the librealsense stamp and every package with its version. Diff two
 manifests to see what changed between builds.
