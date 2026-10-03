@@ -56,6 +56,11 @@ def _load_admin():
 
 admin = _load_admin()
 
+# The admin helper is a root service on the Pi (Linux): it opens the queue with O_NOFOLLOW,
+# runs install.sh under bash and keeps POSIX paths. None of that exists on Windows, where these
+# tests failed on the CI leg; the cockpit-side portal tests still run everywhere.
+pi_only = pytest.mark.skipif(sys.platform == "win32", reason="the admin helper runs on the Pi (Linux)")
+
 
 def _code(text: str) -> str:
     return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
@@ -111,6 +116,7 @@ def _manifest_key(rel: str) -> str:
     return f"{admin.TOP}/{rel}"
 
 
+@pi_only
 def test_a_bundle_verifies_and_unpacks_what_it_was_built_from(bundle, wheel, deploy_dir, tmp_path):
     m = admin.verify_bundle(bundle)
     assert m["version"] == "0.1.0" and m["wheel"] == WHEEL_NAME and m["source_rev"] == "abc123def456"
@@ -291,6 +297,7 @@ def _job(admin_mod, state):
     return admin_mod.Job("20261003T120000-00000000", "update", state / "status.json")
 
 
+@pi_only
 def test_an_update_runs_the_bundles_installer_with_its_wheel(bundle, helper_paths, tmp_path, monkeypatch):
     state, current, releases = helper_paths
     args = tmp_path / "args"
@@ -311,6 +318,7 @@ def test_an_update_runs_the_bundles_installer_with_its_wheel(bundle, helper_path
     assert status["job"]["state"] == "done"
 
 
+@pi_only
 def test_a_failing_installer_leaves_the_release_alone(bundle, helper_paths, monkeypatch):
     state, *_ = helper_paths
     monkeypatch.setenv("FAKE_INSTALL_RC", "3")
@@ -322,6 +330,7 @@ def test_a_failing_installer_leaves_the_release_alone(bundle, helper_paths, monk
         admin.apply_update(bundle, job)
 
 
+@pi_only
 def test_a_release_that_does_not_come_up_is_rolled_back(bundle, helper_paths, tmp_path, monkeypatch):
     state, *_ = helper_paths
     rollback_args = tmp_path / "rollback-args"
@@ -336,6 +345,7 @@ def test_a_release_that_does_not_come_up_is_rolled_back(bundle, helper_paths, tm
     assert rollback_args.read_text().split() == ["--rollback"]
 
 
+@pi_only
 def test_the_prebuilt_librealsense_is_unpacked_only_when_it_differs(
     tmp_path, wheel, deploy_dir, helper_paths, monkeypatch
 ):
@@ -561,6 +571,7 @@ def _status(state):
     return json.loads((state / "status.json").read_text())
 
 
+@pi_only
 def test_a_queued_network_request_reaches_the_installer(queue, helper_paths, monkeypatch):
     state, *_ = helper_paths
     seen = []
@@ -574,6 +585,7 @@ def test_a_queued_network_request_reaches_the_installer(queue, helper_paths, mon
     assert not list(queue.iterdir())
 
 
+@pi_only
 def test_a_symlinked_request_is_refused_and_cleared(queue, helper_paths, tmp_path, monkeypatch):
     state, *_ = helper_paths
     monkeypatch.setattr(admin, "_run_logged", lambda *a: pytest.fail("ran a symlinked request"))
@@ -587,6 +599,7 @@ def test_a_symlinked_request_is_refused_and_cleared(queue, helper_paths, tmp_pat
     assert not list(queue.iterdir()) and secret.exists()
 
 
+@pi_only
 def test_a_symlinked_bundle_is_not_copied(queue, helper_paths, bundle, monkeypatch):
     state, *_ = helper_paths
     monkeypatch.setattr(admin, "apply_update", lambda *a: pytest.fail("applied a symlinked bundle"))
@@ -611,6 +624,7 @@ def test_a_symlinked_bundle_is_not_copied(queue, helper_paths, bundle, monkeypat
         ),
     ],
 )
+@pi_only
 def test_bad_queue_entries_never_reach_the_installer(queue, helper_paths, monkeypatch, name, body):
     monkeypatch.setattr(admin, "_run_logged", lambda *a: pytest.fail("ran a bad request"))
     safe = name if "/" not in name else "weird-name"
@@ -620,6 +634,7 @@ def test_bad_queue_entries_never_reach_the_installer(queue, helper_paths, monkey
     assert not list(queue.iterdir())
 
 
+@pi_only
 def test_an_oversized_request_is_refused(queue, helper_paths, monkeypatch):
     state, *_ = helper_paths
     monkeypatch.setattr(admin, "_run_logged", lambda *a: pytest.fail("ran an oversized request"))
@@ -895,6 +910,7 @@ def test_an_upload_without_a_length_is_refused(portal_server):
     s.close()
 
 
+@pi_only
 def test_push_to_queue_to_helper_end_to_end(portal_server, bundle, helper_paths, monkeypatch, capsys):
     """scripts/pi-update.sh push -> the cockpit's upload route -> the queue -> run_queue -> status
     the client follows: everything but install.sh itself."""
@@ -947,6 +963,7 @@ def _unit(path: Path) -> dict[str, list[str]]:
     return out
 
 
+@pi_only
 def test_the_cockpit_the_helper_and_the_installer_agree_on_paths():
     cockpit = _unit(PI / "perceptronics-cockpit.service")
     admin_dir = next(
