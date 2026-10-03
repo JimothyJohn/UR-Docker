@@ -22,6 +22,10 @@
   // One feed request, connect + long poll + picture: an address nothing answers on (the pick
   // PC's default before it is plugged in) must fail in seconds, not after TCP gives up.
   const FEED_TIMEOUT_MS = POLL_TIMEOUT_MS + 3500;
+  // Every other request to the camera computer: a click must fail with a reason, not hang on
+  // an address nothing answers on. A move answers when the arm has arrived, so it gets longer.
+  const API_TIMEOUT_MS = 15000;
+  const MOVE_TIMEOUT_MS = 60000;
   const HOVER_MS = 150;
   const PROBE_TIMEOUT_MS = 2500;
   const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -276,17 +280,29 @@
       }
     }
 
-    async api(method, path, body) {
+    async api(method, path, body, timeoutMs = API_TIMEOUT_MS) {
       const init = { method, headers: {} };
       if (body !== undefined) {
         init.headers["Content-Type"] = "application/json";
         init.body = JSON.stringify(body);
       }
-      const r = await fetch(this.cockpitUrl() + path, init);
-      let out;
-      try { out = await r.json(); } catch (e) { out = { ok: false, error: `HTTP ${r.status}` }; }
-      if (out && out.ok === undefined) out.ok = r.ok;
-      return out;
+      const ctl = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : null;
+      if (ctl) init.signal = ctl.signal;
+      try {
+        const r = await fetch(this.cockpitUrl() + path, init);
+        let out;
+        try { out = await r.json(); } catch (e) { out = { ok: false, error: `HTTP ${r.status}` }; }
+        if (out && out.ok === undefined) out.ok = r.ok;
+        return out;
+      } catch (err) {
+        if (err && err.name === "AbortError") {
+          throw new Error(`no answer from ${this.cockpitUrl()} in ${Math.round(timeoutMs / 1000)} s`);
+        }
+        throw err;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
 
     // -- rendering --------------------------------------------------------------------
@@ -779,7 +795,7 @@
       this.$("move-ck").disabled = true;
       this.setStatus("moving through the cockpit (Primary, safety-enveloped)…");
       try {
-        const res = await this.api("POST", "/api/robot/move", { pose: loc.approach_pose, velocity: 0.1 });
+        const res = await this.api("POST", "/api/robot/move", { pose: loc.approach_pose, velocity: 0.1 }, MOVE_TIMEOUT_MS);
         if (res.ok) {
           this.setStatus(`landed at ${fmtVec(res.landed)}`, "ok");
         } else {
@@ -797,7 +813,7 @@
     async bringUp() {
       this.setStatus("bringing the robot up…");
       try {
-        const res = await this.api("POST", "/api/robot/bring_up");
+        const res = await this.api("POST", "/api/robot/bring_up", undefined, MOVE_TIMEOUT_MS);
         this.setStatus(res.ok ? `robot ${res.robot_mode || "up"} / ${res.safety_mode || ""}` : `bring-up failed: ${res.error || "?"}`, res.ok ? "ok" : "err");
       } catch (err) {
         this.setStatus(`bring-up: ${err && err.message ? err.message : err}`, "err");

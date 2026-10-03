@@ -578,3 +578,47 @@ def test_locate_withholds_the_polyscope_target_when_the_offset_is_not_the_one_in
     loc = RobotLink(RobotConfig(host="fake")).locate((0.0, 0.0, 0.3))
     assert loc["ok"] and loc["polyscope_pose"] is None
     assert "disagrees" in loc["polyscope_pose_note"] and loc["robot"]["tcp_offset_consistent"] is False
+
+
+# -- the pick PC keeps its hand-eye in the calibration file, never the environment -------------
+
+
+def test_a_seeded_file_is_what_from_env_reads(tmp_path):
+    from perceptronics.handeye import ENV_HANDEYE_FILE, HandEye, seed_calibration_file
+
+    f = tmp_path / "cal" / "handeye.json"
+    pose = [0.013337, 0.055303, 0.01286, 0.099999, -0.1637, 3.118758]
+    assert seed_calibration_file(f, pose, source="cell profile") is True
+    he = HandEye.from_env({ENV_HANDEYE_FILE: str(f)})
+    assert he.source == f"file:{f}" and he.calibrated
+    assert he.as_dict()["flange_to_depth_pose"] == pytest.approx(pose)
+
+
+def test_a_calibration_already_saved_is_never_overwritten_by_a_seed(tmp_path):
+    from perceptronics.handeye import seed_calibration_file
+
+    f = tmp_path / "handeye.json"
+    f.write_text(
+        '{"flange_to_depth_pose": [9, 9, 9, 0, 0, 0], "source": "touch-and-click"}', encoding="utf-8"
+    )
+    assert seed_calibration_file(f, [0, 0, 0, 0, 0, 0], source="cell profile") is False
+    assert "touch-and-click" in f.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("pose", [[0, 0, 0], [0, 0, 0, 0, 0, float("nan")], [0, 0, 0, 0, 0, float("inf")]])
+def test_a_seed_must_be_six_finite_numbers(tmp_path, pose):
+    from perceptronics.handeye import seed_calibration_file
+
+    with pytest.raises(ValueError):
+        seed_calibration_file(tmp_path / "h.json", pose, source="x")
+    assert not (tmp_path / "h.json").exists()
+
+
+def test_why_the_environment_must_not_carry_it(tmp_path):
+    # the trap the pick PC's installer avoids: an environment pose beats every saved calibration
+    from perceptronics.handeye import ENV_HANDEYE_FILE, ENV_T_FLANGE_CAMERA, HandEye, seed_calibration_file
+
+    f = tmp_path / "handeye.json"
+    seed_calibration_file(f, [0.1, 0, 0, 0, 0, 0], source="a calibration on this PC")
+    he = HandEye.from_env({ENV_HANDEYE_FILE: str(f), ENV_T_FLANGE_CAMERA: "[0,0,0,0,0,0]"})
+    assert he.source.startswith("env:")

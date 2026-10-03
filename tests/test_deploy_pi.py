@@ -10,6 +10,7 @@ the same under perceptronics's own parser, and the firewall must drop by default
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -461,3 +462,95 @@ def test_installer_defaults_and_its_guards():
     # owns the port: one that already carries the address is kept, not duplicated
     assert '" 802-3-ethernet "*' in code
     assert "dnsmasq-base" in code
+
+
+# ----- the hand-eye lives in the calibration file, not cell.env ---------------------------------
+
+
+def _handeye_snippet() -> str:
+    """The Python install.sh's handeye_out_of_env runs, exactly as written there."""
+    body = _text(INSTALL).split("handeye_out_of_env() {", 1)[1]
+    return body.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+
+
+def _run_handeye(tmp_path, cell_text: str, existing: str | None = None):
+    cell_env, file, out = tmp_path / "cell.env", tmp_path / "cal" / "handeye.json", tmp_path / "cell.env.new"
+    cell_env.write_text(cell_text, encoding="utf-8")
+    if existing is not None:
+        file.parent.mkdir()
+        file.write_text(existing, encoding="utf-8")
+    ran = subprocess.run(
+        [sys.executable, "-", str(cell_env), str(file), str(out)],
+        input=_handeye_snippet(),
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=True,
+    )
+    return ran.stdout.strip(), file, out
+
+
+def test_the_profiles_hand_eye_seeds_the_file_and_leaves_the_environment(tmp_path):
+    from perceptronics.cell import load_cell
+    from perceptronics.handeye import ENV_HANDEYE_FILE, ENV_T_FLANGE_CAMERA, HandEye
+
+    pose = load_cell("ur3")[ENV_T_FLANGE_CAMERA]
+    said, file, out = _run_handeye(tmp_path, f"UR_HOST=192.168.3.3\n{ENV_T_FLANGE_CAMERA}={pose}\n")
+    assert said == "seeded"
+    assert ENV_T_FLANGE_CAMERA not in parse_env_text(out.read_text(encoding="utf-8"))
+    he = HandEye.from_env({ENV_HANDEYE_FILE: str(file)})
+    assert he.source == f"file:{file}"
+    assert he.as_dict()["flange_to_depth_pose"] == pytest.approx(json.loads(pose))
+
+
+def test_a_calibration_made_on_the_pc_survives_a_redeploy(tmp_path):
+    saved = '{"flange_to_depth_pose": [0.02, 0.05, 0.01, 0.1, -0.16, 3.1], "source": "touch-and-click"}'
+    said, file, out = _run_handeye(
+        tmp_path, "UR_HOST=192.168.3.3\nPERCEPTRONICS_T_FLANGE_CAMERA=[0,0,0,0,0,0]\n", existing=saved
+    )
+    assert said == "kept" and file.read_text(encoding="utf-8") == saved
+    assert "PERCEPTRONICS_T_FLANGE_CAMERA" not in out.read_text(encoding="utf-8")
+
+
+def test_a_cell_env_without_a_hand_eye_is_left_alone(tmp_path):
+    said, file, out = _run_handeye(tmp_path, "UR_HOST=192.168.3.3\n")
+    assert said == "none" and not file.exists() and not out.exists()
+
+
+def test_the_installer_runs_the_move_on_every_install():
+    code = _code(_text(INSTALL))
+    main = code.split("main() {", 1)[1]
+    assert main.index("write_cell_env") < main.index("handeye_out_of_env") < main.index("install_units")
+    # and the cell.env it writes no longer tells anyone to delete the line by hand
+    assert "delete the PERCEPTRONICS_T_FLANGE_CAMERA" not in _text(INSTALL)
+
+
+# ----- deploy-pi.sh: the Python that builds the wheel ---------------------------------------
+
+
+def _python_with_pip() -> str | None:
+    for cand in (sys.executable, shutil.which("python3"), "/opt/homebrew/bin/python3", "/usr/bin/python3"):
+        if cand and subprocess.run([cand, "-m", "pip", "--version"], capture_output=True).returncode == 0:
+            return cand
+    return None
+
+
+def test_deploy_skips_a_python_without_pip(tmp_path):
+    # Regression (2026-10-02): the repo's .venv (no pip) was first on PATH and the deploy died
+    # with "python3 with pip not found" although Homebrew's python3 had pip.
+    bash, good = _real_bash(), _python_with_pip()
+    if bash is None or good is None or sys.platform == "win32":
+        pytest.skip("needs bash and some python3 with pip")
+    code = _text(DEPLOY)
+    loop = code[code.index('py=""\n') : code.index('[ -n "$py" ]')]
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    nopip = fake / "python3"
+    nopip.write_text('#!/bin/sh\n[ "$2" = pip ] && exit 1\nexit 0\n', encoding="utf-8")
+    nopip.chmod(0o755)
+    script = f'{loop}\nprintf "%s" "$py"\n'
+    env = {"PATH": f"{fake}:/usr/bin:/bin", "PYTHON": str(nopip)}
+    picked = subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True).stdout
+    assert picked not in (str(nopip), "python3")  # never the pip-less one (a later install, or none)
+    env["PYTHON"] = good
+    assert subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True).stdout == good
