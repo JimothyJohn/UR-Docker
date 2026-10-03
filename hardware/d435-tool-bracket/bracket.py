@@ -35,6 +35,15 @@ Sources (verified 2026-09-04):
     12 o'clock, centreline 17.60 behind the face (section A-A).
   * UR10e User Manual (SW 5.21, 711-039-00), §7.11.3: Lumberg RKMW 8-354
     tool-I/O socket at 12 o'clock on the Ø90 wrist, 35.65 behind the face.
+  * UFACTORY 850 User Manual V2.3.0, §1.2.2.5 "End-effector Installation"
+    (p. 26): ISO 9409-1-50-4-M6, Ø63 h6 face, Ø31.50 H6 pilot, 4× M6 ▽10 on
+    Ø50 at 45° plus 2× M6 ▽10 on Ø50 at 90° to the dowel, Ø6 H7 ▽5 dowel; the
+    connectors (tool I/O, Ethernet M8) leave the housing beside the dowel.
+  * UFACTORY's own 850 wrist geometry, ``xarm_ros2`` (BSD-3-Clause),
+    ``xarm_description/meshes/uf850/visual/link6.stl`` @ 62936f7 (vendored,
+    unmodified): the face is 6 proud of an Ø84 housing; the pilot recess is 6
+    deep; the connector block reaches r 47.9, 11.5–24.5 behind the face, from
+    67° to 162° round the axis in this frame (the dowel at 90°).
   * Intel RealSense D400 Series Datasheet 337029-017, Fig. 10-9 (D435/D435i):
     90 × 25 × 25.05 mm, 1/4-20 on the bottom, 2× M3 45 mm apart (max
     insertion 3 mm, 0.4 Nm), 50 mm stereo baseline.
@@ -86,6 +95,7 @@ PARAMS = {
     "SPIGOT80_OD": 0.0,  # 0 = off in the base design; the ur20 variant turns it on (see VARIANTS)
     "SPIGOT80_H": 3.0,
     "DOWEL_ANGLE_DEG": 90.0,  # both pin holes sit at 12 o'clock on their PCD
+    "ROBOT_FLANGE_DEG": 0.0,  # this frame turned by this about Z = the robot's own flange frame (UR: same)
     # -- tool-I/O connector (M8 socket at 12 o'clock on the wrist housing, behind the face) -----
     "TOOL_CONNECTOR_Z_ESERIES": -35.65,  # UR10e manual §7.11.3: Lumberg RKMW 8-354, 35.65 behind the face
     "TOOL_CONNECTOR_Z_UR20": -17.6,  # UR20 manual §8.11.3 section A-A: centreline 17.60 behind the face
@@ -102,6 +112,15 @@ PARAMS = {
     "UR20_ARM_ANGLE_DEG": 30.0,
     "UR20_SPIGOT_OD": 49.8,  # Ø50 H7 pilot engaged (a dual part can't: it would hold it off a Ø63 face)
     "UR20_TOP_RECESS_D": 50.2,  # the Ø50 pilot re-presented to an ISO-80 tool (e-Series variant keeps Ø31.7)
+    # UFACTORY 850: the e-Series' ISO-50 face (Ø63, Ø31.5 pilot, 4× M6 on Ø50) plus two M6 at 3 and 9
+    # o'clock, an Ø84 housing, and a connector block (tool I/O + Ethernet M8) from 67° to 162° round the
+    # axis, 11.5-24.5 behind the face, r ≤ 47.9 — where the e-Series wall hangs, so the camera clocks off it
+    "UF850_PLATE_OD": 63.0,
+    "UF850_BOLT50_ANGLES_DEG": (0.0, 45.0, 135.0, 180.0, 225.0, 315.0),  # all six M6 pass a tool's bolts
+    "UF850_WRIST_R": 42.0,  # Ø84 housing behind the face (UFACTORY's link6 mesh); the wall clears it by 3
+    "UF850_ARM_ANGLE_DEG": 0.0,  # 3 o'clock: 18° clear of the connector block, opposite the button at ~156°
+    #   and 90° from the six-axis F/T port on the face's rim at 270°
+    "UF850_ROBOT_FLANGE_DEG": 180.0,  # UFACTORY's flange frame (link6) has the dowel at -Y: this frame + 180°
     "ARM_W": 56.0,  # tangential width of the tab that carries the wall (the wall is as wide as the seat)
     "WRIST_R": 50.0,  # largest thing the wall must clear: the UR20's Ø100 housing (e-Series wrist is Ø90)
     "WALL_CLEAR": 3.0,  # radial gap housing → wall inner face (the flat head is sunk: this is all it needs)
@@ -141,14 +160,16 @@ PARAMS = {
     "HOLE_PRINT_ALLOWANCE": 0.0,  # add to every hole diameter if your printer undersizes
 }
 
-VARIANTS = ("eseries", "ur20")
+VARIANTS = ("eseries", "ur20", "uf850")
 
 
 def variant_params(p: dict, variant: str) -> dict:
     """Base PARAMS (both patterns, Ø96, wall clearing a Ø100 housing) plus the
     per-flange overrides: ``eseries`` drops the ISO-80 pattern, shrinks to the Ø63
     face and pulls the wall in to the Ø90 wrist; ``ur20`` clocks the camera off
-    the M8 socket and engages the Ø50 pilot both ways."""
+    the M8 socket and engages the Ø50 pilot both ways; ``uf850`` is the e-Series
+    disc with the 850's two extra M6, the wall pulled in to its Ø84 housing and
+    clocked off its connector block."""
     if variant == "eseries":
         return {
             **p,
@@ -163,6 +184,16 @@ def variant_params(p: dict, variant: str) -> dict:
             "SPIGOT80_OD": p["UR20_SPIGOT_OD"],
             "TOP_RECESS_D": p["UR20_TOP_RECESS_D"],
         }
+    if variant == "uf850":
+        return {
+            **p,
+            "PLATE_OD": p["UF850_PLATE_OD"],
+            "PATTERNS": ("iso50",),
+            "BOLT50_ANGLES_DEG": p["UF850_BOLT50_ANGLES_DEG"],
+            "WRIST_R": p["UF850_WRIST_R"],
+            "ARM_ANGLE_DEG": p["UF850_ARM_ANGLE_DEG"],
+            "ROBOT_FLANGE_DEG": p["UF850_ROBOT_FLANGE_DEG"],
+        }
     raise ValueError(f"unknown variant {variant!r}; one of {VARIANTS}")
 
 
@@ -171,6 +202,7 @@ OUT = HERE / "out"
 RENDERS = HERE / "renders"
 VENDOR = HERE / "vendor"
 CAMERA_MESH = VENDOR / "d435_realsense-ros_12k.stl"
+ROBOT_MESHES = {"uf850": VENDOR / "uf850_link6_xarm_ros2.stl"}  # the real wrist, where a vendor publishes it
 CAMERA_MESH_SOURCE = {
     "url": "https://raw.githubusercontent.com/IntelRealSense/realsense-ros/9189b0591fae677570d2dfd0ae8957fb6f12e635/realsense2_description/meshes/d435.dae",
     "sha256": "42f3b66f47a1f8f425a2e4dc07c1d9c283183167d8441f520a15623d98f9bf78",
@@ -223,6 +255,12 @@ def derived(p: dict) -> dict:
         *tilt(seat_x + p["CAM_H"] / 2, -p["IMAGER_OFFSET"], front_z - p["DEPTH_ORIGIN_FROM_FRONT"])
     )
     x_cam, y_cam, z_cam = rot(0, 1, 0), rot(-ct, 0, -st), rot(-st, 0, ct)
+    rf = math.radians(p["ROBOT_FLANGE_DEG"])
+    cr, sr = math.cos(rf), math.sin(rf)
+
+    def to_robot(v):  # this frame → the robot's flange frame (what its controller reports poses in)
+        return (round(cr * v[0] - sr * v[1], 6), round(sr * v[0] + cr * v[1], 6), round(v[2], 6))
+
     usb_side = -1.0 if p["CABLE_SIDE"] != "left" else 1.0
     return {
         "wall_inner_x": wall_in,
@@ -270,6 +308,12 @@ def derived(p: dict) -> dict:
         },
         "depth_origin_flange_mm": depth_origin,
         "camera_axes_in_flange": {"x_cam": x_cam, "y_cam": y_cam, "z_cam": z_cam},
+        # the hand-eye seed: the same, in the robot's own flange frame (UR: identical)
+        "robot_flange_deg": p["ROBOT_FLANGE_DEG"],
+        "depth_origin_robot_flange_mm": to_robot(depth_origin),
+        "camera_axes_in_robot_flange": {
+            k: to_robot(v) for k, v in (("x_cam", x_cam), ("y_cam", y_cam), ("z_cam", z_cam))
+        },
         "arm_angle_deg": p["ARM_ANGLE_DEG"],
     }
 
@@ -549,6 +593,8 @@ def build_flange_standin(p: dict, robot: str = "eseries"):
     ur20:    UR20/UR30 Ø100 output housing, 56.5 long, with the ISO-80 pattern (UR20 manual §8.11.3)."""
     import cadquery as cq
 
+    if robot == "uf850":
+        return _uf850_standin(cq, p)
     if robot == "ur20":
         f = cq.Workplane("XY", origin=(0, 0, -56.5)).circle(50.0).extrude(56.5)
         f = f.cut(cq.Workplane("XY", origin=(0, 0, -30)).circle(25.0).extrude(30))  # Ø50 H7 pilot bore
@@ -568,6 +614,83 @@ def build_flange_standin(p: dict, robot: str = "eseries"):
     x, y = _pcd_xy(p["PCD50"] / 2, p["DOWEL_ANGLE_DEG"])
     f = f.cut(cq.Workplane("XY", origin=(x, y, -6.2)).circle(3.0).extrude(6.2))
     return f.union(_connector_standin(cq, p, 45.0, p["TOOL_CONNECTOR_Z_ESERIES"]))
+
+
+def _uf850_standin(cq, p: dict):
+    """UFACTORY 850 wrist for the STEP assembly: Ø84 × 24 housing, Ø63 × 6 face, the
+    Ø31.5 × 6 pilot, six M6 ▽10, the Ø6 ▽5 dowel, and the connector block as a box
+    (r 38…47.9 over 67°…95°, 11.5…24.5 behind the face) — the envelope UFACTORY's
+    mesh shows; the renders and the clash check use the mesh itself."""
+    f = cq.Workplane("XY", origin=(0, 0, -30.0)).circle(p["UF850_WRIST_R"]).extrude(24.0)
+    f = f.union(cq.Workplane("XY", origin=(0, 0, -6.0)).circle(31.5).extrude(6.0))
+    f = f.cut(cq.Workplane("XY", origin=(0, 0, -6.0)).circle(31.5 / 2).extrude(6.0))
+    for a in p["UF850_BOLT50_ANGLES_DEG"]:
+        x, y = _pcd_xy(p["PCD50"] / 2, a)
+        f = f.cut(cq.Workplane("XY", origin=(x, y, -10.0)).circle(2.5).extrude(10.0))
+    x, y = _pcd_xy(p["PCD50"] / 2, p["DOWEL_ANGLE_DEG"])
+    f = f.cut(cq.Workplane("XY", origin=(x, y, -5.0)).circle(3.0).extrude(5.0))
+    block = (
+        cq.Workplane("XY", origin=(0, 0, -24.5))
+        .center(43.0, 0)
+        .rect(10.0, 2 * 47.9 * math.sin(math.radians(14.0)))
+        .extrude(13.0)
+    )
+    return f.union(_rot_z(block, 81.0))
+
+
+def load_robot_mesh(p: dict, robot: str):
+    """The vendor's wrist mesh (metres, its own flange frame) as (verts mm, tris) in
+    this frame — turned by -ROBOT_FLANGE_DEG — or None when there is none."""
+    import numpy as np
+
+    path = ROBOT_MESHES.get(robot)
+    if path is None:
+        return None
+    raw = path.read_bytes()
+    n = struct.unpack_from("<I", raw, 80)[0]
+    rec = np.frombuffer(raw, dtype=[("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")], count=n, offset=84)
+    v = rec["v"].reshape(-1, 3).astype(float) * 1000.0
+    a = -math.radians(p["ROBOT_FLANGE_DEG"])
+    c, s = math.cos(a), math.sin(a)
+    out = v.copy()
+    out[:, 0], out[:, 1] = c * v[:, 0] - s * v[:, 1], s * v[:, 0] + c * v[:, 1]
+    return out, np.arange(len(out)).reshape(-1, 3)
+
+
+def robot_clash(p: dict, bracket, robot: str) -> dict | None:
+    """The bracket against the vendor's wrist mesh: vertices of the wrist inside the
+    bracket (with the wrist lowered 0.05 mm, since the plate sits *on* its face) —
+    the build refuses anything but 0 — and the smallest gaps behind the face: the
+    spigot in the pilot, and the hanging wall to the housing and connectors."""
+    import cadquery as cq
+    import numpy as np
+
+    mesh = load_robot_mesh(p, robot)
+    if mesh is None:
+        return None
+    verts = np.unique(np.round(mesh[0], 4), axis=0) - (0.0, 0.0, 0.05)
+    solid = bracket.val()
+    bb = solid.BoundingBox()
+    near = verts[
+        (verts[:, 0] > bb.xmin - 6)
+        & (verts[:, 0] < bb.xmax + 6)
+        & (verts[:, 1] > bb.ymin - 6)
+        & (verts[:, 1] < bb.ymax + 6)
+        & (verts[:, 2] < bb.zmax + 6)
+    ]
+    inside = int(sum(solid.isInside(cq.Vector(*q), 0.0) for q in near))
+    behind = near[near[:, 2] < -0.5]
+    r = np.hypot(behind[:, 0], behind[:, 1])
+
+    def gap(pts):
+        g = min((solid.distance(cq.Vertex.makeVertex(*q)) for q in pts), default=None)
+        return None if g is None else round(g, 2)
+
+    return {
+        "wrist_vertices_inside": inside,
+        "pilot_gap_mm": gap(behind[r < 20.0]),  # the spigot in the pilot recess: a locating fit, by design
+        "wall_gap_mm": gap(behind[r > 33.0]),  # the hanging wall and clip to the housing and connectors
+    }
 
 
 def _connector_standin(cq, p: dict, housing_r: float, z: float):
@@ -733,9 +856,8 @@ def export(p: dict) -> dict:
         cq.exporters.export(bracket, str(stl), tolerance=0.02, angularTolerance=0.1)
         cq.exporters.export(bracket, str(step))
         assy = cq.Assembly(name=f"d435_tool_bracket_{variant}")
-        assy.add(
-            build_flange_standin(pp, variant), name=f"ur_flange_{variant}", color=cq.Color(0.55, 0.57, 0.6)
-        )
+        robot_name = "uf850_wrist" if variant == "uf850" else f"ur_flange_{variant}"
+        assy.add(build_flange_standin(pp, variant), name=robot_name, color=cq.Color(0.55, 0.57, 0.6))
         assy.add(bracket, name="bracket", color=cq.Color(0.15, 0.15, 0.17))
         assy.add(build_camera_standin(pp), name="d435_envelope", color=cq.Color(0.75, 0.75, 0.78))
         for k, v in build_hardware(pp, variant).items():
@@ -746,12 +868,19 @@ def export(p: dict) -> dict:
         clash = camera_clash(pp, bracket)
         if clash:
             sys.exit(f"{variant}: {clash} vertices of Intel's D435 body are inside the bracket")
+        wrist = robot_clash(pp, bracket, variant)
+        if wrist and wrist["wrist_vertices_inside"]:
+            sys.exit(
+                f"{variant}: {wrist['wrist_vertices_inside']} vertices of the robot's wrist are inside "
+                "the bracket"
+            )
         bb = bracket.val().BoundingBox()
         out["variants"][variant] = {
             "overrides": {k: v for k, v in pp.items() if p.get(k) != v},
             "derived": derived(pp),
             "volume_cm3": vol / 1000.0,
             "camera_clash_vertices": clash,
+            "robot_clash": wrist,
             "mass_g_ppa_cf_solid": vol / 1000.0 * 1.25,  # Bambu PPA-CF spec 1.25 g/cm³, 100 % solid
             "bbox_mm": [round(bb.xlen, 2), round(bb.ylen, 2), round(bb.zlen, 2)],
             "stl": str(stl),
@@ -799,8 +928,13 @@ def render(p: dict) -> list[str]:
     scenes, angles, derived_by_scene = {}, {}, {}
     for robot in VARIANTS:
         pp = variant_params(p, robot)
+        wrist = load_robot_mesh(pp, robot)  # the vendor's own wrist where there is one
         parts = [
-            (_mesh(build_flange_standin(pp, robot)), (0.55, 0.57, 0.60), 0.35),
+            (
+                wrist if wrist is not None else _mesh(build_flange_standin(pp, robot)),
+                (0.55, 0.57, 0.60),
+                0.35,
+            ),
             (_mesh(build_bracket(pp)), (0.16, 0.18, 0.22), 0.6),
             (load_camera_mesh(pp), (0.80, 0.81, 0.84), 0.30),
         ]
@@ -848,6 +982,15 @@ def render(p: dict) -> list[str]:
         ("iso_wide", "eseries", 24, -35, 105, (25, 0, -15), "e-Series assembly — wrist-3, adapter, D435"),
         ("iso_ur20", "ur20", 28, -55, 75, (35, 0, -10), "ur20_title"),
         (
+            "iso_uf850",
+            "uf850",
+            22,
+            40,
+            72,
+            (25, 15, -10),
+            "UFACTORY 850: camera at 3 o'clock, clear of the tool-I/O + Ethernet block",
+        ),
+        (
             "side_xz",
             "eseries",
             0,
@@ -882,6 +1025,15 @@ def render(p: dict) -> list[str]:
             60,
             (15, 0, -2),
             "UR20 print from below: Ø49.8 spigot into the Ø50 H7 pilot, camera 45° off the M8",
+        ),
+        (
+            "underside_uf850",
+            "bracket_uf850",
+            -50,
+            -125,
+            60,
+            (15, 0, -2),
+            "UFACTORY 850 print from below: six M6, Ø31.3 spigot into the Ø31.5 H6 pilot",
         ),
         (
             "wrist_side",

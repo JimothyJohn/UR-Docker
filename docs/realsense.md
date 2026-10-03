@@ -208,7 +208,7 @@ Everything below is the day-to-day loop for testing on a laptop at the cell
 
 **Cell profiles** (`perceptronics/cells/{sim,ur3,ur20}.env`, `--cell NAME` on any
 `perceptronics` entry point or `UR_CELL=NAME`): one word selects the robot's
-host/platform/ports and the bracket print (`PERCEPTRONICS_BRACKET=eseries|ur20`,
+host/platform/ports and the bracket print (`PERCEPTRONICS_BRACKET=eseries|ur20|uf850`,
 which picks the hand-eye seed — `perceptronics.handeye.BRACKET_SEEDS`). A variable
 already set in the shell wins over the file. The real cells ship with `UR_HOST`
 empty: fill in the controller IP once. `perceptronics cells` prints them;
