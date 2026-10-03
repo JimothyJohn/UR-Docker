@@ -1,148 +1,84 @@
 # perceptronics
 
-A vision backend and a browser cockpit for robot picking. A depth camera on the
-arm sees the parts; perceptronics measures them in 3-D, turns the one you want
-into a pose in the robot's base frame, and hands that pose to the robot.
+A depth camera on the robot's wrist finds the part; the **3D Pick** node on the
+pendant puts the gripper on it. This page gets it onto a Universal Robots e-Series
+(PolyScope 5).
 
-Perceptronics is meant to work with **any robot that can report where its tool
-is and move to a pose it is given**. Universal Robots is the first one wired
-up (e-Series and PolyScope X), through the `urctl` library in this repo and a
-pendant plug-in (URCap). Other arms plug in at one seam: see
-[Adding a robot](#adding-a-robot).
+## Install it: one USB stick
 
-## The idea
+**1. Download these two files** (both, from the same place, don't rename them):
 
-```
- depth camera ──▶ vision backend ─────────────────────▶ cockpit (browser)
- (RealSense,      frames + flange pose, segment,          live picture, 3-D scan,
-  synthetic)      measure, hand-eye, reach                click → target, pick
-                       ▲          │
-           flange pose │          │ target pose
-                       │          ▼
-                ┌──────────────────────────┐
-                │ robot adapter            │   today: Universal Robots
-                │ read pose · move to pose │   (urctl, URCap pick node)
-                └──────────────────────────┘
-```
+- [`perceptronic-ps5-0.8.0.urcap`](https://github.com/JimothyJohn/perceptronics/raw/main/urcap/dist/perceptronic-ps5-0.8.0.urcap)
+- [`urmagic_perceptronic.sh`](https://github.com/JimothyJohn/perceptronics/raw/main/urcap/dist/urmagic_perceptronic.sh)
 
-The robot is a pose source and a pose sink. Everything between the two lives in
-this repo and knows nothing about the vendor:
+**2. Copy them onto a USB stick**, at the top, not in a folder. The stick must be
+FAT32 (most sticks are). Eject it properly before you pull it out.
 
-- **Pose in every frame.** The robot streams its flange pose and each camera
-  frame carries the pose it was taken at, so a pixel becomes a point in the
-  base frame even while the wrist moves.
-- **Segment and measure.** Click a part, or describe it by size, and the
-  backend finds it in colour + depth: its top face, centre, heading, and
-  length × width × height.
-- **Hand-eye.** Where the camera sits on the flange: a seed from the bracket
-  design, refined by a touch-and-click or a mark-less calibration.
-- **Plan.** Approach pose, grasp pose, and a reach check from the arm's own
-  kinematics. The controller's IK has the final say before anything moves.
-- **Hand it over.** The target goes out through the robot adapter as a
-  safety-checked, audited move, or back to a program on the robot that asked
-  for it.
+**3. On the pendant, once per robot:** ☰ → **Settings** → **Security** → **General**
+→ turn on **Run magic files** and **USB ports**.
 
-The core is pure Python standard library. It runs from a checkout on Windows,
-macOS and Linux, amd64 and arm64, with nothing to install. The production target
-is a small arm64 computer next to the robot (a Pi 5 or a Jetson).
+**4. Power the arm off** (the robot stays on) and stop any program. **Plug the stick
+in.** The pendant shows **! USB !**, then the robot restarts by itself. That's the
+install.
 
-## Quick start
+**5. Use it.** **Installation** → **URCaps** → **Perceptronic**: type the camera
+computer's address. In your program: *your gripper's Open* → **3D Pick** → *your
+gripper's Close*.
 
-No camera and no robot needed. Python 3.10 or newer:
+If nothing happens at step 4: the arm was on or a program was running (you'll get a
+popup saying to restart; restart the robot), or the magic files setting is off. You
+can always install by hand: ☰ → **Settings** → **System** → **URCaps** → **+** → pick
+the `.urcap` → **Open** → **Restart**. What happened is written to
+`urmagic_perceptronic.log` on the stick.
 
-```bash
-git clone https://github.com/JimothyJohn/perceptronics && cd perceptronics
-python3 -m perceptronics gui --fake     # cockpit on a synthetic scene: http://localhost:7621
-python3 -m perceptronics doctor         # pre-flight: camera, SDK, robot, hand-eye
-```
+The camera computer (a Raspberry Pi with the D435 on its USB port) is set up once:
+[docs/pick-kit.md](docs/pick-kit.md). PolyScope X has no magic files; its URCap
+installs through System Manager: [urcap/README.md](urcap/README.md).
 
-With a simulated robot in the loop:
+## Developers: install from a PC over SSH
+
+Same two files, same script, no stick: copy them to the robot and run the script
+there. Your PC must be on the robot's network.
+
+**Turn SSH on (PolyScope 5.10 and later):** ☰ → **Settings** → **Security** →
+**Secure Shell** → enter the admin password → tick **Enable SSH Access**.
+
+**Log in as `root`.** The factory default password is **`easybot`**
+([UR: resetting passwords](https://www.universal-robots.com/articles/ur/robot-care-maintenance/resetting-passwords/)).
+If it was changed, ask whoever owns the robot. Put your key on it so you never type
+the password again (`ssh-copy-id`, or **Secure Shell** → **Manage Authorized Keys** on
+the pendant), and change the default with `passwd`
+([UR: secure setup](https://www.universal-robots.com/articles/ur/cybersecurity/secure-setup-of-ur-cobots/)):
 
 ```bash
-make simx-up                            # PolyScope X sim (HOST_ARCH=arm64 on Apple Silicon)
-python3 -m perceptronics --cell sim gui # synthetic camera, simulated arm
+ROBOT=192.168.1.50                       # your robot's IP address
+ssh-copy-id root@$ROBOT                  # once: key login from now on
 ```
 
-Motion on PolyScope X needs Remote mode and the Primary interface switched on in
-its UI once ([CLAUDE.md](CLAUDE.md#polyscope-x-the-rest-robot-api-second-platform)).
-With the real camera and cell: `python3 -m perceptronics --cell ur3 gui`. A
-*cell* (`perceptronics/cells/*.env`) names the robot's address, platform, tool
-length and camera bracket in one word.
-
-## Where the code lives
-
-| Path | What it is |
-| ---- | ---------- |
-| `perceptronics/realsense.py`, `rgbd.py` | RealSense D4xx over librealsense's C API (ctypes, no `pyrealsense2`): aligned colour + depth, intrinsics, deprojection |
-| `perceptronics/segment.py`, `volume.py`, `partspec.py` | Click-to-segment (region growing, or SAM with the `sam` extra) and part-by-size detection from depth alone |
-| `perceptronics/handeye.py`, `calibrate.py`, `orbitcal.py` | Camera-to-flange transform: bracket seed, touch-and-click and orbit calibration |
-| `perceptronics/posestream.py` | The live flange pose, stamped onto every frame |
-| `perceptronics/pickplan.py`, `armfk.py`, `armik.py` | Approach and grasp planning; forward and inverse kinematics for reach |
-| `perceptronics/webapp.py`, `webui/` | The cockpit: HTTP API and the single-page UI (point-cloud scan, live feed, pick) |
-| `perceptronics/picknode.py` | Pick server: a program on the robot asks over a socket and gets a target pose back |
-| `perceptronics/robotlink.py` | The cockpit's one door to the robot; every action goes through the tool registry |
-| `perceptronics/synthscene.py`, `--fake` | Synthetic RGB-D scenes, so everything runs and is tested without hardware |
-| `urctl/` | The Universal Robots adapter: library, CLI, MCP server, safety envelope, audit log |
-| `urcap/` | Pendant plug-ins for PolyScope 5 and PolyScope X: the live picture and the 3D Pick program node |
-| `hardware/`, `deploy/` | Camera bracket (parametric CAD) and the pick-computer deployment |
-
-## The cockpit's API
-
-The UI is one page over a plain HTTP API, so an agent, a script or another UI
-can drive the same things. The main routes:
-
-| Route | Does |
-| ----- | ---- |
-| `GET /api/rgbd`, `/api/color.png`, `/api/depth.png` | Frames, each with the flange pose it was taken at |
-| `POST /api/segment`, `/api/objects`; `GET /api/pick/scene` | Segment a click; list every part with its top face; find parts by size |
-| `POST /api/robot/locate` | Camera point → base-frame point, approach pose, reachable or not (no motion) |
-| `POST /api/robot/move`, `/api/robot/pick` | Move to a pose; run a full approach or pick |
-| `GET /api/robot/pose`, `/api/info`, `/api/doctor` | Live pose, stream health, pre-flight |
-| `POST /api/snapshot` | Save the current views as PNGs an agent can read |
-
-`python3 -m perceptronics.mcp_server` (wired in `.mcp.json`) serves the same
-robot and camera actions as MCP tools.
-
-## Adding a robot
-
-The vision side asks a robot two things: *where is your flange* and *move to
-this pose*. There are two ways to answer, and a new arm can use either:
-
-1. **The host drives the robot.** Implement the `Controller` protocol in
-   [`urctl/controller.py`](urctl/controller.py) (`get_flange_pose`,
-   `move_tcp`, `move_tcp_path`, `stop`, …). The tool registry, the cockpit's
-   `RobotLink`, the pick cycle and calibration call those method names, not
-   UR ones. A live pose stream (`posestream.py`, RTDE on UR) is what lets every
-   frame carry its pose.
-2. **The robot asks.** A program on the robot opens a socket to the pick
-   server, sends its flange pose and reads back a target pose
-   (`perceptronics/picknode.py`: one ASCII line in, one list of numbers out).
-   Any controller that can open a TCP socket and parse numbers can use it. The
-   UR 3D Pick node is the reference client.
-
-The reach check takes kinematics from a DH table (`armfk.DH`). An arm that isn't
-in the table is left to its controller's own IK.
-
-## Development
+**Install** from a checkout of this repo (or wherever you downloaded the two files):
 
 ```bash
-make install-dev          # .venv with the pinned dev tools (pytest, ruff), hash-checked
-make test                 # unit tests: no camera, no robot
-make test-integration     # against a running simulator
-make lint
+ssh root@$ROBOT 'mkdir -p /tmp/perceptronic'
+scp urcap/dist/perceptronic-ps5-0.8.0.urcap urcap/dist/urmagic_perceptronic.sh root@$ROBOT:/tmp/perceptronic/
+ssh root@$ROBOT 'bash /tmp/perceptronic/urmagic_perceptronic.sh'
 ```
 
-Run the unit tests in a clean shell: an exported `UR_CELL` or `PERCEPTRONICS_*`
-changes the defaults they expect.
+The script checks the file's checksum, puts it where PolyScope's own URCaps screen
+would, and restarts the controller when the arm is off and no program runs; otherwise
+it tells you to restart. `URMAGIC_RESTART=always` (before `bash`) restarts regardless,
+`=never` leaves it to you. Its log is `/tmp/perceptronic/urmagic_perceptronic.log`.
 
-PRs go to `dev`. CI runs lint and the unit tests on Python 3.10, 3.12 and 3.14
-(Linux, plus Windows, macOS and Linux arm64), and runs URCap changes against
-every PolyScope 5 minor release.
+**After changing the URCap:** `make urcap5-package` rebuilds `urcap/dist/` (the `.urcap`
+and the `.sh` with its new checksum), then run the three lines above again.
+`scripts/urcap5-usb.sh` writes a stick from a Mac without the `._` files Finder leaves.
 
 ## More
 
-- [docs/realsense.md](docs/realsense.md): the camera, depth quality, hand-eye, sending a point to the robot
-- [docs/pick-kit.md](docs/pick-kit.md): the pick kit for a PolyScope 5 cell
-- [docs/harness.md](docs/harness.md): the `urctl` read and control surfaces
-- [urcap/README.md](urcap/README.md): the pendant plug-ins
+- [docs/architecture.md](docs/architecture.md): how it works, the code map, the cockpit's API, adding a robot, running it all without hardware
+- [urcap/perceptronic-ps5/README.md](urcap/perceptronic-ps5/README.md): the PolyScope 5 URCap in full: upgrading, every screen
+- [docs/pick-kit.md](docs/pick-kit.md): the kit, the camera computer, setting up a cell
+- [docs/realsense.md](docs/realsense.md): the camera, depth quality, hand-eye
 - [CLAUDE.md](CLAUDE.md): working notes, protocols, and the gotchas that cost real time
+
+Working on perceptronics itself: `make install-dev`, `make test`, `make lint`; PRs go
+to `dev` ([docs/architecture.md](docs/architecture.md#development)).
