@@ -407,7 +407,7 @@ verified only against the office DHCP server and a cable-less port on the Pi 5 (
 **Settled 2026-10-01 (Nick):** green overlays for pickable parts and yellow for *marginal* ones (the
 server's `near` flag) is the intended picture — nothing is drawn for what is nothing like the part;
 the 3D Pick node's picture carries no watermark; the **UR7e is the UR5e's arm and the UR12e the
-UR10e's** (`armfk.DH` aliases, so `armik` judges them; only the UR30 is still left to the controller).
+UR10e's** (`armfk.DH` aliases, so `armik` judges them). The UR30 and UR15 rows are UR's published table (2026-10-02); an arm not in `armfk.DH` is left to the controller.
 
 **Three traps from the 3D Pick sessions.** (1) `urcap/pick5_e2e.py` compiles the test harness in
 `tests/test_urcap5.py` (`HARNESS`): anything the harness starts to use must be in the source list
