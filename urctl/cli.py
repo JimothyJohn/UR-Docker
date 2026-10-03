@@ -366,6 +366,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="seconds to read the broadcast for captured output (default: 2.0)",
     )
 
+    tc = sub.add_parser("tcp", help="read/write the TCP offset; save/use named TCPs (any arm)")
+    tc.add_argument("action", choices=["get", "set", "save", "use", "list", "delete"])
+    tc.add_argument("name", nargs="?", default=None, help="a saved TCP's name (save/use/delete)")
+    tc.add_argument(
+        "--offset", type=float, nargs=6, metavar="V", default=None, help="x y z rx ry rz (m, rad; set/save)"
+    )
+
+    po = sub.add_parser("position", help="save/get/list/delete/move-to named positions (any arm)")
+    po.add_argument("action", choices=["save", "get", "list", "delete", "move_to"])
+    po.add_argument("name", nargs="?", default=None)
+    po.add_argument("--velocity", type=float, default=None, help="joint speed for move_to, rad/s")
+
+    wp = sub.add_parser(
+        "workplane",
+        help="a table plane from three TCP touches (touch NAME 1|2|3), or define/get/list/delete (any arm)",
+    )
+    wp.add_argument("action", choices=["touch", "define", "get", "list", "delete", "use_tcp"])
+    wp.add_argument("name", nargs="?", default=None)
+    wp.add_argument(
+        "index", nargs="?", type=int, default=None, help="touch: 1 corner, 2 along +X, 3 far side"
+    )
+    wp.add_argument(
+        "--points",
+        type=float,
+        nargs=9,
+        metavar="V",
+        default=None,
+        help="define: x1 y1 z1 x2 y2 z2 x3 y3 z3 (m)",
+    )
+
     dc = sub.add_parser("dashboard", help="send a raw Dashboard command")
     dc.add_argument("command", nargs="+", help="command words, e.g. robotmode")
 
@@ -540,6 +570,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "freedrive":
         kwargs = {} if args.hold is None else {"hold_s": args.hold}
         return _emit(robot.freedrive(args.state == "on", **kwargs))
+    if args.cmd in ("tcp", "position", "workplane"):
+        from . import workcell
+
+        if args.cmd == "tcp":
+            return _emit(workcell.tcp_offset(robot, args.action, name=args.name, offset=args.offset))
+        if args.cmd == "position":
+            move = {} if args.velocity is None else {"velocity": args.velocity}
+            return _emit(workcell.position(robot, args.action, name=args.name, **move))
+        pts = None if args.points is None else [args.points[i : i + 3] for i in (0, 3, 6)]
+        return _emit(workcell.workplane(robot, args.action, name=args.name, index=args.index, points=pts))
     if args.cmd == "gripper":
         kwargs = {"speed": args.speed, "force": args.force, "timeout_s": args.timeout}
         if args.position is not None:

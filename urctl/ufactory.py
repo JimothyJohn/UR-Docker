@@ -305,6 +305,43 @@ class UFactoryArm:
         }
         return self._log("get_flange_pose", {}, ok=True, result=result)
 
+    def get_tcp_offset(self) -> dict:
+        """The active TCP offset, metres + rotation vector (the report carries mm + RPY)."""
+        if self.dry_run:
+            return self._log("get_tcp_offset", {}, ok=True, result={"tcp_offset": [0.0] * 6, "dry_run": True})
+        try:
+            report = self.client.read_report()
+        except XArmError as exc:
+            return self._unreachable("get_tcp_offset", {}, exc)
+        return self._log(
+            "get_tcp_offset", {}, ok=True, result={"tcp_offset": offset_from_wire(report.tcp_offset_rpy_mm)}
+        )
+
+    def set_tcp_offset(self, offset: list[float], *, timeout: float = 30.0) -> dict:
+        """SET_TCP_OFFSET (mm + RPY on the wire) after the queue drains — the SDK waits
+        for motion to finish first too — then read it back from the report. It stays
+        until the next write (UFACTORY Studio's TCP setting included)."""
+        off = [float(v) for v in offset]
+        if len(off) != 6 or not all(math.isfinite(v) for v in off):
+            raise ValueError("offset must be 6 finite numbers [x, y, z, rx, ry, rz]")
+        args = {"offset": off}
+        if self.dry_run:
+            return self._log("set_tcp_offset", args, ok=True, result={"reply": "(dry-run)"})
+        try:
+            if self.client.get_state() in (STATE_MOVING, STATE_PAUSED) or self.client.get_cmdnum():
+                self._wait_idle(timeout)
+            self.client.set_tcp_offset(offset_to_wire(off))
+            deadline = time.monotonic() + 2.0
+            while True:
+                active = offset_from_wire(self.client.read_report().tcp_offset_rpy_mm)
+                ok = _offset_close(active, off)
+                if ok or time.monotonic() > deadline:
+                    break
+                time.sleep(0.1)
+        except XArmError as exc:
+            return self._unreachable("set_tcp_offset", args, exc)
+        return self._log("set_tcp_offset", args, ok=ok, result={"tcp_offset": active})
+
     # ----- power / recovery ------------------------------------------------------------
 
     def bring_up(self, *, timeout: float = 30.0) -> dict:
@@ -821,6 +858,15 @@ class UFactoryArm:
             "teach_sensitivity": r.teach_sensitivity,
         }
         return self._log("rtde_state", {"deep": deep}, ok=True, result=result)
+
+
+def _offset_close(a: Sequence[float], b: Sequence[float]) -> bool:
+    """Same TCP: within 0.1 mm, and the same rotation within 1 mrad (compared as
+    matrices — two rotation vectors can differ for one rotation)."""
+    if any(abs(a[i] - b[i]) > 1e-4 for i in range(3)):
+        return False
+    ra, rb = rotvec_to_matrix(a[3:6]), rotvec_to_matrix(b[3:6])
+    return all(abs(ra[i][j] - rb[i][j]) < 1e-3 for i in range(3) for j in range(3))
 
 
 def _matmul(a, b):
