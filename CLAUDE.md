@@ -311,7 +311,7 @@ root-owned, `~/Library/Logs/perceptronics/` (also `GET /api/pick/log`). **Kill t
 relaunching the cockpit** (`pkill -f "pick-server --bind"`): both bind `:7622`, and the cockpit
 just warns and runs without its pick server. The 0.3.0 script has not yet run on a controller.
 **Part size (0.4.0, `perceptronics/partspec.py`):** the node's Length × Width [× Height] ± tolerance
-(as the part lies; default ±25 %, never under ±5 mm) rides on FIND/REFINE as `part=60x40x30 tol=25`
+(any face down since 2026-10-03; default ±25 %, never under ±5 mm) rides on FIND/REFINE as `part=60x40x30 tol=25`
 and replaces `detect_blocks`' fixed foam-block gate (≤ 70 × 60 mm); height is measured against the
 non-white depth in a ring around the blob (unseen → not checked). Status −7 = white things in view,
 none that size; the teach screen draws the rejects grey with why. Still colour-segmented: the part
@@ -427,6 +427,22 @@ version. (2) `scripts/deploy-pi.sh` builds the wheel with the first Python that 
 the repo `.venv` has none and is often first on PATH. (3) `site/site.sh datasheet` from an SSH shell:
 Chrome can't print without a display — `CHROME=` Playwright's `chrome-headless-shell` (`site/site.sh`
 header has the line).
+
+**Detection at arm's length (2026-10-03, Nick: "make the detection more robust ... from a distance
+similar to the robot arm"; "assumed that they could be lying on either face").** `perceptronics/volume.py`
+was only ever tested on perfect ray-cast depth. `synthscene.Sensor`/`sense()` now add what the Pi's
+D435 does (sized from a real carpet frame: 0.37 mm pixel jitter, ±4 mm swells at 0.85 m, ∝ z²; stereo
+shadow, flying pixels, top dropouts) and `scripts/volume_bench.py` scores random arm-distance cells
+(0.28–0.60 m, tilts to 25°, hand-eye off up to N°) against truth: found / false picks / size bias.
+Before → after on `--sensor real --cal-deg 1.5`: 92 % → 100 %; `harsh --cal-deg 2.5`: 60 % → 95 %;
+0 false picks. What changed: the table is a **fitted plane** (≤ 8° off level; > 1° adds a "hand-eye is
+out" note) instead of exactly level; the top face is eroded one pixel (flying pixels made every part
+3–6 mm big); a blob is **peeled level by level** into connected tops (tall parts whose sides meet, a low
+part beside a tall one) and a top ringed by higher ground or shoulder heights is not a part (a lump's
+slices, a dome's plateau); nothing under 3.5 × the surface's own spread counts as standing on it
+(the carpet: ±4.1 mm → 14 mm, and a note says so); `PartSpec.poses()` — a box matches on any face.
+Run the bench before and after any detector change. Still synthetic + one unlabelled real frame:
+**real labelled frames at arm distance are the next step**.
 
 **Three traps from the 3D Pick sessions.** (1) `urcap/pick5_e2e.py` compiles the test harness in
 `tests/test_urcap5.py` (`HARNESS`): anything the harness starts to use must be in the source list

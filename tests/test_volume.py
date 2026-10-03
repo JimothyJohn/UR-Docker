@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 import random
+import statistics
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -472,3 +473,81 @@ def test_every_part_in_the_plan_is_free_once_the_ones_before_it_are_gone(seed, n
             "a planned part is still pinned when its turn comes"
         )
         left.remove(box)
+
+
+# -- the real sensor: noise, swells, shadows, flying pixels, a hand-eye that is a little off --------
+# Sized from the Pi's D435 (synthscene.Sensor); scripts/volume_bench.py is the long version.
+
+from perceptronics.synthscene import D435, Sensor, camera_looking_at, sense  # noqa: E402
+
+LOW = PartSpec.from_mm(30, 20, 12)  # a small, low part: the one the old detector lost first
+
+
+def sensed(boxes, T=CAM, sensor=D435, seed=3, T_det=None, spec=SPEC):
+    depth = sense(scene(boxes, T), W, H, K, T, boxes, table_z=TABLE, sensor=sensor, seed=seed)
+    return find_parts(W, H, depth, 0.001, K, T_det or T, spec=spec)
+
+
+def off_by(T, deg, axis=(0.6, 0.8, 0.0)):
+    """``T`` as a hand-eye that is ``deg`` out about ``axis`` would place it."""
+    a = math.radians(deg)
+    return T.compose(Transform.from_pose([0.002, -0.001, 0.0, axis[0] * a, axis[1] * a, axis[2] * a]))
+
+
+def test_a_low_part_is_found_through_a_hand_eye_two_degrees_out_and_the_tilt_is_named():
+    # 2° tilts a 0.4 m view ~14 mm: a level table would rise over the 5 mm occupied height
+    # across half the picture and swallow the part (the old detector: one 300 mm blob)
+    T = camera_looking_at((0.30, 0.0, TABLE + 0.40), (0.34, 0.02, TABLE))
+    box = Box(0.34, 0.02, 0.030, 0.020, 0.012, 0.3)
+    sc = sensed([box], T=T, T_det=off_by(T, 2.0), spec=LOW)
+    assert len(sc.parts) == 1, [(p.why, round(p.length_m * 1000)) for p in sc.rejected]
+    assert sc.surface.tilt_deg() == pytest.approx(2.0, abs=0.4)
+    assert any("hand-eye" in n for n in sc.notes)
+
+
+def test_flying_pixels_on_the_edges_do_not_grow_the_part():
+    # the old detector read every part 3-6 mm big with real edges: a 30 x 20 part read "too wide"
+    boxes = [
+        Box(0.30 + 0.07 * (k % 3), -0.05 + 0.08 * (k // 3), 0.030, 0.020, 0.012, 0.4 * k) for k in range(6)
+    ]
+    sc = sensed(boxes, spec=LOW, sensor=Sensor(skirt_px=2))
+    assert len(sc.parts) == 6, [
+        (p.why, round(p.length_m * 1000), round(p.width_m * 1000)) for p in sc.rejected
+    ]
+    assert statistics.median(p.length_m for p in sc.parts) == pytest.approx(0.030, abs=0.0015)
+    assert statistics.median(p.width_m for p in sc.parts) == pytest.approx(0.020, abs=0.0015)
+
+
+def test_two_tall_parts_whose_sides_meet_are_two_parts_and_a_low_one_beside_them_is_found():
+    # standing on end (any face, Nick 2026-10-03), seen from the side their faces join one blob
+    # of occupied cells; the old detector fitted one 150 mm rectangle round both tops and never
+    # looked lower in the blob for the third
+    spec = PartSpec.from_mm(100, 50, 25)
+    T = camera_looking_at((0.22, -0.05, TABLE + 0.32), (0.33, 0.0, TABLE))
+    boxes = [
+        Box(0.33, -0.03, 0.050, 0.025, 0.100),
+        Box(0.33, 0.035, 0.050, 0.025, 0.100),
+        Box(0.40, 0.00, 0.100, 0.050, 0.025, 1.4),
+    ]
+    sc = sensed(boxes, T=T, spec=spec)
+    assert len(sc.parts) == 3, [(p.why, p.centre) for p in sc.rejected]
+    for b in boxes:
+        assert min(math.dist(p.centre[:2], (b.x, b.y)) for p in sc.parts) < 0.005
+
+
+def test_a_box_is_found_on_whichever_face_it_lies():
+    spec = PartSpec.from_mm(60, 40, 30)
+    boxes = [
+        Box(0.29, -0.06, 0.060, 0.040, 0.030),  # flat
+        Box(0.29, 0.06, 0.060, 0.030, 0.040, 0.7),  # on its long side
+        Box(0.41, 0.00, 0.040, 0.030, 0.060, -0.4),  # on its end
+    ]
+    sc = sensed(boxes, spec=spec)
+    assert len(sc.parts) == 3, [(p.why, p.centre) for p in sc.rejected]
+    hs = sorted(p.height_m for p in sc.parts)
+    assert hs == pytest.approx([0.030, 0.040, 0.060], abs=0.002)
+
+
+def test_an_empty_table_through_the_real_sensor_is_no_parts_and_no_near_misses():
+    sc = sensed([], T=off_by(CAM, 1.5), sensor=Sensor(warp_m=0.009, jitter_m=0.001), spec=LOW)
+    assert sc.parts == [] and not [p for p in sc.rejected if p.near]
