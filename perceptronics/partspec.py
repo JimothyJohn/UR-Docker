@@ -81,8 +81,10 @@ class PartSpec:
     def is_round(self) -> bool:
         return self.shape == "cyl"
 
-    def slack(self, dim_m: float) -> float:
-        return max(self.tol * dim_m, MIN_SLACK_M)
+    def slack(self, dim_m: float, floor_m: float = 0.0) -> float:
+        """How far off ``dim_m`` may measure: the tolerance, never under the measurement's own
+        noise (:data:`MIN_SLACK_M`, or ``floor_m`` — the caller's, which grows with range)."""
+        return max(self.tol * dim_m, MIN_SLACK_M, floor_m)
 
     def poses(self) -> list[tuple[float, float, float | None]]:
         """The ways it can lie on the table, as ``(footprint length, footprint width, height)``:
@@ -103,39 +105,47 @@ class PartSpec:
         """Every height its top can stand at (empty: no height given)."""
         return sorted({h for _, _, h in self.poses() if h is not None})
 
-    def why_not(self, major_m: float, minor_m: float, height_m: float | None) -> str | None:
+    def why_not(
+        self, major_m: float, minor_m: float, height_m: float | None, floor_m: float = 0.0
+    ) -> str | None:
         """Why a candidate with these measurements is not this part lying on any of its faces
         (:meth:`poses`), or None when it is. The reason is the nearest pose's. An unmeasured
-        height (no surface visible around it) is not held against it."""
+        height (no surface visible around it) is not held against it. ``floor_m``: no
+        tolerance tighter than this (:meth:`slack`)."""
         best: tuple[tuple[float, float], str] | None = None
         for pose in self.poses():
-            why = self._why_not_as(pose, major_m, minor_m, height_m)
+            why = self._why_not_as(pose, major_m, minor_m, height_m, floor_m)
             if why is None:
                 return None
-            off = self._offness(pose, major_m, minor_m, height_m)
+            off = self._offness(pose, major_m, minor_m, height_m, floor_m)
             if best is None or off < best[0]:
                 best = (off, why)
         return best[1] if best else None
 
-    def _offness(self, pose, major_m: float, minor_m: float, height_m: float | None) -> tuple[float, float]:
+    def _offness(
+        self, pose, major_m: float, minor_m: float, height_m: float | None, floor_m: float = 0.0
+    ) -> tuple[float, float]:
         """How many tolerances the footprint is off ``pose`` (worst side), then the height: the
         operator is told about the face the camera saw — "too tall" for the right footprint
         standing too high, not "too long" against some other face."""
-        foot = max(abs(major_m - pose[0]) / self.slack(pose[0]), abs(minor_m - pose[1]) / self.slack(pose[1]))
-        up = 0.0 if pose[2] is None or height_m is None else abs(height_m - pose[2]) / self.slack(pose[2])
+        sl = lambda d: self.slack(d, floor_m)  # noqa: E731
+        foot = max(abs(major_m - pose[0]) / sl(pose[0]), abs(minor_m - pose[1]) / sl(pose[1]))
+        up = 0.0 if pose[2] is None or height_m is None else abs(height_m - pose[2]) / sl(pose[2])
         return foot, up
 
-    def _why_not_as(self, pose, major_m: float, minor_m: float, height_m: float | None) -> str | None:
+    def _why_not_as(
+        self, pose, major_m: float, minor_m: float, height_m: float | None, floor_m: float = 0.0
+    ) -> str | None:
         length, width, height = pose
-        lo, hi = lambda d: d - self.slack(d), lambda d: d + self.slack(d)  # noqa: E731
+        lo, hi = lambda d: d - self.slack(d, floor_m), lambda d: d + self.slack(d, floor_m)  # noqa: E731
         if major_m > hi(length):
             n = round(major_m / length)
-            if n >= 2 and abs(major_m - n * length) <= self.slack(n * length):
+            if n >= 2 and abs(major_m - n * length) <= self.slack(n * length, floor_m):
                 return f"{n} parts touching?"
             return "too long"
         if minor_m > hi(width):
             n = round(minor_m / width)
-            if n >= 2 and abs(minor_m - n * width) <= self.slack(n * width):
+            if n >= 2 and abs(minor_m - n * width) <= self.slack(n * width, floor_m):
                 return f"{n} parts touching?"
             return "too wide"
         if major_m < lo(length):
@@ -149,16 +159,16 @@ class PartSpec:
                 return "too flat"
         return None
 
-    def near_miss(self, major_m: float, minor_m: float, height_m: float | None) -> bool:
+    def near_miss(self, major_m: float, minor_m: float, height_m: float | None, floor_m: float = 0.0) -> bool:
         """Is a candidate that is *not* this part still close enough to be worth showing the
         operator — every measurement within :data:`NEAR_MISS_SLACKS` tolerances of one of its
         poses, a side that is two or three parts' worth counting too (parts touching)?"""
         k = NEAR_MISS_SLACKS
 
         def close(got: float, want: float, multiples: bool) -> bool:
-            if abs(got - want) <= k * self.slack(want):
+            if abs(got - want) <= k * self.slack(want, floor_m):
                 return True
-            return multiples and any(abs(got - n * want) <= self.slack(n * want) for n in (2, 3))
+            return multiples and any(abs(got - n * want) <= self.slack(n * want, floor_m) for n in (2, 3))
 
         for length, width, height in self.poses():
             if not close(major_m, length, True) or not close(minor_m, width, True):
