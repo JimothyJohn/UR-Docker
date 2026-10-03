@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 from _xarm_fake import FakeXArm
@@ -125,9 +126,10 @@ def test_names_that_could_bend_a_path_or_a_log_are_refused(bad):
 
 
 def test_store_path_from_the_environment():
-    assert str(default_store_path({})).endswith("captures/cell/default.json")
-    assert str(default_store_path({"UR_CELL": "ur3"})).endswith("captures/cell/ur3.json")
-    assert str(default_store_path({"URCTL_CELL_STORE": "/x/y.json", "UR_CELL": "ur3"})) == "/x/y.json"
+    # compared as path parts, not strings: Windows joins with backslashes
+    assert default_store_path({}).parts[-3:] == ("captures", "cell", "default.json")
+    assert default_store_path({"UR_CELL": "ur3"}).parts[-3:] == ("captures", "cell", "ur3.json")
+    assert default_store_path({"URCTL_CELL_STORE": "/x/y.json", "UR_CELL": "ur3"}) == Path("/x/y.json")
     with pytest.raises(WorkcellError):
         default_store_path({"UR_CELL": "../evil"})
 
