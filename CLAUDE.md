@@ -486,6 +486,21 @@ Known gaps: one harsh-bench false pick in 351 (a tall box's fragment fitting ano
 range-scaled tolerance also loosens the height check; a fixed deployment could subtract a taught
 empty-surface depth map instead of fitting the floor (not built).
 
+**Setup portal + update bundles (2026-10-03, Nick: "a setup portal ... at its default IP address",
+`admin`/`admin` for now; bundles checksummed, **not signed** — his call).** `http://<pick PC>:7621/setup`
+(`perceptronics/setupportal.py`, `webui/setup.html`) changes the cell port's address/gateway/DNS, the
+robot's address and the cell DHCP, and installs `perceptronics-update-*.tar` bundles
+(`scripts/pi-update.sh bundle|push`). The cockpit only queues; root work is
+`deploy/pi/perceptronics-admin` (stdlib, standalone, `.path`-triggered) → `install.sh --network` or the
+bundle's own `install.sh --wheel`, health check on `/api/info`, automatic `--rollback`. Off unless
+`PERCEPTRONICS_ADMIN_DIR` is set (only the Pi's unit sets it). Traps: (1) `/etc/perceptronics/network.env`
+is install.sh's **default for every later run** — a redeploy without `--cell-if`/`--cell-address` keeps
+what the portal chose; (2) after `--network` the port keeps `192.168.3.20/24` as a rescue address unless
+the new network holds it; (3) the network rules live twice (helper + `setupportal.validate_network`) and
+a hypothesis test holds them equal — change both; (4) install.sh must never restart
+`perceptronics-admin.service` (an update runs install.sh from inside it); (5) a card flashed before
+this has no portal: reflash it, or SSH with `deploy-pi.sh`. Not yet run on a board.
+
 **Three traps from the 3D Pick sessions.** (1) `urcap/pick5_e2e.py` compiles the test harness in
 `tests/test_urcap5.py` (`HARNESS`): anything the harness starts to use must be in the source list
 `generate()` copies (`PURE_JAVA` + `SCREEN_JAVA`) — a mismatch failed all 23 controller jobs in a

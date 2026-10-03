@@ -84,6 +84,7 @@ from urllib.parse import parse_qs, urlparse
 
 from urctl.pose import Transform
 
+from . import setupportal
 from .cell import describe_cell
 from .config import PerceptionConfig
 from .factory import SEGMENT_BACKENDS, make_segmenter
@@ -182,6 +183,7 @@ def reopen_delay(failures: int) -> float:
 
 _WEBUI = Path(__file__).parent / "webui" / "index.html"
 _CLASSIC = Path(__file__).parent / "webui" / "classic.html"  # every control, the pre-2026-09-27 page
+_SETUP = Path(__file__).parent / "webui" / "setup.html"  # the pick PC's setup portal (setupportal.py)
 
 
 class ViewPump:
@@ -1543,6 +1545,61 @@ class ViewerHandler(BaseHTTPRequestHandler):
             traceback.print_exc(file=sys.stderr)
             self._send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=500)
 
+    # ---- the setup portal (perceptronics.setupportal): pick PC only, behind a login ----
+
+    def _portal(self, *, posting: bool = False):
+        """The portal once the request is logged in, else None with the answer already sent.
+
+        A refused POST leaves its body unread, so the connection is closed after the answer."""
+        portal = getattr(self.server, "portal", None)
+        if portal is None:
+            if posting:
+                self.close_connection = True
+            self._send_json(
+                {"ok": False, "error": "no setup portal on this cockpit (it is the pick PC's)"}, 404
+            )
+            return None
+        if not portal.authorized(self.headers.get("Authorization")):
+            if posting:
+                self.close_connection = True
+            self._send(
+                b'{"ok": false, "error": "log in to the setup portal"}',
+                "application/json",
+                401,
+                {"WWW-Authenticate": f'Basic realm="{setupportal.REALM}", charset="UTF-8"'},
+            )
+            return None
+        if posting and self.headers.get(setupportal.ADMIN_HEADER) != "1":
+            self.close_connection = True
+            self._send_json({"ok": False, "error": f"missing {setupportal.ADMIN_HEADER}: 1"}, 403)
+            return None
+        return portal
+
+    def _portal_call(self, fn) -> None:
+        try:
+            self._send_json(fn())
+        except setupportal.PortalBusy as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=409)
+        except setupportal.PortalError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+        except OSError as exc:
+            traceback.print_exc(file=sys.stderr)
+            self._send_json({"ok": False, "error": f"could not queue it: {exc.strerror or exc}"}, status=500)
+
+    def _upload(self) -> None:
+        portal = self._portal(posting=True)
+        if portal is None:
+            return
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            self.close_connection = True
+            self._send_json({"ok": False, "error": "Content-Length required"}, status=411)
+            return
+        # a refused upload leaves its body unread: never reuse this connection
+        self.close_connection = True
+        self._portal_call(lambda: portal.queue_update(self.rfile, length))
+
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length > 65536:
@@ -1561,6 +1618,13 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._send(_WEBUI.read_bytes(), "text/html; charset=utf-8")
         elif route == "/classic":
             self._send(_CLASSIC.read_bytes(), "text/html; charset=utf-8")
+        elif route == "/setup":
+            if self._portal() is not None:
+                self._send(_SETUP.read_bytes(), "text/html; charset=utf-8")
+        elif route == "/api/admin/status":
+            portal = self._portal()
+            if portal is not None:
+                self._portal_call(portal.status)
         elif route == "/api/info":
             self._guarded(self.app.info)
         elif route == "/api/doctor":
@@ -1672,6 +1736,20 @@ class ViewerHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         route = urlparse(self.path).path.rstrip("/")
+        if route == "/api/admin/update":  # a raw bundle, not a JSON body
+            self._upload()
+            return
+        if route == "/api/admin/network":
+            portal = self._portal(posting=True)
+            if portal is None:
+                return
+            try:
+                payload = self._body()
+            except (ValueError, json.JSONDecodeError) as exc:
+                self._send_json({"ok": False, "error": f"bad request: {exc}"}, status=400)
+                return
+            self._portal_call(lambda: portal.queue_network(payload))
+            return
         try:
             payload = self._body()
         except (ValueError, json.JSONDecodeError) as exc:
@@ -1955,6 +2033,7 @@ def serve(
     server = ThreadingHTTPServer((bind, port), ViewerHandler)
     server.daemon_threads = True
     server.app = app  # type: ignore[attr-defined]
+    server.portal = setupportal.Portal.from_env()  # type: ignore[attr-defined]
     host = "127.0.0.1" if bind in ("0.0.0.0", "") else bind
     url = f"http://{host}:{server.server_address[1]}/" + ("classic?demo=1" if demo else "")
     kind = camera.describe()["kind"]

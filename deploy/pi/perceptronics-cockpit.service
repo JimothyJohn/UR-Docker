@@ -31,6 +31,9 @@ SupplementaryGroups=plugdev video
 EnvironmentFile=/etc/perceptronics/cell.env
 Environment=HOME=/var/lib/perceptronics
 Environment=PYTHONUNBUFFERED=1
+# The setup page (/setup, login admin/admin unless cell.env sets PERCEPTRONICS_ADMIN_USER /
+# PERCEPTRONICS_ADMIN_PASSWORD) queues requests here for perceptronics-admin.service (root).
+Environment=PERCEPTRONICS_ADMIN_DIR=/var/lib/perceptronics/admin
 WorkingDirectory=/var/lib/perceptronics
 StateDirectory=perceptronics
 StateDirectoryMode=0750

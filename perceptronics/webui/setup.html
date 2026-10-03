@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Computer Setup</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --ink: #1c2330; --muted: #5d6675; --line: #d9dde3;
+    --accent: #1f6feb; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --field: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1318; --card: #171c23; --ink: #e6e9ee; --muted: #9aa3b0; --line: #2a313b;
+      --accent: #4c8dff; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --field: #0f1318;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 18px 20px; margin-bottom: 16px; }
+  h2 { font-size: 1.15rem; margin: 0 0 12px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-word; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  .hint { font-weight: 400; color: var(--muted); font-size: .9rem; }
+  input[type=text] { width: 100%; padding: 9px 10px; font: inherit; color: var(--ink);
+                     background: var(--field); border: 1px solid var(--line); border-radius: 6px; }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+  .check { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; margin-top: 14px; }
+  .check input { margin-top: 4px; }
+  button { margin-top: 16px; padding: 10px 18px; font: inherit; font-weight: 600; border: 0;
+           border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .msg { margin-top: 14px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--line); display: none; }
+  .msg.show { display: block; }
+  .msg.ok { border-color: var(--ok); }
+  .msg.bad { border-color: var(--bad); }
+  .msg.busy { border-color: var(--warn); }
+  progress { width: 100%; height: 10px; margin-top: 12px; display: none; }
+  progress.show { display: block; }
+  details { margin-top: 10px; }
+  pre { max-height: 260px; overflow: auto; font-size: .8rem; background: var(--bg);
+        padding: 8px; border-radius: 6px; white-space: pre-wrap; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Camera computer setup</h1>
+  <p class="sub">Network address and software of this Perceptronics camera computer.</p>
+
+  <div id="banner" class="msg" role="status" aria-live="polite"></div>
+
+  <section>
+    <h2>This camera computer</h2>
+    <dl>
+      <dt>Address</dt><dd id="s-address">…</dd>
+      <dt>Backup address</dt><dd id="s-rescue">…</dd>
+      <dt>Robot</dt><dd id="s-robot">…</dd>
+      <dt>Software</dt><dd id="s-release">…</dd>
+      <dt>Card image</dt><dd id="s-image">…</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Network</h2>
+    <form id="net" autocomplete="off">
+      <div class="row">
+        <div>
+          <label for="address">Camera computer's address</label>
+          <input type="text" id="address" name="address" placeholder="192.168.3.20" inputmode="decimal" required>
+        </div>
+        <div>
+          <label for="netmask">Subnet mask</label>
+          <input type="text" id="netmask" name="netmask" value="255.255.255.0" inputmode="decimal" required>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="gateway">Gateway <span class="hint">(optional)</span></label>
+          <input type="text" id="gateway" name="gateway" inputmode="decimal">
+        </div>
+        <div>
+          <label for="dns">DNS servers <span class="hint">(optional, separate with commas)</span></label>
+          <input type="text" id="dns" name="dns" inputmode="decimal">
+        </div>
+      </div>
+      <label for="robot_host">Robot's address <span class="hint">(as set on the teach pendant)</span></label>
+      <input type="text" id="robot_host" name="robot_host" placeholder="192.168.3.3" inputmode="decimal" required>
+      <label class="check"><input type="checkbox" id="robot_dhcp" name="robot_dhcp">
+        <span>Give the robot its address when it asks for one (DHCP). Only for a network with no
+        DHCP server of its own, such as a cable straight from this computer to the robot.</span></label>
+      <button type="submit" id="net-go">Apply network settings</button>
+    </form>
+    <div id="net-msg" class="msg" role="status" aria-live="polite"></div>
+  </section>
+
+  <section>
+    <h2>Software update</h2>
+    <p class="hint">Choose the update file you were sent (<code>perceptronics-update-….tar</code>).
+      Settings and calibration are kept, and if the new software doesn't start, the camera
+      computer goes back to the one it has now.</p>
+    <input type="file" id="bundle" accept=".tar,application/x-tar">
+    <button type="button" id="up-go">Install update</button>
+    <progress id="up-bar" max="1" value="0"></progress>
+    <div id="up-msg" class="msg" role="status" aria-live="polite"></div>
+    <details id="log-box"><summary>Details of the last change</summary><pre id="log"></pre></details>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const HDR = { "X-Perceptronics-Admin": "1" };
+let lastJob = null, filled = false, polling = null, wasDown = false;
+
+function show(el, text, kind) {
+  el.textContent = text;
+  el.className = "msg show " + (kind || "");
+}
+function hide(el) { el.className = "msg"; }
+
+function describeJob(job) {
+  const what = job.kind === "update" ? "Software update" : job.kind === "network" ? "Network change" : "Change";
+  if (job.state === "running") return [what + " in progress…", "busy"];
+  if (job.state === "done") return [what + " finished: " + job.message, "ok"];
+  if (job.state === "rolled_back") return [what + " didn't work, so the previous software was put back: " + job.message, "bad"];
+  return [what + " failed: " + job.message, "bad"];
+}
+
+async function refresh() {
+  let st;
+  try {
+    const r = await fetch("/api/admin/status", { cache: "no-store" });
+    st = await r.json();
+    if (!st.ok) throw new Error(st.error || "error");
+  } catch (e) {
+    wasDown = true;
+    show($("banner"), "The camera computer isn't answering — it may be restarting. This page keeps trying.", "busy");
+    return;
+  }
+  if (wasDown) { wasDown = false; hide($("banner")); }
+  const n = st.network;
+  $("s-address").textContent = n.cidr.split("/")[0] + "  (subnet " + n.cidr.split("/")[1] + ")" +
+    (n.gateway ? ", gateway " + n.gateway : "");
+  $("s-rescue").textContent = n.rescue_address ? n.rescue_address + " (always reachable on the cable)" : "none (same network)";
+  $("s-robot").textContent = (n.robot_host || "not set") + (n.robot_dhcp ? " — handed out by this computer when asked" : "");
+  $("s-release").textContent = st.release || "unknown";
+  $("s-image").textContent = st.image || "installed by hand";
+  if (!filled) {
+    filled = true;
+    $("address").value = n.cidr.split("/")[0];
+    $("netmask").value = prefixToMask(+n.cidr.split("/")[1]);
+    $("gateway").value = n.gateway || "";
+    $("dns").value = (n.dns || []).join(", ");
+    $("robot_host").value = n.robot_host || "";
+    $("robot_dhcp").checked = !!n.robot_dhcp;
+  }
+  const job = st.job;
+  $("net-go").disabled = $("up-go").disabled = st.busy;
+  if (st.busy && !job) show($("banner"), "A change is waiting to start…", "busy");
+  if (job) {
+    const [text, kind] = describeJob(job);
+    if (lastJob !== null || job.state === "running") show($("banner"), text, kind);
+    $("log").textContent = (job.log || []).join("\n");
+    lastJob = job.id;
+  }
+  schedule(st.busy || wasDown ? 2000 : 10000);
+}
+
+function schedule(ms) {
+  clearTimeout(polling);
+  polling = setTimeout(refresh, ms);
+}
+
+function prefixToMask(p) {
+  if (!(p >= 0 && p <= 32)) return "255.255.255.0";
+  const m = p === 0 ? 0 : (0xffffffff << (32 - p)) >>> 0;
+  return [24, 16, 8, 0].map((s) => (m >>> s) & 255).join(".");
+}
+
+$("net").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const body = {
+    address: $("address").value.trim(), netmask: $("netmask").value.trim(),
+    gateway: $("gateway").value.trim(), dns: $("dns").value.trim(),
+    robot_host: $("robot_host").value.trim(), robot_dhcp: $("robot_dhcp").checked,
+  };
+  $("net-go").disabled = true;
+  try {
+    const r = await fetch("/api/admin/network", {
+      method: "POST", headers: { ...HDR, "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const out = await r.json();
+    if (!out.ok) { show($("net-msg"), out.error, "bad"); $("net-go").disabled = false; return; }
+    const here = location.hostname;
+    const newIp = out.network.cidr.split("/")[0];
+    let text = "Applying. The camera computer will answer at " + out.new_url + ".";
+    if (newIp !== here) {
+      text += " To reach it there, your computer needs an address on that network.";
+      if (out.rescue_address) text += " " + out.rescue_address + " keeps working on the cable as a backup.";
+    }
+    show($("net-msg"), text, "ok");
+    lastJob = "";
+    schedule(1500);
+  } catch (e) {
+    show($("net-msg"), "Couldn't send it: " + e.message, "bad");
+    $("net-go").disabled = false;
+  }
+});
+
+$("up-go").addEventListener("click", () => {
+  const file = $("bundle").files[0];
+  if (!file) { show($("up-msg"), "Choose the update file first.", "bad"); return; }
+  if (!/\.tar$/i.test(file.name)) { show($("up-msg"), file.name + " isn't an update file (perceptronics-update-….tar).", "bad"); return; }
+  $("up-go").disabled = true;
+  const bar = $("up-bar");
+  bar.className = "show"; bar.value = 0;
+  show($("up-msg"), "Sending " + file.name + "…", "busy");
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/admin/update");
+  xhr.setRequestHeader("X-Perceptronics-Admin", "1");
+  xhr.setRequestHeader("Content-Type", "application/x-tar");
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) bar.value = e.loaded / e.total; };
+  xhr.onload = () => {
+    bar.className = "";
+    let out = {};
+    try { out = JSON.parse(xhr.responseText); } catch (e) { out = { ok: false, error: "HTTP " + xhr.status }; }
+    if (!out.ok) { show($("up-msg"), out.error, "bad"); $("up-go").disabled = false; return; }
+    show($("up-msg"), "Received. Installing — the camera computer restarts its software, which takes a minute or two.", "ok");
+    lastJob = "";
+    schedule(1500);
+  };
+  xhr.onerror = () => {
+    bar.className = "";
+    show($("up-msg"), "The upload was interrupted. Try again.", "bad");
+    $("up-go").disabled = false;
+  };
+  xhr.send(file);
+});
+
+refresh();
+</script>
+</body>
+</html>
