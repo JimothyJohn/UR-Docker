@@ -38,10 +38,13 @@
     th { width: 1.05in; font-weight: 600; }
     td.v { width: 1.12in; font-weight: 700; white-space: nowrap; }
     td.n { color: #5a6470; }
+    table.perf td.v { width: 0.9in; }
+    table.perf td.h { font-weight: 700; font-size: 7.2pt; line-height: 1.15; padding-bottom: 2.5pt; }
+    table.perf td.h span { font-weight: 400; color: #5a6470; }
     sup { font-size: 6pt; color: #8a5a00; font-weight: 700; line-height: 0; }
     ul { padding-left: 10pt; }
-    .notfor ul { columns: 1; }
-    .caps ul { columns: 2; column-gap: 0.25in; }
+    .notfor ul { columns: 2; column-gap: 0.2in; }
+    .caps ul { columns: 3; column-gap: 0.2in; }
     .caps li { break-inside: avoid; }
     .caps { margin-top: 7pt; break-inside: avoid; }
     li { margin: 1.6pt 0; }
@@ -81,19 +84,26 @@
           <tr><th>Gripper</th><td class="v">Two-finger</td><td class="n">Any parallel gripper the robot's program opens and closes.</td></tr>
         </table>
 
-        <h2>Performance <span style="text-transform:none;letter-spacing:0;color:#5a6470;font-weight:400">(conservative; verify on your cell)</span></h2>
-        <table>
-          <tr><th>Smallest part</th><td class="v">25 × 25 × 15 mm<sup>E</sup></td><td class="n">As it lies. The software accepts 5 mm; depth noise makes it unreliable.</td></tr>
-          <tr><th>Largest part</th><td class="v">200 mm long side<sup>E</sup></td><td class="n">The whole part must fit in one picture.</td></tr>
-          <tr><th>Size measurement</th><td class="v">±5 mm</td><td class="n">Parts that differ by less than 10 mm look alike.</td></tr>
-          <tr><th>Grip position</th><td class="v">±10 mm<sup>E</sup></td><td class="n">Plan the jaw opening for it. 4.4 mm RMS calibration in one trial.</td></tr>
-          <tr><th>Gap between parts</th><td class="v">≥ 25 mm<sup>E</sup></td><td class="n">20 mm clear where each finger comes down. Touching parts are skipped.</td></tr>
-          <tr><th>Cycle time, find to grip</th><td class="v">15 s per part<sup>E</sup></td><td class="n">At the UR connector's moderate speeds. About 2 parts a minute with a short place.</td></tr>
-          <tr><th>Camera to parts</th><td class="v">0.30 to 0.60 m<sup>E</sup></td><td class="n">Never closer than 0.25 m.</td></tr>
-          <tr><th>Area per picture</th><td class="v">0.5 × 0.3 m<sup>E</sup></td><td class="n">From 0.5 m. Up to 12 pictures per pick.</td></tr>
-          <tr><th>Surface</th><td class="v">Flat, level</td><td class="n">Table, tray or bench; parts lying separately.</td></tr>
+        <h2>Picking performance <span style="text-transform:none;letter-spacing:0;color:#5a6470;font-weight:400">(by camera-to-part distance; verify on your cell)</span></h2>
+        <table class="perf">
+          <tr><th></th><td class="h">0.30 to 0.60 m<br><span>working zone</span></td><td class="h">1.0 to 1.5 m<br><span>far limit</span></td><td class="n"></td></tr>
+          <tr><th>Parts found</th><td class="v">99 %<sup>S</sup></td><td class="v">4 of 4<sup>M</sup></td><td class="n">Right-size parts in view. Wrong ones picked: 0.</td></tr>
+          <tr><th>Size resolved to</th><td class="v">±5 mm</td><td class="v">±17 mm</td><td class="n">It checks a size; it does not measure one.</td></tr>
+          <tr><th>Sizes told apart</th><td class="v">≥ 10 mm<sup>E</sup></td><td class="v">≥ 35 mm<sup>E</sup></td><td class="n">Closer sizes read as the same part.</td></tr>
+          <tr><th>Smallest side</th><td class="v">20 mm<sup>E</sup></td><td class="v">45 mm<sup>E</sup></td><td class="n">Edges blur by ~1 % of the distance.</td></tr>
+          <tr><th>Lowest part</th><td class="v">5 mm<sup>E</sup></td><td class="v">15 mm<sup>M</sup></td><td class="n">Above the surface; rough ones raise it.</td></tr>
+          <tr><th>Part centre</th><td class="v">±3 mm<sup>S</sup></td><td class="v">±10 mm<sup>E</sup></td><td class="n">95 %, plus calibration: 9 mm per 1°.</td></tr>
+          <tr><th>Part heading</th><td class="v">±2.5°<sup>S</sup></td><td class="v">±8°<sup>E</sup></td><td class="n">95 %. None for a square top.</td></tr>
+          <tr><th>Gap to neighbours</th><td class="v">≥ 25 mm</td><td class="v">≥ 40 mm<sup>E</sup></td><td class="n">20 mm finger room a side.</td></tr>
+          <tr><th>Time to find</th><td class="v">0.9 s<sup>M</sup></td><td class="v">1.1 s<sup>M</sup></td><td class="n">Per picture, Raspberry Pi 5.</td></tr>
         </table>
-        <p class="n" style="color:#5a6470;font-size:6.8pt;margin-top:3pt"><sup>E</sup> Estimate, not a measured or guaranteed value.</p>
+        <table style="margin-top:5pt">
+          <tr><th>Distance limits</th><td class="v">0.28 to 1.6 m</td><td class="n">No depth nearer; nothing farther is picked.</td></tr>
+          <tr><th>Grip position</th><td class="v">±10 mm<sup>E</sup></td><td class="n">Plan the jaws for it. Mostly calibration.</td></tr>
+          <tr><th>Part pose</th><td class="v">Any face down</td><td class="n">Boxes on any face; cylinders on end.</td></tr>
+          <tr><th>Cycle, node only</th><td class="v">15 s per part<sup>E</sup></td><td class="n">To the grip. ~2 parts/min with a short place.</td></tr>
+        </table>
+        <p class="n" style="color:#5a6470;font-size:6.6pt;margin-top:3pt"><sup>M</sup> Measured with the camera computer and a D435, one setup. <sup>S</sup> Simulated: 720 parts through a model of the D435's noise. <sup>E</sup> Estimate, not a measured or guaranteed value.</p>
       </div>
 
       <div>
@@ -117,13 +127,17 @@
           <tr><th>Software</th><td>Free, open source (MIT). Kit from Advin.</td></tr>
         </table>
 
-        <h2>Not for</h2>
+        <h2 style="margin-top:8pt">Not for (limits of the depth camera)</h2>
         <div class="notfor">
           <ul>
+            <li>Measuring parts or quality checks</li>
+            <li>Defect, surface or print inspection</li>
+            <li>Telling apart parts of nearly the same size</li>
+            <li>Thin or flat parts: sheets, washers, labels</li>
+            <li>Transparent, mirror-like or very dark parts</li>
             <li>Bin picking: piled or leaning parts</li>
             <li>Shapes other than boxes and upright cylinders</li>
-            <li>Transparent or mirror-like parts</li>
-            <li>Telling apart parts of the same size</li>
+            <li>Direct sunlight on the work area</li>
             <li>Driving the gripper or the place move</li>
           </ul>
         </div>
@@ -133,13 +147,13 @@
     <div class="caps">
       <h2>Capabilities</h2>
       <ul>
-        <li><strong>Finds parts by volume, from depth alone:</strong> boxes, and cylinders standing on end. Colour and lighting contrast are not used.</li>
-        <li><strong>Any position, any rotation</strong> on the surface. Fingers close across the short side, or the long side of a box if you choose.</li>
+        <li><strong>Finds parts by volume, from depth alone:</strong> boxes on any face, cylinders on end; the floor is fitted round each part.</li>
+        <li><strong>Any position, any rotation.</strong> Fingers across the short side, or the long one.</li>
         <li><strong>Eight pick orders:</strong> by rows or by columns, from any corner.</li>
-        <li><strong>Checks before it moves:</strong> reach by the arm's kinematics, and room for the fingers beside the part.</li>
-        <li><strong>Says why not:</strong> rejected parts are drawn in yellow with the reason (off size, touching, out of reach, no finger room, outside the area, cut off).</li>
-        <li><strong>Queues what it saw:</strong> the next part is picked without a trip back to the picture point.</li>
-        <li><strong>Runs inside the robot's own program</strong> through its connector: one step that ends with the tool at the grip. No internet needed.</li>
+        <li><strong>Checks before it moves:</strong> reach by the arm's kinematics, finger room.</li>
+        <li><strong>Says why not:</strong> near misses drawn in yellow with the reason.</li>
+        <li><strong>Queues what it saw:</strong> no trip back to the picture point.</li>
+        <li><strong>Runs inside the robot's own program</strong> through its connector. No internet.</li>
       </ul>
     </div>
 

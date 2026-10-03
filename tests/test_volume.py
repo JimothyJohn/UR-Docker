@@ -75,7 +75,8 @@ def test_things_the_wrong_size_are_rejected_with_the_reason():
     why = {(round(p.centre[0], 2), round(p.centre[1], 2)): p.why for p in sc.rejected}
     assert why[(0.40, -0.07)] == "too long"
     assert why[(0.30, 0.07)] == "too tall"
-    assert why[(0.40, 0.07)] == "too short"
+    # 30 x 30 fits the part's 40 x 30 end face, which would stand 60 tall (a box lies on any face)
+    assert why[(0.40, 0.07)] == "too flat"
 
 
 def test_two_parts_touching_end_to_end_are_named_as_such():
@@ -551,3 +552,58 @@ def test_a_box_is_found_on_whichever_face_it_lies():
 def test_an_empty_table_through_the_real_sensor_is_no_parts_and_no_near_misses():
     sc = sensed([], T=off_by(CAM, 1.5), sensor=Sensor(warp_m=0.009, jitter_m=0.001), spec=LOW)
     assert sc.parts == [] and not [p for p in sc.rejected if p.near]
+
+
+# -- real D435 frames (tests/fixtures/d435: the pick PC's camera, 2026-10-03) -----------------------
+
+import json  # noqa: E402
+import zlib  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+REAL = Path(__file__).parent / "fixtures" / "d435"
+
+
+def real(name, spec):
+    meta = json.loads((REAL / f"{name}.json").read_text())
+    depth = zlib.decompress((REAL / f"{name}.depth.zlib").read_bytes())
+    sc = find_parts(
+        meta["width"], meta["height"], depth, meta["depth_scale_m"], meta["intrinsics"], None, spec=spec
+    )
+    return meta, sc
+
+
+def test_four_labelled_boxes_on_carpet_at_one_and_a_half_metres_are_four_parts():
+    # the old detector: one of four (a single global plane under a carpet, a top band that the white
+    # labels and the 1.4 m blur cut into pieces); the half-height footprint on the local floor finds all
+    meta, sc = real("boxes_on_carpet_1p4m", PartSpec.from_mm(110, 70, 30))
+    assert len(sc.parts) == 4, [(p.pixel, p.why) for p in sc.rejected if p.near]
+    for px in meta["pixels"]:
+        assert min(math.dist(px, p.pixel) for p in sc.parts) < 15
+
+
+@pytest.mark.parametrize("dims", [(60, 40, 20), (200, 150, 30), (110, 70, 80)])
+def test_the_same_boxes_are_not_a_part_of_another_size(dims):
+    _, sc = real("boxes_on_carpet_1p4m", PartSpec.from_mm(*dims))
+    assert sc.parts == []
+
+
+@pytest.mark.parametrize("dims", [(50, 30, 30), (40, 30, 20), (60, 40, 40)])
+def test_a_carpet_with_a_lump_on_it_is_no_part(dims):
+    _, sc = real("carpet_lump_0p85m", PartSpec.from_mm(*dims))
+    assert sc.parts == []
+
+
+def test_two_flat_and_two_standing_boxes_at_three_quarters_of_a_metre_are_four_parts():
+    # High Density preset (High Accuracy left the near standing box's dark top 57 % holes: missed);
+    # the standing ones show their 110 x 30 face, 70 tall — a box on any face
+    meta, sc = real("boxes_flat_and_on_side_0p75m", PartSpec.from_mm(110, 70, 30))
+    assert len(sc.parts) == 4, [(p.pixel, p.why) for p in sc.rejected if p.near]
+    for px in meta["pixels"]:
+        assert min(math.dist(px, p.pixel) for p in sc.parts) < 15
+    assert sorted(round(p.height_m * 1000, -1) for p in sc.parts) == [30, 30, 70, 70]
+
+
+@pytest.mark.parametrize("dims", [(60, 40, 20), (200, 150, 30)])
+def test_flat_and_standing_boxes_are_not_a_part_of_another_size(dims):
+    _, sc = real("boxes_flat_and_on_side_0p75m", PartSpec.from_mm(*dims))
+    assert sc.parts == []

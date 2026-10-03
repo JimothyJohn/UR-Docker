@@ -1,0 +1,29 @@
+{
+ "width": 848,
+ "height": 480,
+ "depth_scale_m": 0.0010000000474974513,
+ "intrinsics": {
+  "width": 848,
+  "height": 480,
+  "fx": 617.8555908203125,
+  "fy": 618.2134399414062,
+  "ppx": 426.5736999511719,
+  "ppy": 243.31895446777344,
+  "model": "inverse_brown_conrady",
+  "coeffs": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "fov_deg": [
+   68.91929456404054,
+   42.4339616103857
+  ]
+ },
+ "what": "carpet 0.63-1.12 m away with an irregular lump ~40 mm tall at the left (unidentified, dark room), no parts; same camera, 2026-10-03",
+ "part_mm": null,
+ "count": 0,
+ "pixels": []
+}

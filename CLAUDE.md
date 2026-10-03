@@ -69,7 +69,7 @@ legacy Windows codepages never crash on unicode.
 with ctypes (no `pyrealsense2`; zero deps kept), streams colour + depth aligned
 to colour (both sensors at the D435's native 848×480 — **mismatched sizes give
 black colour frames** — through the SDK's spatial + temporal filter chain,
-sensor on the High Accuracy preset at full laser; `docs/realsense.md` §Depth
+sensor on the High Density preset at full laser (High Accuracy left holes in dark part tops, 2026-10-03); `docs/realsense.md` §Depth
 quality; `--no-depth-filters` / `--rs-preset none` for raw), and the cockpit (`perceptronics/webapp.py` + `perceptronics/webui/`) does
 hover-to-measure, click-to-segment (`perceptronics/segment.py`: colour+depth
 region growing, or SAM via the `sam` extra), snapshots (`POST /api/snapshot`), and a **Robot** panel that sends the segment's point to
@@ -428,21 +428,66 @@ the repo `.venv` has none and is often first on PATH. (3) `site/site.sh datashee
 Chrome can't print without a display — `CHROME=` Playwright's `chrome-headless-shell` (`site/site.sh`
 header has the line).
 
-**Detection at arm's length (2026-10-03, Nick: "make the detection more robust ... from a distance
-similar to the robot arm"; "assumed that they could be lying on either face").** `perceptronics/volume.py`
-was only ever tested on perfect ray-cast depth. `synthscene.Sensor`/`sense()` now add what the Pi's
-D435 does (sized from a real carpet frame: 0.37 mm pixel jitter, ±4 mm swells at 0.85 m, ∝ z²; stereo
-shadow, flying pixels, top dropouts) and `scripts/volume_bench.py` scores random arm-distance cells
-(0.28–0.60 m, tilts to 25°, hand-eye off up to N°) against truth: found / false picks / size bias.
-Before → after on `--sensor real --cal-deg 1.5`: 92 % → 100 %; `harsh --cal-deg 2.5`: 60 % → 95 %;
-0 false picks. What changed: the table is a **fitted plane** (≤ 8° off level; > 1° adds a "hand-eye is
-out" note) instead of exactly level; the top face is eroded one pixel (flying pixels made every part
-3–6 mm big); a blob is **peeled level by level** into connected tops (tall parts whose sides meet, a low
-part beside a tall one) and a top ringed by higher ground or shoulder heights is not a part (a lump's
-slices, a dome's plateau); nothing under 3.5 × the surface's own spread counts as standing on it
-(the carpet: ±4.1 mm → 14 mm, and a note says so); `PartSpec.poses()` — a box matches on any face.
-Run the bench before and after any detector change. Still synthetic + one unlabelled real frame:
-**real labelled frames at arm distance are the next step**.
+**Detection (`perceptronics/volume.py`, reworked 2026-10-03; Nick: "more robust ... from a distance
+similar to the robot arm", "assumed that they could be lying on either face", "drawing a line halfway
+up the expected part height", "tying [the tolerance] to the distance").** One frame → parts:
+1. **Surface**: a plane fitted near level (≤ 8°; > 1° adds a "hand-eye is out" note), then a **local
+   floor** — median + MAD of near-floor heights in tiles of 3 part lengths (≥ 15 cm), interpolated:
+   heights are off the floor *round each part* (carpet: one plane leaves 5-7 mm, local 1.7 mm).
+2. **Occupied** = over half the part's lowest face height *and* over 3.5 × the local spread (a note
+   when roughness limits it).
+3. Per blob: the **footprint is where it stands over half the expected height** (the spec's height on
+   the face nearest the measured top) — the half-height line of a blurred step is its edge, and a white
+   label can't split it. Far-side **ramps are undone** (`_unramp`: a cell lower than its neighbour
+   toward the camera slides back `(top − h)·tanθ`). Footprints apart *on the surface* are separate
+   parts even when the picture joins them; a part owns its footprint + blur margin + **its shadow**;
+   what is left is looked at again (a low part beside a tall one).
+4. Measure at full resolution (eroded one pixel), **trimmed-quantile rectangle** (`robust_rect`, 2-98 %),
+   reject ledges (higher ground beside) and domes (shoulder heights round it).
+5. **Size check**: any face down (`PartSpec.poses()`), tolerance never under `RANGE_SLACK` × range
+   (1.2 %); past `MAX_PICK_RANGE_M` (1.6 m) nothing is picked.
+
+Tools: `synthscene.Sensor`/`sense()` (D435 noise model, sized from the real frames below) and
+`scripts/volume_bench.py` (random arm-distance cells vs truth: found / false picks / size bias) — **run
+the bench before and after any detector change**. Real labelled frames: `tests/fixtures/d435/` (4 boxes
+110×70×30 on carpet at 1.3-1.5 m, white labels; 2 flat + 2 on a side at 0.72-0.81 m, High Density;
+carpet with a lump) — the arbiter over the model.
+Numbers as of this rework: bench (0.28-0.60 m, hand-eye ≤ 1.5°) 99.4 % found, 0 false picks, size bias
++0.6 mm, heading p95 2.4°; real boxes 4/4 at 1.4 m, wrong sizes 0; ~1 s per frame on the Pi 5.
+
+**What a D435 can't do — read before proposing detector work** (measured on the pick PC's D435,
+2026-10-03, unless noted). These are the sensor's limits, not the software's; don't spend time trying
+to process past them:
+- **It doesn't measure parts.** Lateral blur is ~1 % of range (σ 12-16 mm at 1.4 m, **the same with
+  the SDK filters off**: it is the stereo matcher's window, not our filters). Sizes are good to about
+  ±max(5 mm, 1.2 % of range): it confirms a size *class*, it can't do metrology or QA, and two parts
+  closer in size than ~2× that can't be told apart. Edges are blurred steps and corners round: there
+  is **no perfect bounding box**, only a best edge estimate (the half-height line).
+- **No defect inspection.** Anything under ~5 mm at 0.4 m (~15 mm at 1.4 m) is smoothed away;
+  dents, chips, scratches, print and label content are invisible in depth.
+- **Near and far.** Nothing closer than ~0.28 m (848×480). Error grows with z²: the good zone is
+  0.30-0.60 m; usable for picking to ~1.5 m with looser sizes; past 1.6 m we never pick.
+- **Heights need contrast against the surface.** Nothing stands out under ~3.5× the local surface
+  spread: ~5 mm on a smooth table at 0.4 m, 10-18 mm on carpet at 0.85-1.4 m. Thin, flat parts
+  (sheets, washers, labels) are invisible in depth.
+- **Surfaces lie.** White labels / bright patches bias depth (one 30 mm box read 21-36 mm across its
+  top at 1.4 m); dark, shiny, transparent surfaces drop out or read wrong; sunlight washes out the
+  IR projector. **The preset decides how much drops out:** a dark, printed 30 mm-wide top at 0.72 m
+  kept 43 % of its depth on High Accuracy (box missed) and 92 % on High Density (found, 110×31×71 for
+  110×30×70) — hence High Density by default; holes can't be processed back, noise can.
+- **Oblique views hide floor.** A part hides `height·tanθ` of floor behind it (54 mm for 30 mm at 61°)
+  and the stereo **fills it with a ramp, not holes** — far edges stretch unless undone.
+- **Averaging frames buys little.** Filtered temporal noise is 0.8 mm at 1.4 m (raw 2.1 mm); the error
+  is spatial and static (swells, blur, material bias) and doesn't average out.
+- **The surface is never one plane** over a whole view: swells grow with z² (±4 mm at 0.85 m over a
+  carpet view). Fit locally.
+- **Positions inherit calibration.** The detector tolerates a hand-eye tilted 2.5° for *finding*
+  parts, but every 1° of hand-eye error is ~9 mm of grip error at 0.5 m.
+- **Rest pose is ambiguous for near-cubes**: a box with two equal sides has no long axis (heading
+  undefined), and faces of similar size can't be told apart by the camera.
+Known gaps: one harsh-bench false pick in 351 (a tall box's fragment fitting another face); the
+range-scaled tolerance also loosens the height check; a fixed deployment could subtract a taught
+empty-surface depth map instead of fitting the floor (not built).
 
 **Three traps from the 3D Pick sessions.** (1) `urcap/pick5_e2e.py` compiles the test harness in
 `tests/test_urcap5.py` (`HARNESS`): anything the harness starts to use must be in the source list
