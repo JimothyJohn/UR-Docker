@@ -457,4 +457,7 @@ def test_installer_defaults_and_its_guards():
     # the lease must be on the pick PC's network, or nothing is served
     assert "is not on ${cidr} — not serving" in code
     assert "/usr/sbin/dnsmasq --test" in code
+    # Raspberry Pi OS's own eth0 profile names no interface (netplan `match: {}`) and still
+    # owns the port: one that already carries the address is kept, not duplicated
+    assert '" 802-3-ethernet "*' in code
     assert "dnsmasq-base" in code

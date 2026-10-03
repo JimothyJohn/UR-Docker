@@ -403,11 +403,19 @@ configure_cell_address() {
         return
     fi
     # A profile of someone else's for this port that already carries the address (the
-    # bench's hand-made one): keep it rather than add a second.
+    # bench's hand-made one): keep it rather than add a second. "For this port" = it names the
+    # port, or it is an Ethernet profile that names none (netplan's `match: {}`, as Raspberry
+    # Pi OS writes it: it applies to any Ethernet port).
+    local bound
     while IFS=: read -r con; do
         if [ -z "$con" ] || [ "$con" = "$NM_CELL_CON" ]; then continue; fi
-        if [ "$(nmcli -g connection.interface-name connection show "$con" 2>/dev/null)" = "$cell_if" ] \
-            && nmcli -g ipv4.addresses connection show "$con" 2>/dev/null | grep -qF "$cidr"; then
+        bound="$(nmcli -g connection.interface-name,connection.type connection show "$con" 2>/dev/null \
+            | tr '\n' ' ')"
+        case "$bound" in
+            "${cell_if} "* | " 802-3-ethernet "*) ;;
+            *) continue ;;
+        esac
+        if nmcli -g ipv4.addresses connection show "$con" 2>/dev/null | grep -qF "$cidr"; then
             log "cell port: NetworkManager profile ${con} already gives ${cell_if} ${cidr} — kept"
             return
         fi
