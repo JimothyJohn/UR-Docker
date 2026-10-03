@@ -340,7 +340,9 @@ def find_parts(
     instant (flange pose ∘ hand-eye); None for a camera-only preview (no reach, no base
     heading — the camera frame stands in for the base). ``fingers``: keyword arguments for
     :func:`perceptronics.pickplan.clearance` (``stroke_m``, ``grasp_below_m``, …) — the open
-    fingers' room is checked when given."""
+    fingers' room is checked when given, and the parts are then put in the order that
+    **clears the way** (:func:`clear_the_way`): a part pinned only by other parts is picked
+    after them instead of being turned away. ``order`` breaks the ties."""
     level_ok = T_bc is not None
     T = T_bc if T_bc is not None else Transform()
     if stride is None:
@@ -387,6 +389,7 @@ def find_parts(
 
     parts: list[Part] = []
     rejected: list[Part] = []
+    blobs: dict[int, list[int]] = {}  # id(part) → its cells, for who-pins-whom
     T_cb = T.inverse()
     seen = bytearray(gw * gh)
     for start in range(gw * gh):
@@ -399,12 +402,15 @@ def find_parts(
         if part is None:
             continue
         part.why = _why_not(part, spec, surf, reach, level_ok)
-        if part.why is None and fingers is not None:
-            part.why = _fingers(part, pts, fingers)
         part.near = _near(part, spec)
         (parts if part.why is None else rejected).append(part)
+        blobs[id(part)] = blob
     if order:
         order_parts(parts, T, surf, order)
+    if fingers is not None and parts:
+        for part in clear_the_way(parts, pts, blobs, fingers):
+            part.near = _near(part, spec)
+            rejected.append(part)
     return Scene(parts, rejected, surf, stride, notes)
 
 
@@ -647,7 +653,9 @@ def _near(part: Part, spec: PartSpec | None) -> bool:
     return spec.near_miss(part.length_m, part.width_m, part.height_m)
 
 
-def _fingers(part: Part, pts: list, fingers: dict) -> str | None:
+def _fingers(part: Part, pts: list, fingers: dict) -> dict:
+    """:func:`perceptronics.pickplan.clearance` for ``part`` against ``pts`` (None entries
+    skipped) — only the points near enough to matter."""
     from .pickplan import clearance
 
     fingers = dict(fingers)
@@ -657,10 +665,74 @@ def _fingers(part: Part, pts: list, fingers: dict) -> str | None:
     rect = {"centre": list(part.centre), "theta": part.theta, "minor_m": part.width_m}
     if long_way:
         rect = {**rect, "theta": part.theta + math.pi / 2, "minor_m": part.length_m}
-    got = clearance(rect, near, **fingers)
-    if got["clear"]:
-        return None
+    return clearance(rect, near, **fingers)
+
+
+def _no_room(got: dict) -> str:
     return f"no room for a finger beside it ({got['worst_mm']:.0f} mm too high)"
+
+
+def clear_the_way(parts: list[Part], pts: list, blobs: dict[int, list[int]], fingers: dict) -> list[Part]:
+    """Put ``parts`` (already in the picture's order) in the order that clears the way, and
+    return the ones that can't be picked at all (``why`` set), taken out of ``parts``.
+
+    Nick, 2026-10-02: pick the parts that make other parts easier to pick. A part whose
+    finger zone is blocked *only by other parts* can go once they have gone; one blocked by
+    anything else (a wall, a wrong-size thing — what never leaves) can't. Greedy: of the
+    parts free now, take the one that frees the most others (the picture's order breaks
+    ties), and repeat. Parts that pin each other with nothing free to start from stay out."""
+    owner: dict[int, int] = {}
+    for n, p in enumerate(parts):
+        for cell in blobs.get(id(p), ()):
+            owner[cell] = n
+    background = [q for cell, q in enumerate(pts) if q is not None and cell not in owner]
+    cells_of = [[pts[c] for c in blobs.get(id(p), ()) if pts[c] is not None] for p in parts]
+    reach = [p.length_m + 0.08 + (fingers.get("room_m") or 0.0) for p in parts]
+    # the background near each part, once: a full frame is tens of thousands of points
+    around = [
+        [q for q in background if math.dist(q[:2], p.centre[:2]) < reach[n]] for n, p in enumerate(parts)
+    ]
+    blockers: list[set[int] | None] = []  # None: pinned by something that never leaves
+    for n, p in enumerate(parts):
+        if not _fingers(p, around[n], fingers)["clear"]:
+            blockers.append(None)
+            continue
+        near = [
+            m
+            for m, q in enumerate(parts)
+            if m != n and math.dist(q.centre[:2], p.centre[:2]) < reach[n] + q.length_m
+        ]
+        if _fingers(p, around[n] + [c for m in near for c in cells_of[m]], fingers)["clear"]:
+            blockers.append(set())
+            continue
+        mine = {m for m in near if not _fingers(p, around[n] + cells_of[m], fingers)["clear"]}
+        blockers.append(mine or set(near))  # several together, none alone: all of them
+    gone: set[int] = set()
+    plan: list[int] = []
+    left = [n for n in range(len(parts)) if blockers[n] is not None]
+
+    def free(n: int, after: set[int]) -> bool:
+        b = blockers[n]
+        return b is not None and b <= after
+
+    while True:
+        now = [n for n in left if n not in gone and free(n, gone)]
+        if not now:
+            break
+        pending = [n for n in left if n not in gone and not free(n, gone)]
+        pick = max(now, key=lambda n: (sum(free(m, gone | {n}) for m in pending), -n))
+        plan.append(pick)
+        gone.add(pick)
+    out = []
+    for n, p in enumerate(parts):
+        if n not in gone:
+            others = [c for m, cs in enumerate(cells_of) if m != n for c in cs]
+            p.why = _no_room(_fingers(p, around[n] + others, fingers))
+            out.append(p)
+    parts[:] = [parts[n] for n in plan]
+    for k, p in enumerate(parts, 1):
+        p.order = k
+    return out
 
 
 # -- pick order -----------------------------------------------------------------------------

@@ -5,6 +5,7 @@ surface (fitted, taught, nudged), the reach annulus, the pick order the pendant 
 from __future__ import annotations
 
 import math
+import random
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -249,6 +250,50 @@ def test_a_neighbour_where_a_finger_goes_down_blocks_the_pick():
     assert not crowded.parts
 
 
+# -- clear the way (Nick, 2026-10-02: pick the parts that make other parts easier to pick) ----
+
+FINGERS = {"grasp_below_m": 0.015, "stroke_m": 0.050}
+# B lies along X, so its fingers come down beside it along Y — where A stands. A lies along Y,
+# its fingers come down along X, clear of B: A can go now, B once A is gone.
+PINNED = Box(0.35, 0.0, 0.06, 0.04, 0.03)
+BLOCKER = Box(0.35, 0.06, 0.06, 0.04, 0.03, math.pi / 2)  # 10 mm off B, 9 mm into its finger zone
+
+
+def test_a_part_pinned_only_by_a_pickable_neighbour_is_picked_after_it():
+    sc = detect([PINNED, BLOCKER], spec=SPEC, fingers=FINGERS)
+    assert not sc.rejected and len(sc.parts) == 2
+    first, second = sorted(sc.parts, key=lambda p: p.order)
+    assert math.dist(first.centre[:2], (BLOCKER.x, BLOCKER.y)) < 0.005  # the blocker goes first
+    assert math.dist(second.centre[:2], (PINNED.x, PINNED.y)) < 0.005
+    assert [p.order for p in sc.parts] == [1, 2]  # the list is in pick order
+
+
+def test_the_same_holds_with_the_nodes_finger_room():
+    room = {"grasp_below_m": 0.015, "room_m": 0.020}
+    sc = detect([PINNED, BLOCKER], spec=SPEC, fingers=room)
+    assert not sc.rejected and [round(p.centre[1], 2) for p in sc.parts] == [0.06, 0.0]
+
+
+def test_a_part_pinned_by_something_that_is_not_a_part_stays_out():
+    post = Box(0.35, 0.04, 0.02, 0.02, 0.03)  # too small to be the part: it never leaves
+    sc = detect([PINNED, post], spec=SPEC, fingers=FINGERS)
+    assert not sc.parts
+    pinned = [p for p in sc.rejected if math.dist(p.centre[:2], (PINNED.x, PINNED.y)) < 0.005]
+    assert pinned and pinned[0].why.startswith("no room for a finger")
+
+
+def test_the_part_that_frees_another_goes_before_the_pictures_first():
+    # FREE is first in the picture's order (front row, left) but frees nobody
+    free = Box(0.27, -0.06, 0.06, 0.04, 0.03)
+    sc = detect([free, PINNED, BLOCKER], spec=SPEC, fingers=FINGERS, order=("LR", "FB"))
+    assert len(sc.parts) == 3 and not sc.rejected
+    first = min(sc.parts, key=lambda p: p.order)
+    assert math.dist(first.centre[:2], (BLOCKER.x, BLOCKER.y)) < 0.005
+    # without the finger check there is nothing to clear, and the picture's order stands
+    plain = detect([free, PINNED, BLOCKER], spec=SPEC, order=("LR", "FB"))
+    assert math.dist(min(plain.parts, key=lambda p: p.order).centre[:2], (free.x, free.y)) < 0.005
+
+
 # -- pick order -----------------------------------------------------------------------------
 
 GRID = [Box(0.28 + 0.07 * c, -0.07 + 0.07 * r, 0.05, 0.035, 0.03) for r in range(3) for c in range(3)]
@@ -386,3 +431,44 @@ def test_garbage_depth_never_raises(noise):
     depth = (noise * (W * H * 2 // max(1, len(noise)) + 1))[: W * H * 2] if noise else bytes(W * H * 2)
     sc = find_parts(W, H, depth, 0.001, K, CAM, spec=SPEC)
     assert isinstance(sc.parts, list)
+
+
+def packed(rng, n):
+    """Up to ``n`` parts, each lying along X or Y, 8 mm or more apart: never touching (one
+    blob), often inside each other's finger zones."""
+    rects = []
+    for _ in range(200):
+        if len(rects) == n:
+            break
+        turned = rng.random() < 0.5
+        hx, hy = (0.02, 0.03) if turned else (0.03, 0.02)
+        x, y = rng.uniform(0.24, 0.46), rng.uniform(-0.09, 0.09)
+        gap = min(
+            (max(abs(x - a) - hx - ahx, abs(y - b) - hy - ahy) for a, b, ahx, ahy, _ in rects), default=1
+        )
+        if gap >= 0.008:
+            rects.append((x, y, hx, hy, turned))
+    return [Box(x, y, 0.06, 0.04, 0.03, math.pi / 2 if t else 0.0) for x, y, _, _, t in rects]
+
+
+@settings(max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(st.integers(0, 2**32 - 1), st.integers(2, 7))
+def test_every_part_in_the_plan_is_free_once_the_ones_before_it_are_gone(seed, n):
+    """The contract of clearing the way, checked against fresh pictures: take the planned
+    part out of the scene, re-render, and the next planned part must be pickable *then*.
+    (These layouts pin parts often: over 40 of them the old rule turned away 10 parts
+    that clearing the way picks.)"""
+    boxes = packed(random.Random(seed), n)
+
+    def box_of(part, among):
+        return min(among, key=lambda b: math.dist(part.centre[:2], (b.x, b.y)))
+
+    sc = detect(boxes, spec=SPEC, fingers=FINGERS)
+    plan = [box_of(p, boxes) for p in sorted(sc.parts, key=lambda p: p.order)]
+    left = list(boxes)
+    for box in plan:
+        now = detect(left, spec=SPEC, fingers=FINGERS)
+        assert box in [box_of(p, left) for p in now.parts], (
+            "a planned part is still pinned when its turn comes"
+        )
+        left.remove(box)
