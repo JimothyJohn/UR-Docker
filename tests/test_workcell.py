@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from _xarm_fake import FakeXArm
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from perceptronics.partspec import PartSpec
@@ -54,6 +54,7 @@ def test_a_workplane_passes_through_its_three_points_and_faces_up(a, b, c):
 
 
 @given(point, point, point)
+@example(a=(0.0, 0.25, 0.0), b=(0.625, 0.0, 0.0), c=(0.625, 0.0, 0.5))  # a wall: n_z is float noise
 def test_the_workplane_and_the_pick_surface_agree_on_the_convention(a, b, c):
     """The URCap's PoseMath.plane, Surface.from_points and Workplane are one convention:
     the same three touches give the same frame and the same area."""

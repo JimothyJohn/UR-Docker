@@ -129,7 +129,9 @@ class Workplane:
         if _norm(n) < MIN_SINE * _norm(ab) * _norm(ac):
             raise WorkcellError("the three points are (nearly) on one line: touch point 3 off the 1-2 edge")
         x = _unit(ab)
-        n = _unit(n)
+        # the normal by Surface.from_points' own operations, so the two agree to the bit:
+        # on a wall n_z is ±1e-17 noise and "point it up" must flip the same way in both
+        n = _unit(_cross(x, ac))
         if n[2] < 0:
             n = (-n[0], -n[1], -n[2])
         y = _cross(n, x)
