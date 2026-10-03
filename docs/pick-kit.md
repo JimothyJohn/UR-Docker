@@ -23,7 +23,8 @@ in a window, fed by a simulated camera computer (or `--cockpit http://<ip>:7621`
 
 1. **Mount the camera.** Print `d435_tool_bracket_eseries.stl` (the BOM names the
    material), fit it between the flange and the gripper with the tool's bolts, the D435
-   on its 1/4-20 and M3 screws, the cable along the arm (strain relief at the wrist).
+   dropped into the bracket's lip on its one 1/4-20, the cable clicked into the bracket's clip
+   and along the arm (strain relief at the wrist).
 2. **Deploy the camera computer.** Flash Raspberry Pi OS Lite 64-bit (or Debian arm64),
    give it an address on the robot's network, plug the D435 into a **USB 3** port, then
    from a laptop with this repo — or ask Claude Code to "deploy the pick PC":

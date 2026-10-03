@@ -4,14 +4,15 @@ assembly renders. Everything dimensional lives in the PARAMS block; the spec
 
     python3 hardware/d435-tool-bracket/bracket.py
 
-Design (Rev B): a sandwich *adapter plate* that carries BOTH the ISO 9409-1-50
-(UR3e/5e/10e/16e) and the ISO 9409-1-80 (UR20/UR30) bolt patterns as through
-holes, so the tool's own bolts pass through it into whichever flange it is on.
-The camera hangs off one edge and points *back along -Z* beside the wrist — its
-front plate is flush with the plate's tool face, so nothing of the camera or
-the bracket rises into the tool's volume. The 1/4-20 and the two M3 go through
-the hanging wall from the wrist side, countersunk flush: fit the camera to the
-adapter first, then bolt the adapter to the robot.
+Design (Rev C): a sandwich *adapter plate* per flange (VARIANTS) whose bolt
+patterns are through holes, so the tool's own bolts pass through it into the
+robot. The camera hangs off one edge, back along -Z beside the wrist — its
+front plate at the plate's tool face, so nothing of the camera or the bracket
+rises into the tool's volume — on a 3 mm wall drafted 5° so the optical axis
+tips in toward the flange axis. A chamfered lip round the seat locates the
+camera and one countersunk 1/4-20 from the wrist side holds it (Rev C dropped
+the two M3); a C clip beside the USB end takes the cable back along the wrist.
+Fit the camera to the adapter first, then bolt the adapter to the robot.
 
 Frame: origin at the centre of the robot's tool-flange face, +Z away from the
 flange (the tool direction, and the camera's optical axis), +Y towards the
@@ -96,16 +97,32 @@ PARAMS = {
     "ESERIES_PLATE_OD": 63.0,  # e-Series print: ISO-50 only, so the disc shrinks to the Ø63 face
     "ESERIES_PATTERNS": ("iso50",),
     "ESERIES_WRIST_R": 45.0,  # ...and the wall only has to clear the Ø90 wrist (UR20 housing is Ø100)
-    "UR20_ARM_ANGLE_DEG": 45.0,  # UR20: its socket is only 17.6 behind the face, so clock the camera 45° off
+    # UR20: its socket is only 17.6 behind the face, so clock the camera off it. Rev C's 95-wide seat
+    # (+ clip) needs ≥ 54° off the socket: 30° (60° off) leaves 6.4°; Rev B's 56-wide wall sat at 45°
+    "UR20_ARM_ANGLE_DEG": 30.0,
     "UR20_SPIGOT_OD": 49.8,  # Ø50 H7 pilot engaged (a dual part can't: it would hold it off a Ø63 face)
     "UR20_TOP_RECESS_D": 50.2,  # the Ø50 pilot re-presented to an ISO-80 tool (e-Series variant keeps Ø31.7)
-    "ARM_W": 56.0,  # tangential width of tab + wall: M3 csk at ±22.5 (Ø6.6) + 2 mm of wall each side
+    "ARM_W": 56.0,  # tangential width of the tab that carries the wall (the wall is as wide as the seat)
     "WRIST_R": 50.0,  # largest thing the wall must clear: the UR20's Ø100 housing (e-Series wrist is Ø90)
-    "WALL_CLEAR": 3.0,  # radial gap housing → wall inner face (flat heads are flush, so this is all it needs)
-    "WALL_T": 6.0,
-    "WALL_BELOW_CAM": 0.0,  # wall ends at the camera's back face (3.8 mm below the 1/4-20 countersink mouth)
-    "WALL_CORNER_R": 6.0,  # rounded bottom corners of the wall / outer corners of the tab
+    "WALL_CLEAR": 3.0,  # radial gap housing → wall inner face (the flat head is sunk: this is all it needs)
+    "WALL_T": 3.0,  # Rev C: 6 → 3 (Nick). At the top; the draft thickens it downward (≈ 4.4 at the 1/4-20)
+    "TAB_T": 3.0,  # Rev C: the tab beyond the disc; the disc keeps PLATE_T (pilot recess + spigot)
+    "CAM_TILT_DEG": 5.0,  # Rev C "draft": the seat leans so the optical axis tips 5° toward the flange axis
+    #   (pivot = the camera's outer front edge, so nothing rises above the tool face)
     "CAM_PROUD": 0.0,  # camera front plate above the plate's tool face (0 = flush)
+    # -- the chamfered lip round the camera seat (locates the camera; one screw can't stop it turning) ----
+    "LIP_H": 2.5,  # proud of the seat; the USB-C plug on the end face starts ≈ 9 mm up the camera, well clear
+    "LIP_W": 2.0,
+    "LIP_CLEAR": 0.3,  # per side, camera envelope → lip
+    "LIP_CHAMFER": 1.0,  # 45° lead-in on the lip's inner top edge
+    "LIP_OUTER_CHAMFER": 0.5,
+    "LIP_CORNER_R": 4.0,  # outer corners of the lip and the wall's bottom corners; inner = this − LIP_W
+    # -- USB cable clip: a snap-in C ring beside the camera's USB end, cable running back along the wrist ----
+    "CABLE_SIDE": "right",  # seen from the front (the lens side): "right" = the camera's own left end, where
+    #   Intel's mesh puts the USB-C; "left" mirrors it; "none" drops the clip
+    "CABLE_D": 6.3,  # the BOM's cable (K4, Newnex high-flex USB 3): 6.3 OD per Newnex; ring bore +0.4
+    "CABLE_CLIP_WALL": 2.0,
+    "CABLE_CLIP_GAP": 5.0,  # snap opening, ≈ 0.8 × CABLE_D (PPA-CF is stiff, the jacket gives), facing out
     # -- camera: Intel RealSense D435 ---------------------------------------------------------
     "CAM_L": 90.0,
     "CAM_H": 25.0,  # bottom→top (along the wall normal, +X)
@@ -114,11 +131,9 @@ PARAMS = {
     "TRIPOD_HOLE_D": 6.6,  # 1/4-20 UNC clearance
     "TRIPOD_CSK_D": 12.7,  # 82° flat head (1/4" FHMS head ≈ Ø12.1)
     "TRIPOD_CSK_ANGLE": 82.0,
-    "M3_FROM_FRONT": 14.2,  # measured on Intel's mesh (0.7 in front of the tripod line)
-    "M3_HOLE_D": 3.4,
-    "M3_CSK_D": 6.6,  # 90° flat head (M3 FHMS head Ø6.0)
-    "M3_CSK_ANGLE": 90.0,
-    "M3_SPACING": 45.0,
+    "TRIPOD_CSK_SINK": 0.6,  # extra depth: the wrist face is vertical, the screw tilted 5°, so a flush mouth
+    #   would leave one side of the head 0.55 proud
+    "TRIPOD_SCREW_L": 9.525,  # 1/4-20 × 3/8" flat head (overall length) → ≈ 5.6 mm into the camera
     "IMAGER_OFFSET": 17.5,  # tripod → left imager, along the length, to the camera's left
     "BASELINE": 50.0,
     "DEPTH_ORIGIN_FROM_FRONT": 4.3,  # zero-depth plane behind the front plate (4.2 glass + 0.1)
@@ -165,52 +180,92 @@ CAMERA_MESH_SOURCE = {
 
 
 def derived(p: dict) -> dict:
-    """Numbers that follow from PARAMS (also written into the spec)."""
+    """Numbers that follow from PARAMS (also written into the spec).
+
+    The camera side is authored on +X (radial out), +Y tangential, untilted;
+    ``tilt`` then leans it CAM_TILT_DEG about the camera's outer front edge (so
+    the optical axis tips in toward the flange axis and nothing rises above the
+    tool face), and ``rot`` clocks it about Z by ARM_ANGLE_DEG."""
     wall_in = p["WRIST_R"] + p["WALL_CLEAR"]
-    wall_out = wall_in + p["WALL_T"]
+    seat_x = wall_in + p["WALL_T"]  # the camera's bottom plane before the tilt
     front_z = p["PLATE_T"] + p["CAM_PROUD"]
     back_z = front_z - p["CAM_D"]
-    wall_bottom_z = back_z - p["WALL_BELOW_CAM"]
-    tripod_z = front_z - p["TRIPOD_FROM_FRONT"]
-    m3_z = front_z - p["M3_FROM_FRONT"]
-    cam_x0, cam_x1 = wall_out, wall_out + p["CAM_H"]
-    # camera frame in flange coords before the arm rotation: +z_cam = +Z, +y_cam
-    # (image down, toward the camera's bottom = the wall) = -X, hence +x_cam = +Y
-    # and camera-left = -Y. ARM_ANGLE_DEG rotates the whole set about Z.
+    tripod_z_u = front_z - p["TRIPOD_FROM_FRONT"]
+    t = math.radians(p["CAM_TILT_DEG"])
+    ct, st = math.cos(t), math.sin(t)
+    px, pz = seat_x + p["CAM_H"], front_z  # pivot: the camera's outer front edge
+
+    def tilt(x, y, z):
+        dx, dz = x - px, z - pz
+        return (px + ct * dx - st * dz, y, pz + st * dx + ct * dz)
+
     a = math.radians(p["ARM_ANGLE_DEG"])
     ca, sa = math.cos(a), math.sin(a)
 
     def rot(x, y, z):  # the whole camera side rotates about Z by ARM_ANGLE_DEG
         return (round(ca * x - sa * y, 6), round(sa * x + ca * y, 6), round(z, 6))
 
-    depth_origin = rot(wall_out + p["CAM_H"] / 2, -p["IMAGER_OFFSET"], front_z - p["DEPTH_ORIGIN_FROM_FRONT"])
-    x_cam, y_cam, z_cam = rot(0, 1, 0), rot(-1, 0, 0), (0, 0, 1)
+    # seat outline (lip outer edge), camera coords before the tilt
+    seat_half_l = p["CAM_L"] / 2 + p["LIP_CLEAR"] + p["LIP_W"]
+    seat_z_lo = back_z - p["LIP_CLEAR"] - p["LIP_W"]
+    # lowest point: the seat's bottom edge where it meets the (vertical) wrist-side face
+    dz = seat_z_lo - pz
+    dx = (wall_in - px + st * dz) / ct
+    lowest_z = pz + st * dx + ct * dz
+    cam_corners = [tilt(x, 0, z) for x in (seat_x, seat_x + p["CAM_H"]) for z in (back_z, front_z)]
+    tripod = tilt(seat_x, 0, tripod_z_u)
+    # 1/4-20 axis runs in along (-cos t, -sin t) from the seat to the wrist-side face x = wall_in
+    tripod_wall = (tripod[0] - wall_in) / ct
+    clip = _cable_clip_xy(p, wall_in, seat_half_l)
+    # camera frame in flange coords before tilt + arm rotation: +z_cam = +Z, +y_cam (image down,
+    # toward the camera's bottom = the wall) = -X, hence +x_cam = +Y and camera-left = -Y
+    depth_origin = rot(
+        *tilt(seat_x + p["CAM_H"] / 2, -p["IMAGER_OFFSET"], front_z - p["DEPTH_ORIGIN_FROM_FRONT"])
+    )
+    x_cam, y_cam, z_cam = rot(0, 1, 0), rot(-ct, 0, -st), rot(-st, 0, ct)
+    usb_side = -1.0 if p["CABLE_SIDE"] != "left" else 1.0
     return {
         "wall_inner_x": wall_in,
-        "wall_outer_x": wall_out,
-        "wall_z_range": (wall_bottom_z, p["PLATE_T"]),
+        "wall_outer_x": round(seat_x, 6),
+        "seat_x_untilted": seat_x,
+        "seat_half_length": seat_half_l,
+        "seat_z_lo_untilted": seat_z_lo,
+        "tilt_deg": p["CAM_TILT_DEG"],
+        "tilt_pivot_xz": (px, pz),
+        "wall_z_range": (round(lowest_z, 3), p["PLATE_T"]),
+        "wall_t_at_tripod": round(tripod_wall, 3),
         "camera_front_z": front_z,
         "camera_back_z": back_z,
-        "camera_x_range": (cam_x0, cam_x1),
+        "camera_x_range": (
+            round(min(c[0] for c in cam_corners), 3),
+            round(max(c[0] for c in cam_corners), 3),
+        ),
         "camera_y_range": (-p["CAM_L"] / 2, p["CAM_L"] / 2),
-        "camera_z_range": (back_z, front_z),
-        "tripod_z": tripod_z,
-        "m3_z": m3_z,
-        "radial_extent": cam_x1,
-        "lowest_z": wall_bottom_z,
+        "camera_z_range": (
+            round(min(c[2] for c in cam_corners), 3),
+            round(max(c[2] for c in cam_corners), 3),
+        ),
+        "tripod_z": round(tripod[2], 3),
+        "tripod_xyz_unclocked": tuple(round(v, 3) for v in tripod),
+        "radial_extent": round(max(max(c[0] for c in cam_corners), clip["x_max"] if clip else 0.0), 3),
+        "lowest_z": round(min(lowest_z, min(c[2] for c in cam_corners)), 3),
+        "cable_clip": clip,
         "usb_c": {
-            "where": "camera back face (-Z), camera-left end, 36–45 mm from centre; exits along -Z",
-            "flange_xyz_mm": rot(wall_out + p["CAM_H"] / 2, -40.5, back_z),
+            "where": "on an end face (Nick's unit, 2026-09-12): the camera-left end in Intel's mesh, "
+            "i.e. the right-hand end seen from the front; the cable clip sits on CABLE_SIDE",
+            "flange_xyz_mm": rot(
+                *tilt(seat_x + p["CAM_H"] / 2, usb_side * p["CAM_L"] / 2, front_z - p["CAM_D"] / 2)
+            ),
         },
         "tool_connector": {
             "eseries": _connector_check(
-                p, p["ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_ESERIES"], wall_in, wall_bottom_z
+                p, p["ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_ESERIES"], wall_in, lowest_z, seat_half_l, clip
             ),
             "ur20_at_this_angle": _connector_check(
-                p, p["ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_UR20"], wall_in, wall_bottom_z
+                p, p["ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_UR20"], wall_in, lowest_z, seat_half_l, clip
             ),
             "ur20_at_UR20_ARM_ANGLE_DEG": _connector_check(
-                p, p["UR20_ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_UR20"], wall_in, wall_bottom_z
+                p, p["UR20_ARM_ANGLE_DEG"], p["TOOL_CONNECTOR_Z_UR20"], wall_in, lowest_z, seat_half_l, clip
             ),
         },
         "depth_origin_flange_mm": depth_origin,
@@ -219,12 +274,40 @@ def derived(p: dict) -> dict:
     }
 
 
-def _connector_check(p: dict, arm_deg: float, conn_z: float, wall_in: float, wall_bot: float) -> dict:
+def _cable_clip_xy(p: dict, wall_in: float, seat_half_l: float) -> dict | None:
+    """Where the cable ring sits, unclocked: just past the seat's end, its outer edge
+    on the seat line, so the cable drops off the USB plug, in under the camera and
+    back along the wrist — and the plug's overmold (camera mid-height, x ≳ seat + 7)
+    stays clear. Past |y| = 46 the ring is outside any wrist radius."""
+    side = p["CABLE_SIDE"]
+    if side == "none":
+        return None
+    if side not in ("right", "left"):
+        raise ValueError(f"CABLE_SIDE must be right, left or none, not {side!r}")
+    r_in = (p["CABLE_D"] + 0.4) / 2
+    r_out = r_in + p["CABLE_CLIP_WALL"]
+    sgn = -1.0 if side == "right" else 1.0  # right, seen from the front = camera-left = -Y unclocked
+    cy = sgn * (seat_half_l + r_out - 1.0)  # 1 mm into the wall's end
+    cx = wall_in + p["WALL_T"] - r_out
+    return {"x": cx, "y": cy, "r_in": r_in, "r_out": r_out, "x_max": cx + r_out, "y_extent": abs(cy) + r_out}
+
+
+def _connector_check(
+    p: dict,
+    arm_deg: float,
+    conn_z: float,
+    wall_in: float,
+    wall_bot: float,
+    seat_half_l: float,
+    clip: dict | None,
+) -> dict:
     """Does the hanging wall stay clear of the M8 tool-I/O plug at 12 o'clock?
-    Angular: the wall spans ±atan(ARM_W/2 / wall_in) about the arm angle, the plug
-    ±asin(TOOL_PLUG_D/2 / wall_in) about 12 o'clock. Axial: the plug body spans
-    conn_z ± TOOL_PLUG_D/2; the wall spans wall_bot … PLATE_T."""
-    half_wall = math.degrees(math.atan2(p["ARM_W"] / 2, wall_in))
+    Angular: the wall (with the cable clip, taken on both sides to be safe) spans
+    ±atan(half width / wall_in) about the arm angle, the plug ±asin(TOOL_PLUG_D/2 /
+    wall_in) about 12 o'clock. Axial: the plug body spans conn_z ± TOOL_PLUG_D/2;
+    the wall spans wall_bot … PLATE_T."""
+    half_w = max(p["ARM_W"] / 2, seat_half_l, clip["y_extent"] if clip else 0.0)
+    half_wall = math.degrees(math.atan2(half_w, wall_in))
     half_plug = math.degrees(math.asin(min(1.0, p["TOOL_PLUG_D"] / 2 / wall_in)))
     dang = abs((arm_deg - p["DOWEL_ANGLE_DEG"] + 180) % 360 - 180)
     angular_gap = round(dang - half_wall - half_plug, 1)
@@ -247,6 +330,15 @@ def _rot_z(shape, deg: float):
     return shape.rotate((0, 0, 0), (0, 0, 1), deg) if deg else shape
 
 
+def _tilt(shape, p: dict):
+    """Lean a camera-side shape (authored untilted) by CAM_TILT_DEG about the pivot
+    in ``derived`` — the same map as ``derived``'s ``tilt``."""
+    if not p["CAM_TILT_DEG"]:
+        return shape
+    px, pz = derived(p)["tilt_pivot_xz"]
+    return shape.rotate((px, 0, pz), (px, 1, pz), -p["CAM_TILT_DEG"])
+
+
 def build_bracket(p: dict):
     import cadquery as cq
 
@@ -254,8 +346,9 @@ def build_bracket(p: dict):
     T = p["PLATE_T"]
     ha = p["HOLE_PRINT_ALLOWANCE"]
     r_plate = p["PLATE_OD"] / 2
-    wall_in, wall_out = d["wall_inner_x"], d["wall_outer_x"]
-    wall_bot = d["wall_z_range"][0]
+    wall_in, seat_x = d["wall_inner_x"], d["seat_x_untilted"]
+    front_z, back_z = d["camera_front_z"], d["camera_back_z"]
+    half_l, z_lo = d["seat_half_length"], d["seat_z_lo_untilted"]
 
     # plate disc
     plate = cq.Workplane("XY").circle(r_plate).extrude(T)
@@ -269,45 +362,97 @@ def build_bracket(p: dict):
     except Exception:
         pass
 
-    # tab: from well inside the disc out to the wall's outer face, full plate thickness
-    tab_x0 = r_plate - 20.0
-    tab = cq.Workplane("XY").center((tab_x0 + wall_out) / 2, 0).rect(wall_out - tab_x0, p["ARM_W"]).extrude(T)
-    try:
-        tab = tab.edges("|Z").edges(">X").fillet(p["WALL_CORNER_R"])
-    except Exception:
-        pass
-
-    # the hanging wall: from the underside of the tab down past the camera's back
+    # --- the camera side, authored untilted in camera coordinates (seat = the plane x = seat_x) ---
+    # the wall: a slab under the whole seat, made thick enough inward that once tilted and trimmed to the
+    # vertical wrist-side face (x = wall_in) it is a wedge — WALL_T at the top, thickening downward
+    slab_t = p["WALL_T"] + 8.0
+    z_hi = front_z + 12.0  # past the tool face; trimmed flat at z = T after the tilt
     wall = (
-        cq.Workplane("XY", origin=(0, 0, wall_bot))
-        .center((wall_in + wall_out) / 2, 0)
-        .rect(p["WALL_T"], p["ARM_W"])
-        .extrude(T - wall_bot)
+        cq.Workplane("YZ", origin=(seat_x - slab_t, 0, 0))
+        .center(0, (z_lo + z_hi) / 2)
+        .rect(2 * half_l, z_hi - z_lo)
+        .extrude(slab_t)
     )
     try:
-        wall = wall.edges("|X").edges("<Z").fillet(p["WALL_CORNER_R"])
+        wall = wall.edges("|X").edges("<Z").fillet(p["LIP_CORNER_R"])
     except Exception:
         pass
-    side = tab.union(wall)
-    # camera fasteners through the wall (axis = X), countersunk on the wrist-side face
+    # the lip round the camera's footprint, chamfered on both top edges (inner = lead-in)
+    zc = (front_z + back_z) / 2
+    in_l, in_d = p["CAM_L"] + 2 * p["LIP_CLEAR"], p["CAM_D"] + 2 * p["LIP_CLEAR"]
+    lip = (
+        cq.Workplane("YZ", origin=(seat_x, 0, 0))
+        .center(0, zc)
+        .rect(in_l + 2 * p["LIP_W"], in_d + 2 * p["LIP_W"])
+        .extrude(p["LIP_H"])
+        .edges("|X")
+        .fillet(p["LIP_CORNER_R"])
+    )
+    hole = (
+        cq.Workplane("YZ", origin=(seat_x - 1.0, 0, 0))
+        .center(0, zc)
+        .rect(in_l, in_d)
+        .extrude(p["LIP_H"] + 2.0)
+        .edges("|X")
+        .fillet(max(0.5, p["LIP_CORNER_R"] - p["LIP_W"]))
+    )
+    lip = lip.cut(hole)
+    for which, size in (("outer", p["LIP_OUTER_CHAMFER"]), ("inner", p["LIP_CHAMFER"])):
+        if not size:
+            continue
+        top = lip.faces(">X").val()
+        edges = top.outerWire().Edges() if which == "outer" else top.innerWires()[0].Edges()
+        lip = lip.newObject(edges).chamfer(size)
+    side = wall.union(lip)
+    # 1/4-20 through the wall along the seat normal, countersunk on the wrist side
+    tripod_u = front_z - p["TRIPOD_FROM_FRONT"]
+    mouth = seat_x - d["wall_t_at_tripod"] + p["TRIPOD_CSK_SINK"]
     side = side.cut(
         _yz_hole_tool(
             cq,
-            wall_in,
+            mouth,
             0,
-            d["tripod_z"],
+            tripod_u,
             p["TRIPOD_HOLE_D"] + ha,
             p["TRIPOD_CSK_D"],
             p["TRIPOD_CSK_ANGLE"],
-            p["WALL_T"],
+            seat_x - mouth + 2.0,
+            mouth_len=4.0,
         )
     )
-    for y in (-p["M3_SPACING"] / 2, p["M3_SPACING"] / 2):
-        side = side.cut(
-            _yz_hole_tool(
-                cq, wall_in, y, d["m3_z"], p["M3_HOLE_D"] + ha, p["M3_CSK_D"], p["M3_CSK_ANGLE"], p["WALL_T"]
-            )
+    side = _tilt(side, p)
+    # trim: nothing inside the wrist clearance, nothing above the tool face
+    keep = cq.Workplane("XY", origin=(wall_in, -200, -100)).box(300, 400, 100 + T, centered=False)
+    side = side.intersect(keep)
+
+    # the tab: disc → wall, TAB_T thick, flush with the tool face
+    tab_x0, tab_x1 = r_plate - 20.0, wall_in + 1.5
+    tab = (
+        cq.Workplane("XY", origin=(0, 0, T - p["TAB_T"]))
+        .center((tab_x0 + tab_x1) / 2, 0)
+        .rect(tab_x1 - tab_x0, p["ARM_W"])
+        .extrude(p["TAB_T"])
+    )
+    side = side.union(tab)
+
+    # the cable clip: a C ring standing on the tool face (prints as a plain vertical extrusion)
+    clip = d["cable_clip"]
+    if clip:
+        zb = d["wall_z_range"][0]
+        ring = (
+            cq.Workplane("XY", origin=(0, 0, zb))
+            .center(clip["x"], clip["y"])
+            .circle(clip["r_out"])
+            .circle(clip["r_in"])
+            .extrude(T - zb)
         )
+        gap = (
+            cq.Workplane("XY", origin=(0, 0, zb - 1.0))
+            .center(clip["x"] + clip["r_out"] / 2 + 0.5, clip["y"])
+            .rect(clip["r_out"] + 1.0, p["CABLE_CLIP_GAP"])
+            .extrude(T - zb + 2.0)
+        )
+        side = side.union(ring.cut(gap))
 
     # only the camera side clocks; the plate features stay with the robot
     body = plate.union(_rot_z(side, p["ARM_ANGLE_DEG"]))
@@ -370,10 +515,19 @@ def build_bracket(p: dict):
 
 
 def _yz_hole_tool(
-    cq, x_face: float, y: float, z: float, dia: float, csk_d: float, csk_angle: float, depth: float
+    cq,
+    x_face: float,
+    y: float,
+    z: float,
+    dia: float,
+    csk_d: float,
+    csk_angle: float,
+    depth: float,
+    mouth_len: float = 1.0,
 ):
     """A countersunk-hole *cutter* with its axis along +X: cone opening at x_face
-    (the wrist side), cylinder continuing through the wall."""
+    (the wrist side), cylinder continuing through the wall, and a Ø csk_d
+    cylinder mouth_len outward of the face so the cut is clean."""
     cone_h = (csk_d - dia) / 2 / math.tan(math.radians(csk_angle / 2))
     cyl = cq.Workplane("YZ", origin=(x_face - 1.0, 0, 0)).center(y, z).circle(dia / 2).extrude(depth + 2.0)
     cone = cq.Solid.makeCone(
@@ -383,8 +537,9 @@ def _yz_hole_tool(
         pnt=cq.Vector(x_face, y, z),
         dir=cq.Vector(1, 0, 0),
     )
-    # extend the mouth 1 mm outside the face so the cut is clean
-    mouth = cq.Solid.makeCylinder(csk_d / 2, 1.0, pnt=cq.Vector(x_face - 1.0, y, z), dir=cq.Vector(1, 0, 0))
+    mouth = cq.Solid.makeCylinder(
+        csk_d / 2, mouth_len, pnt=cq.Vector(x_face - mouth_len, y, z), dir=cq.Vector(1, 0, 0)
+    )
     return cyl.union(cq.Workplane().add(cone)).union(cq.Workplane().add(mouth))
 
 
@@ -432,9 +587,14 @@ def camera_mesh_to_flange(p: dict, verts):
     d = derived(p)
     v = np.asarray(verts, dtype=float)
     out = np.empty_like(v)
-    out[:, 0] = d["wall_outer_x"] + p["CAM_H"] / 2 + v[:, 1]
+    out[:, 0] = d["seat_x_untilted"] + p["CAM_H"] / 2 + v[:, 1]
     out[:, 1] = -v[:, 0]
     out[:, 2] = d["camera_front_z"] + v[:, 2]
+    t = math.radians(p["CAM_TILT_DEG"])
+    if t:  # derived()'s tilt about the camera's outer front edge
+        (px, pz), c, s = d["tilt_pivot_xz"], math.cos(t), math.sin(t)
+        dx, dz = out[:, 0] - px, out[:, 2] - pz
+        out[:, 0], out[:, 2] = px + c * dx - s * dz, pz + s * dx + c * dz
     a = math.radians(p["ARM_ANGLE_DEG"])
     if a:
         c, s = math.cos(a), math.sin(a)
@@ -455,15 +615,31 @@ def load_camera_mesh(p: dict):
     return camera_mesh_to_flange(p, verts), tris
 
 
+def camera_clash(p: dict, bracket) -> int:
+    """Vertices of Intel's D435 body inside the bracket, with the camera lifted
+    0.05 mm off its seat (its bottom flat lies *on* the seat, which a point test
+    counts as inside). The build refuses anything but 0."""
+    import cadquery as cq
+    import numpy as np
+
+    raw = CAMERA_MESH.read_bytes()
+    n = struct.unpack_from("<I", raw, 80)[0]
+    rec = np.frombuffer(raw, dtype=[("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")], count=n, offset=84)
+    local = np.unique(rec["v"].reshape(-1, 3).astype(float), axis=0) + (0.0, 0.05, 0.0)
+    solid = bracket.val()
+    return int(sum(solid.isInside(cq.Vector(*q), 0.0) for q in camera_mesh_to_flange(p, local)))
+
+
 def build_camera_standin(p: dict):
     """D435 envelope for the STEP assembly (the mesh can't go into STEP at a sane
     size): 90 × 25 × 25.05 with the rounded front/back edges, lens windows on the
-    front plate, the USB-C recess on the back at the camera-left end."""
+    front plate, the USB-C recess on the camera-left end face."""
     import cadquery as cq
 
     d = derived(p)
-    x0, x1 = d["camera_x_range"]
-    z0, z1 = d["camera_z_range"]
+    x0 = d["seat_x_untilted"]
+    x1 = x0 + p["CAM_H"]
+    z0, z1 = d["camera_back_z"], d["camera_front_z"]
     cam = (
         cq.Workplane("XY", origin=(x0, 0, z0))
         .center((x1 - x0) / 2, 0)
@@ -485,13 +661,14 @@ def build_camera_standin(p: dict):
         (0.0, 5.0),
     ):
         cam = cam.cut(cq.Workplane("XY", origin=(xc, left * off, z1 - 0.5)).circle(rad).extrude(1))
-    cam = cam.cut(cq.Workplane("XY", origin=(xc, left * 40.5, z0 - 0.5)).rect(3.2, 9.0).extrude(1.5))
-    return _rot_z(cam, p["ARM_ANGLE_DEG"])
+    end = left * p["CAM_L"] / 2
+    cam = cam.cut(cq.Workplane("XZ", origin=(xc, end, (z0 + z1) / 2)).rect(9.0, 3.2).extrude(1.5, both=True))
+    return _rot_z(_tilt(cam, p), p["ARM_ANGLE_DEG"])
 
 
 def build_hardware(p: dict, robot: str = "eseries"):
     """Fasteners as cosmetic stand-ins for the render: the tool-pattern bolts +
-    dowel for the chosen robot, the countersunk 1/4-20 and M3 from the wrist side."""
+    dowel for the chosen robot, the countersunk 1/4-20 from the wrist side."""
     import cadquery as cq
 
     d = derived(p)
@@ -525,44 +702,17 @@ def build_hardware(p: dict, robot: str = "eseries"):
         shank = cq.Workplane("XY", origin=(x, y, -pin_in)).circle(shank_r).extrude(pin_in + p["PLATE_T"])
         head = cq.Workplane("XY", origin=(x, y, p["PLATE_T"])).circle(head_r).extrude(head_h)
         parts[f"bolt_{i}"] = shank.union(head)
-    wall_in = d["wall_inner_x"]
-    for name, y, z, dia, csk_d, ang, length in (
-        (
-            "tripod_screw",
-            0.0,
-            d["tripod_z"],
-            6.35,
-            p["TRIPOD_CSK_D"] - 0.6,
-            p["TRIPOD_CSK_ANGLE"],
-            p["WALL_T"] + 5.5,
-        ),
-        (
-            "m3_a",
-            -p["M3_SPACING"] / 2,
-            d["m3_z"],
-            3.0,
-            p["M3_CSK_D"] - 0.6,
-            p["M3_CSK_ANGLE"],
-            p["WALL_T"] + 2.5,
-        ),
-        (
-            "m3_b",
-            p["M3_SPACING"] / 2,
-            d["m3_z"],
-            3.0,
-            p["M3_CSK_D"] - 0.6,
-            p["M3_CSK_ANGLE"],
-            p["WALL_T"] + 2.5,
-        ),
-    ):
-        cone_h = (csk_d - dia) / 2 / math.tan(math.radians(ang / 2))
-        shank = cq.Workplane("YZ", origin=(wall_in, 0, 0)).center(y, z).circle(dia / 2).extrude(length)
-        head = cq.Solid.makeCone(
-            csk_d / 2, dia / 2, cone_h, pnt=cq.Vector(wall_in, y, z), dir=cq.Vector(1, 0, 0)
-        )
-        parts[name] = shank.union(cq.Workplane().add(head))
-    cam_side = ("tripod_screw", "m3_a", "m3_b")
-    return {k: (_rot_z(v, p["ARM_ANGLE_DEG"]) if k in cam_side else v) for k, v in parts.items()}
+    # the 1/4-20 × 3/8" flat head, authored untilted along the seat normal like its hole
+    dia, csk_d, ang = 6.35, p["TRIPOD_CSK_D"] - 0.6, p["TRIPOD_CSK_ANGLE"]
+    z = d["camera_front_z"] - p["TRIPOD_FROM_FRONT"]
+    x_head = d["seat_x_untilted"] - d["wall_t_at_tripod"] + p["TRIPOD_CSK_SINK"] + 0.3
+    cone_h = (csk_d - dia) / 2 / math.tan(math.radians(ang / 2))
+    shank = (
+        cq.Workplane("YZ", origin=(x_head, 0, 0)).center(0, z).circle(dia / 2).extrude(p["TRIPOD_SCREW_L"])
+    )
+    head = cq.Solid.makeCone(csk_d / 2, dia / 2, cone_h, pnt=cq.Vector(x_head, 0, z), dir=cq.Vector(1, 0, 0))
+    parts["tripod_screw"] = _rot_z(_tilt(shank.union(cq.Workplane().add(head)), p), p["ARM_ANGLE_DEG"])
+    return parts
 
 
 # ----------------------------------------------------------------------------
@@ -593,11 +743,15 @@ def export(p: dict) -> dict:
         assy_path = OUT / f"d435_tool_bracket_assembly_{variant}.step"
         assy.save(str(assy_path))
         vol = bracket.val().Volume()  # mm^3
+        clash = camera_clash(pp, bracket)
+        if clash:
+            sys.exit(f"{variant}: {clash} vertices of Intel's D435 body are inside the bracket")
         bb = bracket.val().BoundingBox()
         out["variants"][variant] = {
             "overrides": {k: v for k, v in pp.items() if p.get(k) != v},
             "derived": derived(pp),
             "volume_cm3": vol / 1000.0,
+            "camera_clash_vertices": clash,
             "mass_g_ppa_cf_solid": vol / 1000.0 * 1.25,  # Bambu PPA-CF spec 1.25 g/cm³, 100 % solid
             "bbox_mm": [round(bb.xlen, 2), round(bb.ylen, 2), round(bb.zlen, 2)],
             "stl": str(stl),
@@ -655,11 +809,11 @@ def render(p: dict) -> list[str]:
         scenes[robot] = parts
         angles[robot] = pp["ARM_ANGLE_DEG"]
         derived_by_scene[robot] = derived_by_scene[f"bracket_{robot}"] = derived(pp)
-    for robot in VARIANTS:  # robot hidden: the print itself, the camera and its three screws
+    for robot in VARIANTS:  # robot hidden: the print itself, the camera and its screw
         scenes[f"bracket_{robot}"] = list(scenes[robot][1:3]) + [
             (_mesh(v), (0.82, 0.68, 0.30), 0.3)
             for k, v in build_hardware(variant_params(p, robot), robot).items()
-            if k in ("tripod_screw", "m3_a", "m3_b")
+            if k == "tripod_screw"
         ]
         angles[f"bracket_{robot}"] = angles[robot]
     light = np.array([0.4, -0.6, 0.7])
@@ -700,7 +854,7 @@ def render(p: dict) -> list[str]:
             -90,
             62,
             (40, 0, -5),
-            "Side (X–Z): front plate flush with the tool face, looks +Z",
+            "Side (X–Z): seat drafted 5°, the camera looks in toward the flange axis",
         ),
         (
             "top_xy",
@@ -736,7 +890,7 @@ def render(p: dict) -> list[str]:
             175,
             48,
             (55, 0, -6),
-            "Wrist side, robot hidden: countersunk 1/4-20 + 2× M3 sit flush",
+            "Wrist side, robot hidden: one sunk 1/4-20, the cable clip on the USB end",
         ),
     ]
     files = []
@@ -826,7 +980,10 @@ def main(argv: list[str]) -> int:
             k, v = arg.split("=", 1)
             if k not in p:
                 sys.exit(f"unknown parameter {k}; see PARAMS in bracket.py")
-            p[k] = type(p[k])(json.loads(v)) if not isinstance(p[k], tuple) else tuple(json.loads(v))
+            if isinstance(p[k], str):
+                p[k] = v
+            else:
+                p[k] = type(p[k])(json.loads(v)) if not isinstance(p[k], tuple) else tuple(json.loads(v))
     info = {"params": p, "variants": VARIANTS, "derived": derived(p), "camera_mesh": CAMERA_MESH_SOURCE}
     info["export"] = export(p)
     info["renders"] = render(p)
