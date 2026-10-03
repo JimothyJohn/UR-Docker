@@ -48,6 +48,8 @@ public class PickContribution implements ProgramNodeContribution, PickScreen.Act
     static final String KEY_GRIP_CHECK = "gripCheck";
     static final String KEY_GRIP_LONG = "gripLongSide";
     static final String KEY_CLOSE_LOOK = "closeLook";
+    static final String KEY_PART_TAUGHT = "partTaught"; // 0.9.0: the size came from a tap (or by hand)
+    private static final int TAP_REACH_PX = 60; // a tap this near a part's centre still means that part
     static final String KEY_POPUP = "popupOnFail";
     static final String KEY_PORT = "pickPort";
     static final String KEY_VARIABLE = "foundVariable";
@@ -178,6 +180,7 @@ public class PickContribution implements ProgramNodeContribution, PickScreen.Act
     public void openView() {
         open = true;
         ensureTemplate();
+        view.screen().reopen();
         refresh();
         view.screen().setStatus("connecting to " + cockpit().base + "…", Ui.Kind.INFO);
         startPolling();
@@ -262,8 +265,13 @@ public class PickContribution implements ProgramNodeContribution, PickScreen.Act
         });
     }
 
+    /** The part's size was taught: by a tap (0.9.0), or set by hand — a node saved before 0.9.0 has one. */
+    boolean partTaught() {
+        return model.get(KEY_PART_TAUGHT, false) || model.isSet("partLengthMm");
+    }
+
     private void refresh() {
-        view.screen().show(script(), rows(), selected());
+        view.screen().show(script(), rows(), selected(), partTaught());
         sceneAt = 0; // what the picture finds follows at once
     }
 
@@ -378,7 +386,11 @@ public class PickContribution implements ProgramNodeContribution, PickScreen.Act
     public void setNumber(final String key, double value) {
         PickScript s = script();
         final double v = s.set(key, value);
-        change(() -> model.set(key, v));
+        final PickScript.Num n = PickScript.BY_KEY.get(key);
+        change(() -> {
+            model.set(key, v);
+            if (n != null && "part".equals(n.section)) model.set(KEY_PART_TAUGHT, true); // a size by hand counts
+        });
         refresh();
     }
 
@@ -442,6 +454,52 @@ public class PickContribution implements ProgramNodeContribution, PickScreen.Act
         refresh();
         view.screen().setStatus("every option back at its default (the picture points and the order are kept)",
                 Ui.Kind.INFO);
+    }
+
+    // -- tap to teach (0.9.0, Nick 2026-10-02) ----------------------------------------------------
+
+    /**
+     * The operator tapped picture pixel ({@code u}, {@code v}) on the Part step: ask the camera
+     * computer for everything in view with no size given, take what is under the finger, and make
+     * its length × width × height the part's. The picture then shows every part like it.
+     */
+    @Override
+    public void teachAt(final int u, final int v) {
+        final PickScript s = script();
+        final Cockpit c = cockpit();
+        final int i = pointCount() == 0 ? -1 : selected();
+        view.screen().setStatus("measuring what you tapped…", Ui.Kind.INFO);
+        actions.submit(() -> {
+            try {
+                Map<String, Object> res = c.get("/api/pick/scene?opts=" + URLEncoder.encode(s.teachTokens(i), "UTF-8"),
+                        5000);
+                if (!Boolean.TRUE.equals(res.get("ok"))) {
+                    Object why = res.get("reason") != null ? res.get("reason") : res.get("error");
+                    view.screen().setStatus("could not measure: " + (why == null ? "?" : why), Ui.Kind.WARN);
+                    return;
+                }
+                final Scene.Part hit = Scene.parse(res).at(u, v, TAP_REACH_PX);
+                if (hit == null || hit.lengthMm <= 0 || hit.widthMm <= 0) {
+                    view.screen().setStatus("nothing to measure there: tap the middle of a part's top", Ui.Kind.WARN);
+                    return;
+                }
+                SwingUtilities.invokeLater(() -> {
+                    change(() -> {
+                        model.set("partLengthMm", s.set("partLengthMm", hit.lengthMm));
+                        model.set("partWidthMm", s.set("partWidthMm", hit.widthMm));
+                        if (hit.heightMm > 0) model.set("partHeightMm", s.set("partHeightMm", hit.heightMm));
+                        model.set(KEY_PART_TAUGHT, true);
+                    });
+                    refresh();
+                    view.screen().setStatus("taught: " + hit.size() + (hit.heightMm > 0 ? "" : " (height not seen:"
+                            + " kept)") + " — the parts like it turn green", Ui.Kind.OK);
+                });
+            } catch (IOException e) {
+                view.screen().setStatus(Cockpit.explain(e, c.base), Ui.Kind.ERR);
+            } catch (RuntimeException e) {
+                view.screen().setStatus("teach: " + e.getMessage(), Ui.Kind.ERR);
+            }
+        });
     }
 
     // -- check the approach with PolyScope's move screen --------------------------------------------

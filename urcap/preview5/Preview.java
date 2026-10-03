@@ -50,6 +50,8 @@ public final class Preview {
     int selectedArea;
     double tipMm = 163;
     volatile boolean depthView;
+    volatile boolean partTaught; // the Part step: a size taught by a tap (0.9.0)
+    volatile Scene lastScene = Scene.empty();
     volatile boolean frozen; // --screens: the feed stopped, for the no-camera picture
     PickScreen pick;
     LocationsScreen areas;
@@ -99,8 +101,22 @@ public final class Preview {
             // the README's pictures (urcap/perceptronic-ps5/screens/): each screen by itself, 1000 x 560
             Thread.sleep(4000);
             final File dir = new File(screens);
+            // the three steps (0.9.0): Look, then Part after a real tap on a part, then Grip
             shots(() -> {
-                shot(p.pick, new File(dir, "pick-main.png"));
+                p.pick.showStep(PickScreen.LOOK);
+                shot(p.pick, new File(dir, "pick-look.png"));
+            });
+            Scene seen = p.lastScene;
+            Scene.Part target = seen.parts.isEmpty() ? null : seen.parts.get(0);
+            if (target != null) p.teach(target.u, target.v);
+            Thread.sleep(2500); // the next scene: what the taught size finds
+            shots(() -> {
+                p.pick.showStep(PickScreen.PART);
+                shot(p.pick, new File(dir, "pick-part.png"));
+                p.pick.showStep(PickScreen.GRIP);
+                shot(p.pick, new File(dir, "pick-grip.png"));
+            });
+            shots(() -> {
                 p.pick.showOptions(0);
                 shot(p.pick, new File(dir, "pick-options.png"));
                 p.pick.showOptions(1);
@@ -241,6 +257,7 @@ public final class Preview {
                     Map<String, Object> res = cockpit.get("/api/pick/scene?opts="
                             + URLEncoder.encode(s.tokens(s.points.isEmpty() ? -1 : selected), "UTF-8"), 5000);
                     Scene scene = Scene.parse(res);
+                    lastScene = scene;
                     pick.setScene(scene);
                     if (!Boolean.TRUE.equals(res.get("ok"))) {
                         pick.setStatus("camera computer: " + res.get("error"), Ui.Kind.WARN);
@@ -289,7 +306,7 @@ public final class Preview {
                     : new PickScreen.PointRow("live table", false));
         }
         selected = Math.max(0, Math.min(selected, pointArea.size() - 1));
-        pick.show(s, rows, selected);
+        pick.show(s, rows, selected, partTaught);
         List<LocationsScreen.Area> list = new ArrayList<LocationsScreen.Area>();
         for (int i = 0; i < areaNames.size(); i++) {
             boolean done = areaTouches.get(i) != null;
@@ -306,6 +323,32 @@ public final class Preview {
             return Double.parseDouble(v.trim());
         } catch (NumberFormatException e) {
             return null;
+        }
+    }
+
+    /** PickContribution.teachAt's work, against the preview's camera computer; true when taught. */
+    boolean teach(int u, int v) {
+        try {
+            Map<String, Object> res = cockpit.get("/api/pick/scene?opts="
+                    + URLEncoder.encode(s.teachTokens(selected), "UTF-8"), 5000);
+            Scene.Part hit = Scene.parse(res).at(u, v, 60);
+            if (hit == null || hit.lengthMm <= 0 || hit.widthMm <= 0) {
+                pick.setStatus("nothing to measure there: tap the middle of a part's top", Ui.Kind.WARN);
+                return false;
+            }
+            synchronized (this) {
+                s.set("partLengthMm", hit.lengthMm);
+                s.set("partWidthMm", hit.widthMm);
+                if (hit.heightMm > 0) s.set("partHeightMm", hit.heightMm);
+                partTaught = true;
+            }
+            refresh();
+            seq = 0;
+            pick.setStatus("taught: " + hit.size() + " — the parts like it turn green", Ui.Kind.OK);
+            return true;
+        } catch (Exception e) {
+            pick.setStatus("teach: " + e.getMessage(), Ui.Kind.ERR);
+            return false;
         }
     }
 
@@ -378,7 +421,17 @@ public final class Preview {
         @Override
         public void setNumber(String key, double value) {
             s.set(key, value);
+            PickScript.Num n = PickScript.BY_KEY.get(key);
+            if (n != null && "part".equals(n.section)) partTaught = true;
             refresh();
+        }
+
+        @Override
+        public void teachAt(final int u, final int v) {
+            pick.setStatus("measuring what you tapped…", Ui.Kind.INFO);
+            Thread t = new Thread(() -> teach(u, v), "preview-teach");
+            t.setDaemon(true);
+            t.start();
         }
 
         @Override

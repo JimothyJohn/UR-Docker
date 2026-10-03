@@ -32,7 +32,7 @@ PUBLIC = SITE / "public"
 DIST = REPO / "urcap" / "dist"
 SCREENS = REPO / "urcap" / "perceptronic-ps5" / "screens"
 # the pendant screens the page shows (all 1000 x 560)
-SCREEN_NAMES = ("pick-main.png", "pick-options.png", "installation-areas.png")
+SCREEN_NAMES = ("pick-part.png", "pick-options.png", "installation-areas.png")
 SHEET_DIR = SITE / "datasheet"
 SHEET_PDF = "perceptronics-datasheet.pdf"
 SHEET_STAMP = SHEET_DIR / "datasheet.html.sha256"

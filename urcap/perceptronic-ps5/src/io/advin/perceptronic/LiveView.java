@@ -28,12 +28,23 @@ final class LiveView extends JComponent {
         void depthView(boolean on);
     }
 
+    /** Told when the operator taps the picture itself, in the scene's (colour picture's) pixels. */
+    interface TapListener {
+        void tapped(int u, int v);
+    }
+
     private volatile BufferedImage frame;
     private volatile Scene scene = Scene.empty();
     private volatile boolean live;
     private volatile boolean depth;
     private volatile String empty = "Check the camera computer and its USB 3 cable — the picture returns by itself.";
     private ViewListener listener;
+    private TapListener tapListener;
+    private volatile String hint; // a pill at the picture's foot: what a tap does now (null: none)
+    // where the last frame was drawn: picture pixel = (screen - origin) / scale
+    private volatile double drawnScale;
+    private volatile int drawnX;
+    private volatile int drawnY;
 
     LiveView() {
         setOpaque(true);
@@ -41,7 +52,15 @@ final class LiveView extends JComponent {
         addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseReleased(java.awt.event.MouseEvent e) {
-                if (!live || !Ui.ViewToggle.bounds(getWidth(), 0).contains(e.getPoint())) return;
+                if (!live) return;
+                if (!Ui.ViewToggle.bounds(getWidth(), 0).contains(e.getPoint())) {
+                    double k = drawnScale;
+                    if (tapListener != null && k > 0) {
+                        tapListener.tapped((int) Math.round((e.getX() - drawnX) / k),
+                                (int) Math.round((e.getY() - drawnY) / k));
+                    }
+                    return;
+                }
                 depth = e.getX() >= Ui.ViewToggle.bounds(getWidth(), 0).getCenterX();
                 repaint();
                 if (listener != null) listener.depthView(depth);
@@ -51,6 +70,16 @@ final class LiveView extends JComponent {
 
     void setViewListener(ViewListener l) {
         listener = l;
+    }
+
+    void setTapListener(TapListener l) {
+        tapListener = l;
+    }
+
+    /** One line at the picture's foot saying what a tap does now; null hides it. */
+    void setHint(String text) {
+        hint = text;
+        repaint();
     }
 
     boolean depthView() {
@@ -104,9 +133,23 @@ final class LiveView extends JComponent {
         Scene s = scene;
         // the scene's pixels are the colour picture's; the image drawn may be scaled (the depth is half-size)
         double sk = s.width > 0 ? (double) iw / s.width : k;
+        drawnScale = sk;
+        drawnX = ox;
+        drawnY = oy;
         for (Scene.Part p : s.nearMisses()) drawNearMiss(g, p, ox, oy, sk);
         for (Scene.Part p : s.parts) drawPart(g, p, ox, oy, sk);
         Ui.ViewToggle.paint(g, w, 0, depth);
+        String tip = hint;
+        if (tip != null && !tip.isEmpty()) {
+            g.setFont(Ui.font(15f, true));
+            FontMetrics fm = g.getFontMetrics();
+            int tw = fm.stringWidth(tip) + 36, th = 40;
+            int x = (w - tw) / 2, y = h - th - 14;
+            g.setColor(new Color(28, 100, 216, 230));
+            g.fillRoundRect(x, y, tw, th, th, th);
+            g.setColor(Color.WHITE);
+            g.drawString(tip, x + 18, y + (th - fm.getHeight()) / 2 + fm.getAscent());
+        }
         g.dispose();
     }
 

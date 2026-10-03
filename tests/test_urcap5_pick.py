@@ -17,7 +17,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from perceptronics.partspec import PartSpec
-from perceptronics.picknode import STATUS, parse_options, parse_request
+from perceptronics.picknode import STATUS, parse_options, parse_request, scene_report
+from perceptronics.synthscene import Box
 from perceptronics.volume import Reach, Surface
 from tests.test_urcap5 import java_client  # noqa: F401 — the fixture
 from urctl.pose import pose_trans
@@ -62,7 +63,7 @@ def test_the_script_is_one_move_sequence_from_the_survey_to_the_grip(java_client
     assert out["problem"] is None
     text = out["script"]
     assert text.isascii() and balanced(text)
-    assert text.startswith("# 3D Pick 0.8.0 ")
+    assert text.startswith("# 3D Pick 0.9.0 ")
     order = [
         "set_tcp(p[0, 0, 0, 0, 0, 0])",
         'socket_open("192.168.3.10", 7622, "rs_pick")',
@@ -489,7 +490,7 @@ PANELS = [(1000, 560), (1280, 720)]  # the README's framing and the pendant's wh
 
 @pytest.mark.parametrize("size", PANELS)
 @pytest.mark.parametrize("points", [0, 1, 12])
-@pytest.mark.parametrize("view", ["main", "part", "approach"])
+@pytest.mark.parametrize("view", ["main", "look", "teach", "grip", "part", "approach"])
 @pytest.mark.parametrize("shape", ["box", "cyl"])
 def test_everything_on_the_nodes_screen_fits_without_scrolling(java_client, size, points, view, shape):  # noqa: F811
     """Nick, 2026-09-30: "Do NOT use scrolling". No scroll pane exists, and no control is laid
@@ -522,8 +523,24 @@ def test_the_options_are_two_tabs_part_and_approach_and_nothing_else(java_client
         assert gone not in part | approach
     cyl = set(java_client("screen", "1000", "560", "cyl", "1", "part")["texts"])
     assert "Diameter" in cyl and "Length" not in cyl
+    # the order is one control on the Approach tab, not eight tiles on the main screen (0.9.0)
+    assert "Order" in approach
     main = set(java_client("screen", "1000", "560", "box", "3", "main")["texts"])
-    assert {"3D Pick", "Picture points", "Pick order", "Options", "Check approach"} <= main
+    assert {"3D Pick", "Options"} <= main and "Pick order" not in main and "Picture points" not in main
+
+
+@pytest.mark.parametrize(
+    ("view", "texts"),
+    [
+        ("look", {"Look", "Put the arm where the camera sees the parts", "Views"}),
+        ("teach", {"Part", "Tap one part in the picture"}),
+        ("grip", {"Grip", "Grip depth", "Check approach", "Done"}),
+    ],
+)
+def test_the_node_is_three_steps_look_part_grip(java_client, view, texts):  # noqa: F811
+    """Nick, 2026-09-28 / 10-02: at most three simple stages, tap to teach, fewer screens."""
+    got = set(java_client("screen", "1000", "560", "box", "1", view)["texts"])
+    assert texts <= got, texts - got
 
 
 def test_the_picture_draws_pickable_parts_green_with_a_number_and_the_rest_yellow_with_why(java_client):  # noqa: F811
@@ -562,3 +579,35 @@ def test_the_toggle_in_the_pictures_corner_switches_picture_and_depth(java_clien
     assert got["heard"] is True and got["depth"] is depth
     x, y, w, h = java_client("toggle", "640")
     assert x + w <= 640 - 8 and y >= 8 and h >= 36 and w >= 150  # top right, inside the frame, a finger wide
+
+
+# -- tap to teach (0.9.0, Nick 2026-10-02) -----------------------------------------------------
+
+
+def test_teach_tokens_ask_for_everything_in_view_with_no_size(java_client):  # noqa: F811
+    out = pick(java_client, values={"partLengthMm": 50, "partWidthMm": 30, "partHeightMm": 30}, shape="cyl")
+    for normal, teach in zip(out["tokens"], out["teach_tokens"], strict=True):
+        o, t = parse_options(normal), parse_options(teach)
+        assert o.part is not None and t.part is None  # no size: nothing filtered by it
+        assert t.grip_check is False and t.order == o.order and t.node == o.node and t.loc == o.loc
+        assert "shape=" not in teach and "tol=" not in teach and "room=" not in teach
+
+
+def test_a_tap_measures_the_part_under_the_finger_whatever_size_the_node_holds(java_client):  # noqa: F811
+    """The node holds 50 x 30 x 30; the operator taps a 90 x 60 x 40 part — out of that size and
+    past the no-size foam-block gate. The teach scan still measures it, and Scene.at finds it."""
+    from tests.test_picknode2 import FLANGE, Frames, planner
+
+    big, small = Box(0.30, -0.04, 0.090, 0.060, 0.040), Box(0.42, 0.05, 0.050, 0.030, 0.030)
+    teach = pick(java_client)["teach_tokens"][0]
+    report = scene_report(planner(Frames([big, small])), FLANGE, parse_options(teach))
+    assert report["ok"]
+    every = report["parts"] + report["rejected"]
+    tapped = min(every, key=lambda d: abs(d["size_mm"][0] - 90))
+    u, v = tapped["pixel"]
+    got = java_client("at", json.dumps(report), str(u + 3), str(v - 2), "60")
+    assert got is not None
+    length, width, height = got
+    assert abs(length - 90) <= 5 and abs(width - 60) <= 5 and abs(height - 40) <= 3
+    # a tap on the empty table, far from both, is nothing
+    assert java_client("at", json.dumps(report), "5", "5", "60") is None

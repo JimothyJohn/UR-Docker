@@ -8,7 +8,7 @@ realsense-pilot …` (RealSense Pilot).*
 Copyright © 2026 Nick Armenta.
 
 > **e-Series robot on PolyScope 5?** Use the Installation-node build instead:
-> [`perceptronic-ps5/`](perceptronic-ps5/README.md) (`dist/perceptronic-ps5-0.8.0.urcap`).
+> [`perceptronic-ps5/`](perceptronic-ps5/README.md) (`dist/perceptronic-ps5-0.9.0.urcap`).
 
 A URCap for **PolyScope X** (PolyScope 10) robots. It adds a **Perceptronic**
 node under **Application** that shows the live colour feed from an Intel

@@ -8,7 +8,7 @@ pendant puts the gripper on it. This page gets it onto a Universal Robots e-Seri
 
 **1. Download these two files** (both, from the same place, don't rename them):
 
-- [`perceptronic-ps5-0.8.0.urcap`](https://github.com/JimothyJohn/perceptronics/raw/main/urcap/dist/perceptronic-ps5-0.8.0.urcap)
+- [`perceptronic-ps5-0.9.0.urcap`](https://github.com/JimothyJohn/perceptronics/raw/main/urcap/dist/perceptronic-ps5-0.9.0.urcap)
 - [`urmagic_perceptronic.sh`](https://github.com/JimothyJohn/perceptronics/raw/main/urcap/dist/urmagic_perceptronic.sh)
 
 **2. Copy them onto a USB stick**, at the top, not in a folder. The stick must be
@@ -59,7 +59,7 @@ ssh-copy-id root@$ROBOT                  # once: key login from now on
 
 ```bash
 ssh root@$ROBOT 'mkdir -p /tmp/perceptronic'
-scp urcap/dist/perceptronic-ps5-0.8.0.urcap urcap/dist/urmagic_perceptronic.sh root@$ROBOT:/tmp/perceptronic/
+scp urcap/dist/perceptronic-ps5-0.9.0.urcap urcap/dist/urmagic_perceptronic.sh root@$ROBOT:/tmp/perceptronic/
 ssh root@$ROBOT 'bash /tmp/perceptronic/urmagic_perceptronic.sh'
 ```
 

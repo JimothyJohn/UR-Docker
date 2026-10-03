@@ -11,7 +11,7 @@ across its short side.
 | Bill of materials | [`hardware/BOM.md`](../hardware/BOM.md) | Every part with links, the price seen 2026-09-28/29 and its history (kit ≈ $785 per cell with a Raspberry Pi 4; ≈ $1,420 with a RevPi Connect 5, ≈ $1,112 with a CompuLab IOT-GATE-RPI5 for a 24 V cabinet PC) |
 | Camera bracket | [`hardware/d435-tool-bracket/`](../hardware/d435-tool-bracket/) | Parametric CadQuery source; print-ready STL and STEP for e-Series (ISO 9409-1-50-4-M6) and UR20 flanges in `out/`; the spec, fasteners and the nominal camera pose in its README |
 | Camera computer | [`deploy/pi/`](../deploy/pi/README.md) | A Raspberry-Pi-class arm64 box on minimal Debian: one command installs librealsense, the cockpit as a hardened systemd service (:7621 HTTP, :7622 pick server) and a firewall |
-| URCap | [`urcap/perceptronic-ps5/`](../urcap/perceptronic-ps5/README.md) | `urcap/dist/perceptronic-ps5-0.8.0.urcap`: the **3D Pick** program node and the **Perceptronic** installation node |
+| URCap | [`urcap/perceptronic-ps5/`](../urcap/perceptronic-ps5/README.md) | `urcap/dist/perceptronic-ps5-0.9.0.urcap`: the **3D Pick** program node and the **Perceptronic** installation node |
 | URCap for PolyScope X | [`urcap/README.md`](../urcap/README.md) §5 | `urcap/dist/perceptronic-0.6.0.urcapx`: the same **3D Pick** node for a PolyScope X robot (the two write the same URScript); the pick areas on the **Perceptronic** application node; one cockpit serves both robots |
 | Self-deploy | [`.claude/skills/deploy-pick-pc/`](../.claude/skills/deploy-pick-pc/SKILL.md) | Claude Code deploys, checks, updates or rolls back the camera computer: "deploy the pick PC at 192.168.3.10" |
 | Tested PolyScope | [`.github/workflows/urcap5-matrix.yml`](../.github/workflows/urcap5-matrix.yml) | Every change: the URCap loads and the node's own URScript picks on PolyScope 5.24, 5.25 and 5.26 (URSim) |
@@ -32,7 +32,7 @@ in a window, fed by a simulated camera computer (or `--cockpit http://<ip>:7621`
 
    It ends with `perceptronics doctor`'s verdict: camera, robot ports, hand-eye, tool length.
 3. **Install the URCap** from a USB stick: Settings → System → URCaps → **+** →
-   `perceptronic-ps5-0.8.0.urcap` → Restart.
+   `perceptronic-ps5-0.9.0.urcap` → Restart.
    Or leave it to the stick: `scripts/urcap5-usb.sh` writes a magic file that installs it by
    itself when **Settings → Security → General → Run magic files** is on
    (`urcap/perceptronic-ps5/README.md`, *Or let the stick install it*).

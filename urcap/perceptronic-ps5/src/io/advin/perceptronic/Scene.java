@@ -59,6 +59,29 @@ final class Scene {
         return out;
     }
 
+    /**
+     * What the operator tapped at picture pixel ({@code u}, {@code v}): the candidate — picked or
+     * not, whatever its size — whose outline holds it, else the one whose centre is nearest within
+     * {@code reach} pixels; null when nothing is there. The Part step's tap to teach (0.9.0).
+     */
+    Part at(int u, int v, int reach) {
+        List<Part> all = new ArrayList<Part>(parts);
+        all.addAll(rejected);
+        Part nearest = null;
+        long best = (long) reach * reach;
+        for (Part p : all) {
+            java.awt.Polygon poly = new java.awt.Polygon();
+            for (int[] c : p.corners) poly.addPoint(c[0], c[1]);
+            if (poly.contains(u, v)) return p;
+            long d = (long) (p.u - u) * (p.u - u) + (long) (p.v - v) * (p.v - v);
+            if (d <= best) {
+                best = d;
+                nearest = p;
+            }
+        }
+        return nearest;
+    }
+
     /** One line for the screen's status: how many parts will be picked, how many nearly. */
     String summary() {
         int near = nearMisses().size();
