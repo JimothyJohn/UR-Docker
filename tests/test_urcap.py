@@ -774,3 +774,20 @@ def test_cors_drops_entries_that_are_not_an_origin(capsys):
     assert app.cors_origins == ["http://localhost:8000", "https://[::1]:8443"]
     err = capsys.readouterr().err
     assert "\r" not in err and err.count("CORS: ignoring") == 3  # logged escaped, never raw
+
+
+def test_every_request_to_the_camera_computer_can_time_out():
+    # Regression (2026-10-02): an empty Cockpit field means 192.168.3.20, and a fetch to an
+    # address nothing answers on waited for TCP to give up — the e2e's feed never went live.
+    # Every fetch carries an AbortController signal, set in the call or in the init it gets
+    # (within the few lines before it), and that controller has a setTimeout that aborts it.
+    for js in sorted(FRONTEND.glob("*.js")):
+        lines = js.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            if "fetch(" not in line or line.lstrip().startswith("//"):
+                continue
+            window = "\n".join(lines[max(0, i - 12) : i + 2])
+            assert "signal" in window, f"{js.name}:{i + 1}: fetch without an abort signal"
+            assert re.search(r"setTimeout\(\(\) => ctl\.abort\(\)", window), (
+                f"{js.name}:{i + 1}: its AbortController is never aborted by a timer"
+            )

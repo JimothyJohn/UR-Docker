@@ -10,6 +10,7 @@
 #   scripts/deploy-pi.sh pi@192.168.3.10 --doctor-only
 #   scripts/deploy-pi.sh pi@192.168.3.10 --rollback            # previous release, restart
 #
+# PYTHON=/path/to/python3 picks the Python that builds the wheel (default: the first with pip).
 # --cell / --robot-host rewrite /etc/perceptronics/cell.env on the PC (the old one is kept
 # beside it); without them an existing cell.env is left alone. --cell-if / --cell-address
 # set the cell port up for a robot nobody configured (install.sh: a fixed address, and a
@@ -92,14 +93,24 @@ case "$mode" in
         ;;
 esac
 
-python3 -m pip --version >/dev/null 2>&1 || die "python3 with pip not found (needed to build the wheel)"
+# The wheel is built with the first Python that has pip: $PYTHON, then python3 on PATH, then
+# the usual installs. A repo .venv made from requirements-dev.txt has no pip and is often
+# first on PATH (it was on the Mac Studio, 2026-10-02), so PATH alone isn't enough.
+py=""
+for cand in ${PYTHON:+"$PYTHON"} python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -m pip --version >/dev/null 2>&1; then
+        py="$cand"
+        break
+    fi
+done
+[ -n "$py" ] || die "no python3 with pip found (needed to build the wheel); set PYTHON=/path/to/python3"
 arch="$(ssh "${ssh_opts[@]}" "$target" uname -m)"
 [ "$arch" = aarch64 ] || log "warning: ${target} is ${arch}, not aarch64 — install.sh builds natively, carrying on"
 
 stage_local="$(mktemp -d)"
 trap 'rm -rf "$stage_local"' EXIT
-log "building the wheel (pip wheel)"
-python3 -m pip wheel "$repo" --no-deps --wheel-dir "$stage_local" -q
+log "building the wheel ($py -m pip wheel)"
+"$py" -m pip wheel "$repo" --no-deps --wheel-dir "$stage_local" -q
 wheel="$(find "$stage_local" -maxdepth 1 -name '*-py3-none-any.whl' | head -n 1)"
 [ -n "$wheel" ] || die "pip wheel produced no pure-Python wheel"
 log "built $(basename "$wheel")"

@@ -416,6 +416,15 @@ server's `near` flag) is the intended picture — nothing is drawn for what is n
 the 3D Pick node's picture carries no watermark; the **UR7e is the UR5e's arm and the UR12e the
 UR10e's** (`armfk.DH` aliases, so `armik` judges them; only the UR30 is still left to the controller).
 
+**Three traps from the 2026-10-02 sessions.** (1) **Every request the URCap pages make to the
+camera computer is bounded** (`AbortController` + `setTimeout`; `test_every_request_to_the_camera_computer_can_time_out`
+reads every `fetch(` in `urcap/perceptronic/perceptronic-frontend/`): an empty Cockpit field means
+192.168.3.20, and an unbounded fetch to an address nothing answers on hung the PolyScope X e2e on every
+version. (2) `scripts/deploy-pi.sh` builds the wheel with the first Python that has pip (`PYTHON=` first):
+the repo `.venv` has none and is often first on PATH. (3) `site/site.sh datasheet` from an SSH shell:
+Chrome can't print without a display — `CHROME=` Playwright's `chrome-headless-shell` (`site/site.sh`
+header has the line).
+
 **Three traps from the 3D Pick sessions.** (1) `urcap/pick5_e2e.py` compiles the test harness in
 `tests/test_urcap5.py` (`HARNESS`): anything the harness starts to use must be in the source list
 `generate()` copies (`PURE_JAVA` + `SCREEN_JAVA`) — a mismatch failed all 23 controller jobs in a
