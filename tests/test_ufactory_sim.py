@@ -12,6 +12,7 @@ agrees with our bytes, units and rotation convention."""
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import socket
@@ -30,6 +31,16 @@ HOST = os.environ.get("UFACTORY_SIM_HOST", "127.0.0.1")
 READY = [0.0, -0.3, -0.6, 0.0, 0.9, 0.0]
 
 
+def _why(r: dict) -> str:
+    """The whole result: pytest's repr cuts it off before the reason (CI, 2026-10-03)."""
+    return json.dumps(r, default=str, indent=1)
+
+
+def ok(r: dict) -> dict:
+    assert r.get("ok"), _why(r)
+    return r
+
+
 def _open(host: str, port: int) -> bool:
     try:
         with socket.create_connection((host, port), timeout=1.0):
@@ -44,8 +55,8 @@ def arm():
         pytest.skip(f"no UFACTORY simulator at {HOST}:502 (scripts/ufactory-sim.sh up)")
     a = UFactoryArm(RobotConfig(host=HOST, platform="ufactory", timeout=5.0))
     up = a.bring_up(timeout=30.0)
-    assert up["ok"], up
-    assert a.move_joints(READY, velocity=1.0, acceleration=3.0, timeout=30.0)["ok"]
+    ok(up)
+    ok(a.move_joints(READY, velocity=1.0, acceleration=3.0, timeout=30.0))
     yield a
     a.move_tcp([0, 0, 0, 0, 0, 0], tcp=[0.0] * 6, relative=True)  # leave the TCP at the flange
     a.close()
@@ -62,20 +73,20 @@ def test_the_simulator_is_an_850(arm):
 def test_rpy_and_axis_angle_reads_agree_under_our_convention(arm):
     """The convention every TCP-offset write relies on, checked against the firmware:
     GET_TCP_POSE (RPY) and GET_TCP_POSE_AA (rotation vector) at a compound wrist."""
-    assert arm.move_joints([0.3, -0.4, -0.5, 0.6, 0.8, -0.7], velocity=1.0, acceleration=3.0)["ok"]
+    ok(arm.move_joints([0.3, -0.4, -0.5, 0.6, 0.8, -0.7], velocity=1.0, acceleration=3.0))
     rpy = arm.client.get_pose_rpy()
     aa = arm.client.get_pose_aa()
     a = rpy_to_matrix(*rpy[3:6])
     b = rotvec_to_matrix(aa[3:6])
     assert all(abs(a[i][j] - b[i][j]) < 1e-3 for i in range(3) for j in range(3)), (rpy, aa)
     assert rpy[:3] == pytest.approx(aa[:3], abs=0.01)
-    assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
+    ok(arm.move_joints(READY, velocity=1.0, acceleration=3.0))
 
 
 def test_joint_move_lands(arm):
     target = [0.2, -0.3, -0.6, 0.0, 0.9, 0.1]
     r = arm.move_joints(target, velocity=1.0, acceleration=3.0)
-    assert r["ok"], r
+    ok(r)
     assert r["landed"] == pytest.approx(target, abs=0.01)
 
 
@@ -83,9 +94,9 @@ def test_linear_moves_in_metres_land_in_metres(arm):
     start = arm.get_state()["tcp"]
     target = [start[0], start[1] + 0.05, start[2] - 0.03, *start[3:]]
     r = arm.move_tcp(target, velocity=0.1, acceleration=1.0)
-    assert r["ok"], r
+    ok(r)
     back = arm.move_tcp([0.0, -0.05, 0.03, 0.0, 0.0, 0.0], relative=True, velocity=0.1, acceleration=1.0)
-    assert back["ok"] and back["landed"][:3] == pytest.approx(start[:3], abs=0.002)
+    assert back["ok"] and back["landed"][:3] == pytest.approx(start[:3], abs=0.002), _why(back)
 
 
 def test_the_planner_refuses_a_pose_out_of_reach_and_nothing_moves(arm):
@@ -98,7 +109,7 @@ def test_the_planner_refuses_a_pose_out_of_reach_and_nothing_moves(arm):
 def test_a_tcp_offset_moves_the_tcp_and_not_the_flange(arm):
     before = arm.get_flange_pose()
     r = arm.move_tcp([0, 0, 0, 0, 0, 0], relative=True, tcp=[0.0, 0.0, 0.1, 0.0, 0.0, 0.0])
-    assert r["ok"], r
+    ok(r)
     after = arm.get_flange_pose()
     assert after["tcp_offset"][2] == pytest.approx(0.1, abs=1e-4)
     assert after["flange"][:3] == pytest.approx(before["flange"][:3], abs=0.002)
@@ -113,15 +124,15 @@ def test_a_path_runs_as_one_queue(arm):
         {"pose": list(s)},
     ]
     r = arm.move_tcp_path(legs, timeout=60.0)
-    assert r["ok"], r
+    ok(r)
 
 
 def test_stop_flushes_the_queue_and_the_next_move_rearms(arm):
     s = arm.get_state()["tcp"]
     arm.move_tcp([s[0], s[1] + 0.1, *s[2:]], velocity=0.02, wait=False)
-    assert arm.stop()["ok"]
+    ok(arm.stop())
     assert arm.get_state()["queued_moves"] == 0
-    assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
+    ok(arm.move_joints(READY, velocity=1.0, acceleration=3.0))
 
 
 def test_freedrive_toggles_teaching_mode_or_says_it_was_refused(arm):
@@ -134,8 +145,8 @@ def test_freedrive_toggles_teaching_mode_or_says_it_was_refused(arm):
     else:
         assert on["refused"] is True and on["control_mode"] == "POSITION", on
     off = arm.freedrive(False)
-    assert off["ok"] and off["control_mode"] == "POSITION", off
-    assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
+    assert off["ok"] and off["control_mode"] == "POSITION", _why(off)
+    ok(arm.move_joints(READY, velocity=1.0, acceleration=3.0))
 
 
 def test_report_stream_and_control_port_agree_on_the_joints(arm):
@@ -153,23 +164,24 @@ def test_the_three_point_touch_off_finds_the_plane_the_tcp_touched(arm, tmp_path
 
     monkeypatch.setenv("URCTL_CELL_STORE", str(tmp_path / "cell.json"))
     tool = [0.0, 0.0, 0.1, 0.0, 0.0, 0.0]
-    assert workcell.tcp_offset(arm, "set", offset=tool)["ok"]
+    ok(workcell.tcp_offset(arm, "set", offset=tool))
     assert workcell.tcp_offset(arm, "get")["tcp_offset"] == pytest.approx(tool, abs=1e-4)
     s = arm.get_state()["tcp"]
     z0 = s[2] - 0.02
     corners = [(0.0, 0.0), (0.06, 0.0), (0.0, 0.06)]
     for i, (dx, dy) in enumerate(corners, start=1):
-        assert arm.move_tcp([s[0] + dx, s[1] + dy, z0, *s[3:]], velocity=0.1, acceleration=1.0)["ok"]
+        ok(arm.move_tcp([s[0] + dx, s[1] + dy, z0, *s[3:]], velocity=0.1, acceleration=1.0))
         touched = workcell.workplane(arm, "touch", name="table", index=i)
-        assert touched["ok"], touched
+        ok(touched)
     plane = workcell.workplane(arm, "get", name="table")
     assert plane["table_z"] == pytest.approx(z0, abs=0.001)
     assert plane["tilt_deg"] == pytest.approx(0.0, abs=0.1)
     assert plane["tcp_offset"] == pytest.approx(tool, abs=1e-4)
 
-    assert workcell.position(arm, "save", name="last-touch")["ok"]
-    assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
+    ok(workcell.position(arm, "save", name="last-touch"))
+    ok(arm.move_joints(READY, velocity=1.0, acceleration=3.0))
     back = workcell.position(arm, "move_to", name="last-touch", velocity=1.0, acceleration=3.0)
-    assert back["ok"] and arm.get_state()["tcp"][:3] == pytest.approx([s[0], s[1] + 0.06, z0], abs=0.002)
-    assert workcell.tcp_offset(arm, "set", offset=[0.0] * 6)["ok"]
-    assert arm.move_joints(READY, velocity=1.0, acceleration=3.0)["ok"]
+    ok(back)
+    assert arm.get_state()["tcp"][:3] == pytest.approx([s[0], s[1] + 0.06, z0], abs=0.002)
+    ok(workcell.tcp_offset(arm, "set", offset=[0.0] * 6))
+    ok(arm.move_joints(READY, velocity=1.0, acceleration=3.0))
