@@ -92,7 +92,10 @@ cmd_build() {
     log "fetching ${name} into ${out_dir}"
     scp -q "${ssh_opts[@]}" "${target}:pi-image/out/${name}.*" "$out_dir/"
     (cd "$out_dir" && shasum -a 256 -c "$(ls "${name}".img*.sha256)") || die "fetched image fails its sha256"
-    log "done: $(ls "${out_dir}/${name}".img*[!6])"
+    local image="${out_dir}/${name}.img.xz"
+    [ -f "$image" ] || image="${out_dir}/${name}.img"
+    log "done: ${image}"
+    log "next: scripts/pi-image.sh flash ${image#"${repo}"/} diskN   (diskutil list external)"
 }
 
 disk_field() {  # disk_field diskN "Field Name"

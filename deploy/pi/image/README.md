@@ -82,3 +82,4 @@ and what changed because of it.
 
 | # | Date | Build | Result on the board | Lesson / change |
 | --- | --- | --- | --- | --- |
+| 0 | 2026-10-02 | `perceptronics-pickpc-20261003-dev-edbc1e3` on pickpc (Pi 5 4 GB): 27 min (librealsense 15, xz 10), 687 MB xz / 3.3 GB raw | not flashed yet. Loop-mounted: fsck clean, no host keys, machine-id `uninitialized`, cockpit + nftables enabled, librealsense loads in the chroot (API 25804), the build host's firewall and service untouched | first try died at the bind mount (`/var/tmp/perceptronics-build` doesn't exist in a stock image); cleanup left nothing mounted. Rebuilds reuse the librealsense tarball (~15 min saved); xz -6 is now the slow step |
