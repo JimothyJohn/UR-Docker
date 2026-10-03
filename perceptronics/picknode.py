@@ -31,7 +31,7 @@ Requests (one line each, ASCII, ≤ 1 kB; the pose is URScript's ``to_str(pose)`
     then measures again from where it is).
 
 ``part=<L>x<W>[x<H>] [tol=<pct>]`` (FIND and REFINE, optional): the part's rough size in
-mm as it lies — footprint and height above the table — and how far off it may measure
+mm — a box with a height on any of its faces, a cylinder on its end — and how far off it may measure
 (default 25 %). Only candidates that size are considered
 (:class:`perceptronics.partspec.PartSpec`); without it, anything foam-block-sized.
 

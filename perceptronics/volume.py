@@ -54,7 +54,19 @@ Vec3 = tuple[float, float, float]
 MAX_RANGE_M = 2.0  # a reflection reads metres away: not the part
 CELL_M = 0.003  # target sample spacing on the surface
 MIN_STRIDE, MAX_STRIDE = 2, 8
-TOP_BAND_M = 0.006  # a flat top's own depth noise at working range
+TOP_BAND_M = 0.004  # a flat top's own depth noise at working range, heights off the fitted plane
+MAX_TILT_DEG = 8.0  # a fitted table further off level than this is not the table: level it is
+TILT_NOTE_DEG = 1.0  # the table reads this far off level: the hand-eye calibration is out
+PLANE_WINDOWS_M = (0.025, 0.012, 0.006, 0.003)
+FINE_EDGE_PX = 0.75  # the eroded fine face's outermost pixel centres sit this far inside the edge
+MAX_LEVELS = 6  # a blob is peeled at most this many heights deep
+LEDGE_RING_M = 0.012  # the ring round a top that must not stand higher than it ...
+LEDGE_FRAC = 0.2  # ... over this much of it (a ledge, not a part)
+SHOULDER_FRAC = 0.35  # a top ringed this much by heights between it and the table: a dome
+SHOULDER_LOW = 0.35  # "between": over this fraction of the top's height
+LEDGE_SEARCH_CELLS = 10  # grid cells round a face searched for its ring (≥ LEDGE_RING_M at any stride)
+NOISE_K = 3.5  # nothing stands off the surface by less than this many of its spreads
+FOOTPRINT_MARGIN_M = 0.005  # a part owns the cells this close round its top's footprint: its sides
 OCCUPIED_FLOOR_M = 0.005  # never call anything flatter than this a part
 LIVE_NUDGE_M = 0.015  # a taught plane follows the live table by at most this much
 SURFACE_BAND_M = 0.004
@@ -243,6 +255,7 @@ class Part:
     order: int = 0
     near: bool = True
     near_edge: bool = field(default=False, repr=False)
+    rect_uv: tuple = field(default=(0.0, 0.0, 0.0, 0.0, 0.0), repr=False)  # in the surface's plane
 
     # the names pickcycle / picknode already use for a block
     @property
@@ -297,10 +310,11 @@ class Scene:
 
 
 def occupied_min_m(spec: PartSpec | None) -> float:
-    """Anything standing this far off the surface is *something*: half the part's height
-    (never under :data:`OCCUPIED_FLOOR_M`), 8 mm without a height."""
-    if spec is not None and spec.height_m is not None:
-        return max(OCCUPIED_FLOOR_M, 0.5 * spec.height_m - spec.slack(spec.height_m))
+    """Anything standing this far off the surface is *something*: half the part's lowest
+    height on any face (never under :data:`OCCUPIED_FLOOR_M`), 8 mm without a height."""
+    if spec is not None and spec.heights():
+        low = spec.heights()[0]
+        return max(OCCUPIED_FLOOR_M, 0.5 * low - spec.slack(low))
     return 0.008
 
 
@@ -374,16 +388,20 @@ def find_parts(
     if surf is None:
         return Scene([], [], None, stride, notes + ["no work surface found in the picture"])
 
-    occ_min = occupied_min_m(spec)
-    hmax = 0.5 if spec is None or spec.height_m is None else 2.5 * spec.height_m + 0.02
-    hs: list[float | None] = [None] * (gw * gh)
+    hmax = 0.5 if spec is None or not spec.heights() else 2.5 * spec.heights()[-1] + 0.02
+    hs: list[float | None] = [None if p is None else surf.height(p) for p in pts]
+    # the surface's own roughness (a carpet, the D435's swells far off): nothing is told from it
+    # that stands less than NOISE_K of its spread off it, whatever the part's size asks for
+    floor = NOISE_K * _spread(hs)
+    occ_min = max(occupied_min_m(spec), floor)
+    if spec is not None and spec.heights() and floor > occupied_min_m(spec):
+        notes.append(
+            f"the surface reads rough (±{floor / NOISE_K * 1000:.1f} mm): nothing under "
+            f"{floor * 1000:.0f} mm can be told from it — move the camera closer"
+        )
     occ = bytearray(gw * gh)
-    for k, p in enumerate(pts):
-        if p is None:
-            continue
-        hk = surf.height(p)
-        hs[k] = hk
-        if occ_min < hk < hmax:
+    for k, hk in enumerate(hs):
+        if hk is not None and occ_min < hk < hmax:
             occ[k] = 1
     _fill_holes(occ, pts, gw, gh)
 
@@ -396,15 +414,13 @@ def find_parts(
         if not occ[start] or seen[start]:
             continue
         blob = _flood(occ, seen, start, gw, gh)
-        part = _measure(
-            blob, pts, hs, zc, gw, gh, stride, surf, T_cb, K, fine=(w, h, depth, depth_scale_m, T)
-        )
-        if part is None:
-            continue
-        part.why = _why_not(part, spec, surf, reach, level_ok)
-        part.near = _near(part, spec)
-        (parts if part.why is None else rejected).append(part)
-        blobs[id(part)] = blob
+        for part, own in _peel(
+            blob, pts, hs, zc, gw, gh, stride, surf, T_cb, K, (w, h, depth, depth_scale_m, T), occ_min, spec
+        ):
+            part.why = _why_not(part, spec, surf, reach, level_ok)
+            part.near = _near(part, spec)
+            (parts if part.why is None else rejected).append(part)
+            blobs[id(part)] = own
     if order:
         order_parts(parts, T, surf, order)
     if fingers is not None and parts:
@@ -428,7 +444,13 @@ def _surface(
             dh = math.copysign(LIVE_NUDGE_M, dh)
         return taught.shifted(dh)
     if level_ok:
-        return _level_surface(valid, spec)
+        surf = _level_surface(valid, spec)
+        if surf is not None and surf.tilt_deg() > TILT_NOTE_DEG:
+            notes.append(
+                f"the table reads {surf.tilt_deg():.1f}° off level: the hand-eye calibration is out "
+                "(parts are still measured off the table as seen; re-run perceptronics calibrate)"
+            )
+        return surf
     return _ransac_surface(valid)
 
 
@@ -444,19 +466,67 @@ def _level_surface(valid: list[Vec3], spec: PartSpec | None) -> Surface | None:
     # smooth over three bins so a table's noise that straddles a boundary still wins
     score = {b: bins.get(b - 1, 0) + bins[b] + bins.get(b + 1, 0) for b in bins}
     best = max(score, key=lambda b: (score[b], -b))
-    if spec is not None and spec.height_m is not None:
+    if spec is not None:
         # parts' tops can outnumber the table in a crowded view: prefer the lower of two
-        # strong bands one part-height apart
-        low = best - round(spec.height_m / 0.002)
-        cand = [b for b in score if abs(b - low) <= 2]
-        if cand:
-            lb = max(cand, key=lambda b: score[b])
-            if score[lb] >= 0.5 * score[best]:
-                best = lb
+        # strong bands one part-height (on any face) apart
+        for hgt in spec.heights():
+            low = best - round(hgt / 0.002)
+            cand = [b for b in score if abs(b - low) <= 2]
+            if cand:
+                lb = max(cand, key=lambda b: score[b])
+                if score[lb] >= 0.5 * score[best]:
+                    best = lb
+                    break
     zs = sorted(p[2] for p in valid if abs(p[2] - (best + 0.5) * 0.002) <= SURFACE_BAND_M)
     if len(zs) < 30:
         return None
-    return Surface.level(zs[len(zs) // 2])
+    z0 = zs[len(zs) // 2]
+    # The table is level, but the hand-eye that puts the picture in the base frame never quite
+    # is: 1.5° of error tilts a 0.4 m view by 10 mm, enough to lift half the table over a low
+    # part's occupied height (the bench: scripts/volume_bench.py). So the band only says where
+    # the table is; the surface is the plane through it, allowed MAX_TILT_DEG off level.
+    plane = _fit_plane_near(valid, z0)
+    if plane is None:
+        return Surface.level(z0)
+    a, b, c, mx, my = plane
+    if math.degrees(math.atan(math.hypot(a, b))) > MAX_TILT_DEG:
+        return Surface.level(z0)
+    n = _unit((-a, -b, 1.0))
+    x = _unit((1.0, 0.0, a))
+    return Surface((mx, my, a * mx + b * my + c), x, _cross(n, x), n)
+
+
+def _fit_plane_near(valid: list[Vec3], z0: float) -> tuple[float, float, float, float, float] | None:
+    """``z = a x + b y + c`` through the points near height ``z0``, by least squares on a
+    window that narrows around the last fit (:data:`PLANE_WINDOWS_M`): the first pass sees a
+    tilted table's whole band, the later ones drop the parts standing on it. Also the
+    inliers' centroid ``(mx, my)``. None when the points don't pin a plane down."""
+    step = max(1, len(valid) // 6000)
+    pts = valid[::step]
+    fit = (0.0, 0.0, z0)
+    mx = my = 0.0
+    for win in PLANE_WINDOWS_M:
+        a, b, c = fit
+        sel = [p for p in pts if abs(p[2] - (a * p[0] + b * p[1] + c)) < win]
+        if len(sel) < 30:
+            return None
+        n = len(sel)
+        mx, my, mz = sum(p[0] for p in sel) / n, sum(p[1] for p in sel) / n, sum(p[2] for p in sel) / n
+        sxx = sxy = syy = sxz = syz = 0.0
+        for p in sel:
+            dx, dy, dz = p[0] - mx, p[1] - my, p[2] - mz
+            sxx += dx * dx
+            sxy += dx * dy
+            syy += dy * dy
+            sxz += dx * dz
+            syz += dy * dz
+        det = sxx * syy - sxy * sxy
+        if det <= 1e-12 * max(1e-12, sxx * syy):
+            return None
+        a = (sxz * syy - syz * sxy) / det
+        b = (syz * sxx - sxz * sxy) / det
+        fit = (a, b, mz - a * mx - b * my)
+    return (*fit, mx, my)
 
 
 def _ransac_surface(valid: list[Vec3]) -> Surface | None:
@@ -529,8 +599,159 @@ def _flood(occ: bytearray, seen: bytearray, start: int, gw: int, gh: int) -> lis
     return out
 
 
-def _measure(
+def _peel(
     blob: list[int],
+    pts: list,
+    hs: list,
+    zc: list[float],
+    gw: int,
+    gh: int,
+    stride: int,
+    surf: Surface,
+    T_cb: Transform,
+    K: dict,
+    fine: tuple | None,
+    occ_min: float,
+    spec: PartSpec | None = None,
+) -> list[tuple[Part, list[int]]]:
+    """Every part in one blob of occupied cells, level by level from the top: the cells within
+    :data:`TOP_BAND_M` of the highest are this level's top faces — each connected piece a part
+    of its own (two tall parts whose sides meet are two tops at one height, not one long
+    part) — then those tops and everything standing inside their footprints (their sides,
+    the flying pixels down them) are taken away, and whatever is left — a lower part beside a
+    taller one — is looked at again. Each part comes with the cells it owns."""
+    left = [k for k in blob if hs[k] is not None]
+    uvs = {k: surf.local(pts[k]) for k in left}
+    out: list[tuple[Part, list[int]]] = []
+    for _ in range(MAX_LEVELS):
+        if len(left) < MIN_TOP_CELLS:
+            break
+        heights = sorted(hs[k] for k in left)
+        top = heights[int(0.97 * (len(heights) - 1))]
+        if top <= occ_min:
+            break
+        band = {k for k in left if hs[k] >= top - TOP_BAND_M}
+        # a lone cell of the band (a flying pixel on the side) would stretch the rectangle
+        band = {k for k in band if _neighbours(k, band, gw) >= 2}
+        level: list[tuple[Part, list[int]]] = []
+        for comp in _components(band, gw):
+            if len(comp) < MIN_TOP_CELLS:
+                continue
+            part = _measure(comp, pts, hs, zc, gw, gh, stride, surf, T_cb, K, fine)
+            beside = [q for q, _ in out if _is_the_part(q, spec)]  # a part may stand next to a part
+            if part is not None and not _not_a_top(part, comp, pts, hs, gw, gh, surf, beside, occ_min):
+                level.append((part, []))
+        keep = []
+        for k in left:
+            uv = uvs[k]
+            owner = next((own for part, own in level if _in_footprint(part, uv)), None)
+            if owner is not None:
+                owner.append(k)
+            elif hs[k] < top - TOP_BAND_M:
+                keep.append(k)
+        out.extend(level)
+        if len(keep) == len(left):
+            break
+        left = keep
+    return out
+
+
+def _in_footprint(part: Part, uv: tuple[float, float], margin: float = FOOTPRINT_MARGIN_M) -> bool:
+    cu, cv, ang, length, width = part.rect_uv
+    du, dv = uv[0] - cu, uv[1] - cv
+    c, s = math.cos(ang), math.sin(ang)
+    return abs(du * c + dv * s) <= length / 2 + margin and abs(-du * s + dv * c) <= width / 2 + margin
+
+
+def _is_the_part(part: Part, spec: PartSpec | None) -> bool:
+    if spec is None:
+        return not (part.length_m > 0.07 or part.width_m > 0.06 or part.width_m < 0.010)
+    return spec.why_not(part.length_m, part.width_m, part.height_m) is None
+
+
+def _not_a_top(
+    part: Part,
+    face: set[int],
+    pts: list,
+    hs: list,
+    gw: int,
+    gh: int,
+    surf: Surface,
+    found: list[Part],
+    floor: float,
+) -> bool:
+    """Is this flat patch something other than a part's top? A part's top drops straight to
+    the table all round (its sides are inside its footprint; the flying pixels down them
+    within :data:`FOOTPRINT_MARGIN_M`). In the ring beyond that, out to :data:`LEDGE_RING_M`:
+
+    - higher ground (over :data:`LEDGE_FRAC` of it) makes it a **ledge** — a slice of
+      something taller — except where it is a part already found (``found``; a lump's summit
+      is higher ground, a part beside a part is not);
+    - heights between the table and the top (over :data:`SHOULDER_FRAC`) make it a
+      **dome's** plateau, a lump's top carved to the part's size by the top band.
+
+    The real carpet frame, 2026-10-03: a 25-40 mm lump that the level-by-level peel cut into
+    part-sized slices and plateaus."""
+    js = [k // gw for k in face]
+    is_ = [k % gw for k in face]
+    r = LEDGE_SEARCH_CELLS
+    ring = higher = shoulder = 0
+    top = part.height_m
+    low = max(SHOULDER_LOW * top, floor)
+    for j in range(max(0, min(js) - r), min(gh, max(js) + r + 1)):
+        for i in range(max(0, min(is_) - r), min(gw, max(is_) + r + 1)):
+            k = j * gw + i
+            if pts[k] is None:
+                continue
+            uv = surf.local(pts[k])
+            if not _in_footprint(part, uv, LEDGE_RING_M) or _in_footprint(part, uv):
+                continue
+            if any(_in_footprint(q, uv) for q in found):
+                continue
+            ring += 1
+            if hs[k] > top + TOP_BAND_M:
+                higher += 1
+            elif low < hs[k] < top - TOP_BAND_M:
+                shoulder += 1
+    return ring >= 8 and (higher >= LEDGE_FRAC * ring or shoulder >= SHOULDER_FRAC * ring)
+
+
+def _spread(hs: list) -> float:
+    """The surface's own spread: 1.4826 × the median absolute height of the points near it
+    (within 20 mm — the table, and little that stands on it)."""
+    near = [abs(h) for h in hs[:: max(1, len(hs) // 8000)] if h is not None and abs(h) < 0.02]
+    if len(near) < 50:
+        return 0.0
+    near.sort()
+    return 1.4826 * near[len(near) // 2]
+
+
+def _components(cells: set[int], gw: int) -> list[set[int]]:
+    """8-connected pieces of ``cells`` (a set of grid indices, ``gw`` wide)."""
+    out, seen = [], set()
+    for start in cells:
+        if start in seen:
+            continue
+        comp, stack = set(), [start]
+        seen.add(start)
+        while stack:
+            k = stack.pop()
+            comp.add(k)
+            j, i = divmod(k, gw)
+            for dj in (-1, 0, 1):
+                for di in (-1, 0, 1):
+                    if not (di or dj) or not 0 <= i + di < gw:
+                        continue
+                    kk = (j + dj) * gw + i + di
+                    if kk in cells and kk not in seen:
+                        seen.add(kk)
+                        stack.append(kk)
+        out.append(comp)
+    return out
+
+
+def _measure(
+    face: set[int],
     pts: list,
     hs: list,
     zc: list[float],
@@ -542,19 +763,11 @@ def _measure(
     K: dict,
     fine: tuple | None = None,
 ) -> Part | None:
-    heights = sorted(hs[k] for k in blob if hs[k] is not None)
-    if len(heights) < MIN_TOP_CELLS:
-        return None
-    top = heights[int(0.9 * (len(heights) - 1))]
-    face = {k for k in blob if hs[k] is not None and hs[k] >= top - TOP_BAND_M}
-    # a lone cell of the band (a flying pixel on the side) would stretch the rectangle
-    face = {k for k in face if _neighbours(k, face, gw) >= 2}
-    if len(face) < MIN_TOP_CELLS:
-        return None
+    """One top face (coarse cells) measured: its rectangle at full resolution when there is one."""
     near_edge = False
-    for k in blob:
+    for k in face:
         j, i = divmod(k, gw)
-        if i < EDGE_CELLS or j < EDGE_CELLS or i >= gw - EDGE_CELLS or j >= gh - EDGE_CELLS:
+        if i <= EDGE_CELLS or j <= EDGE_CELLS or i >= gw - 1 - EDGE_CELLS or j >= gh - 1 - EDGE_CELLS:
             near_edge = True
             break
     uv = [surf.local(pts[k]) for k in face]
@@ -562,15 +775,18 @@ def _measure(
     step = stride
     hface = sorted(hs[k] for k in face)
     height = hface[len(hface) // 2]
+    top = height
     if fine is not None and stride > 1:
         # the coarse cells found the part; its edges come from every pixel of its top face — a
         # 60 mm part spans ~17 cells of 3 mm, and a rectangle through so few quantises its angle
         # by a few degrees at some wrist headings (hypothesis found 4.1°)
         got = _fine_face(face, gw, stride, surf, K, fine, top)
-        if len(got) >= 4 * len(face):
+        if len(got) >= 0.5 * stride * stride * len(face):  # most of the face survived the erosion
             uv, step = got, 1
     cu, cv, ang, length, width = min_area_rect(uv)
-    pad = 0.5 * step * zmed / K["fx"]  # the outermost samples sit ~half a sample inside the edges
+    # the outermost samples sit half a sample inside the edges — and the fine face, eroded by
+    # one pixel, a pixel further in: on each side
+    pad = (2 * FINE_EDGE_PX if step == 1 else 0.5 * step) * zmed / K["fx"]
     length, width = length + pad, width + pad
     centre = surf.point(cu, cv, height)
     ax = tuple(math.cos(ang) * surf.x_axis[i] + math.sin(ang) * surf.y_axis[i] for i in range(3))
@@ -591,6 +807,7 @@ def _measure(
         corners_px=[_project(T_cb, K, c) for c in corners],
         cells=len(face),
         near_edge=near_edge,
+        rect_uv=(cu, cv, ang, length, width),
     )
 
 
@@ -606,7 +823,7 @@ def _fine_face(
     for k in face:
         for d in (-gw - 1, -gw, -gw + 1, -1, 0, 1, gw - 1, gw, gw + 1):
             near.add(k + d)
-    out = []
+    band: dict[tuple[int, int], tuple[float, float]] = {}
     half = stride // 2
     for k in near:
         j, i = divmod(k, gw)
@@ -619,8 +836,15 @@ def _fine_face(
                 z = d * scale
                 p = T.apply(((x - ppx) * z / fx, (y - ppy) * z / fy, z))
                 if abs(surf.height(p) - top) <= TOP_BAND_M:
-                    out.append(surf.local(p))
-    return out
+                    band[(x, y)] = surf.local(p)
+    # one pixel eroded: a flying pixel on the side (between the top and the table) that happens
+    # to fall in the band has a neighbour off it; the top's own edge loses one pixel too, which
+    # the caller adds back (FINE_EDGE_PX)
+    return [
+        uv
+        for (x, y), uv in band.items()
+        if (x - 1, y) in band and (x + 1, y) in band and (x, y - 1) in band and (x, y + 1) in band
+    ]
 
 
 def _why_not(
