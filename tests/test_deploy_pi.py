@@ -428,7 +428,15 @@ def test_link_up_re_probes(tmp_path):
     hook = _render(NM_HOOK)
     assert hook.startswith("#!/bin/sh")
     assert "systemctl restart --no-block perceptronics-cell-dhcp.service" in hook
-    assert NM_HOOK.stat().st_mode & 0o111, "NetworkManager only runs an executable hook"
+    # NetworkManager only runs an executable hook: what ships is git's mode, not the checkout's
+    # (a Windows checkout has no exec bit at all)
+    staged = subprocess.run(
+        ["git", "ls-files", "--stage", str(NM_HOOK.relative_to(ROOT))], cwd=ROOT, capture_output=True, text=True
+    )
+    if staged.returncode == 0 and staged.stdout:
+        assert staged.stdout.startswith("100755 "), staged.stdout
+    else:
+        assert NM_HOOK.stat().st_mode & 0o111
     script = tmp_path / "hook"
     script.write_text(hook, encoding="utf-8")
     subprocess.run(["sh", "-n", str(script)], check=True)

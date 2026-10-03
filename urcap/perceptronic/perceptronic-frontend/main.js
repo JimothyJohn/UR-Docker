@@ -19,6 +19,9 @@
   // The pick PC's factory address (pickscript.js DEFAULT_COCKPIT_HOST; a test holds them equal).
   const DEFAULT_COCKPIT_HOST = "192.168.3.20";
   const POLL_TIMEOUT_MS = 1500;
+  // One feed request, connect + long poll + picture: an address nothing answers on (the pick
+  // PC's default before it is plugged in) must fail in seconds, not after TCP gives up.
+  const FEED_TIMEOUT_MS = POLL_TIMEOUT_MS + 3500;
   const HOVER_MS = 150;
   const PROBE_TIMEOUT_MS = 2500;
   const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -535,6 +538,9 @@
       const value = this.$("url").value.trim();
       this._node.cockpitUrl = value;
       this._seq = 0;
+      // a request still waiting on the old address is dropped: the feed asks the new one now
+      this._urlChanged = true;
+      if (this._pollCtl) this._pollCtl.abort();
       this.$("open").href = this.cockpitUrl() + "/";
       try {
         if (this._api && this._api.applicationNodeService) {
@@ -555,7 +561,19 @@
       while (!this._stopped && this.isConnected) {
         try {
           const depth = this._depth;
-          const r = await fetch(`${this.cockpitUrl()}/api/${depth ? "depth" : "color"}.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`);
+          this._urlChanged = false;
+          const ctl = typeof AbortController === "function" ? new AbortController() : null;
+          this._pollCtl = ctl;
+          const timer = ctl ? setTimeout(() => ctl.abort(), FEED_TIMEOUT_MS) : 0;
+          let r, blob;
+          try {
+            r = await fetch(`${this.cockpitUrl()}/api/${depth ? "depth" : "color"}.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`,
+              ctl ? { signal: ctl.signal } : undefined);
+            if (r.ok) blob = await r.blob();
+          } finally {
+            clearTimeout(timer);
+            this._pollCtl = null;
+          }
           if (r.status === 503) {
             this.setLive(false);
             this.noCamera("nopicture", "HTTP 503: the cockpit has no frame", "warn");
@@ -579,7 +597,6 @@
             throw e;
           }
           const seq = Number(r.headers.get("X-Seq") || 0);
-          const blob = await r.blob();
           const url = URL.createObjectURL(blob);
           const previous = this._blobUrl;
           img.onload = () => {
@@ -593,6 +610,7 @@
           if (!announced) { this.setStatus(`live from ${this.cockpitUrl()}`, "ok"); announced = true; }
         } catch (err) {
           announced = false;
+          if (this._urlChanged) continue; // aborted by Save: straight on to the new address
           this.setLive(false);
           const why = err && err.message ? err.message : String(err);
           // Only a network-level failure is ambiguous; an HTTP status already says what happened.
