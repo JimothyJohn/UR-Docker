@@ -591,3 +591,19 @@ def test_the_same_boxes_are_not_a_part_of_another_size(dims):
 def test_a_carpet_with_a_lump_on_it_is_no_part(dims):
     _, sc = real("carpet_lump_0p85m", PartSpec.from_mm(*dims))
     assert sc.parts == []
+
+
+def test_two_flat_and_two_standing_boxes_at_three_quarters_of_a_metre_are_four_parts():
+    # High Density preset (High Accuracy left the near standing box's dark top 57 % holes: missed);
+    # the standing ones show their 110 x 30 face, 70 tall — a box on any face
+    meta, sc = real("boxes_flat_and_on_side_0p75m", PartSpec.from_mm(110, 70, 30))
+    assert len(sc.parts) == 4, [(p.pixel, p.why) for p in sc.rejected if p.near]
+    for px in meta["pixels"]:
+        assert min(math.dist(px, p.pixel) for p in sc.parts) < 15
+    assert sorted(round(p.height_m * 1000, -1) for p in sc.parts) == [30, 30, 70, 70]
+
+
+@pytest.mark.parametrize("dims", [(60, 40, 20), (200, 150, 30)])
+def test_flat_and_standing_boxes_are_not_a_part_of_another_size(dims):
+    _, sc = real("boxes_flat_and_on_side_0p75m", PartSpec.from_mm(*dims))
+    assert sc.parts == []

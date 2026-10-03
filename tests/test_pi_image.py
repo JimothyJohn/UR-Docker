@@ -14,6 +14,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,9 @@ def _network(**kw) -> dict:
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
 def test_scripts_parse_and_are_strict(script):
-    if shutil.which("bash"):
+    # Windows' `bash` may be WSL's launcher, which can't read a D:\ path: the Linux and macOS
+    # legs parse them (the repo's convention, as in test_usb_magic / test_deploy_pi)
+    if shutil.which("bash") and sys.platform != "win32":
         subprocess.run(["bash", "-n", str(script)], check=True)
     assert "set -euo pipefail" in script.read_text()
 
@@ -93,8 +96,21 @@ def test_shellcheck_clean(script):
 
 @pytest.mark.parametrize("script", [*SCRIPTS, SEED], ids=lambda p: p.name)
 def test_scripts_are_executable_or_run_by_python(script):
-    if script.suffix == ".sh":
-        assert script.stat().st_mode & 0o111
+    # the mode git records is what a Linux checkout (the Pi, CI) gets; Windows has no exec bit,
+    # so os.stat reads 0 there (the Windows CI leg failed on it) — as in test_deploy_pi
+    if script.suffix != ".sh":
+        return
+    rel = script.relative_to(ROOT).as_posix()
+    try:
+        staged = subprocess.run(
+            ["git", "ls-files", "-s", "--", rel], cwd=ROOT, capture_output=True, text=True, timeout=30
+        ).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        staged = []
+    if staged:
+        assert staged[0] == "100755", f"{rel} is committed without its executable bit"
+    elif sys.platform != "win32":
+        assert script.stat().st_mode & 0o111, f"{script} is not executable"
 
 
 def test_base_image_is_pinned_and_verified():

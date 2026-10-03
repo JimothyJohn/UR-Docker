@@ -2135,7 +2135,7 @@ def add_camera_args(ap) -> None:
         "--rs-preset",
         default=None,
         help=f"depth visual preset at open: {'|'.join(sorted(VISUAL_PRESETS))}|none "
-        "(default: $PERCEPTRONICS_RS_PRESET, high_accuracy; none = leave the sensor as is)",
+        "(default: $PERCEPTRONICS_RS_PRESET, high_density; none = leave the sensor as is)",
     )
     ap.add_argument(
         "--laser-power",
