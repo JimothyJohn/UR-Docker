@@ -123,7 +123,8 @@ for ((i = 0; i < ${#install_args[@]}; i++)); do
 done
 if [ "$cell_address" = 192.168.3.20 ]; then
     log "done. On the pendant nothing to type: the URCap's Cockpit field defaults to this PC's cell address 192.168.3.20;" \
-        "set the robot's network to DHCP (Settings -> System -> Network) and it gets 192.168.3.3 from this PC"
+        "set the robot's network to DHCP (Settings -> System -> Network) and it gets 192.168.3.3 from this PC." \
+        "The whole procedure: PLUG-AND-PLAY.md"
 else
     log "done. On the pendant: Installation -> URCaps -> Perceptronic -> Cockpit = ${cell_address} -> Save"
 fi

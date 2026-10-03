@@ -80,8 +80,10 @@ scripts/deploy-pi.sh <user@pc> --cell ur3 --robot-host <robot-ip>
   doesn't on a real e-Series until the pendant is set to Remote. That is expected, not a
   deploy fault.
 - `approach`: must name the tool length Nick measured (`PERCEPTRONICS_TIP_M`).
-- `handeye`: `env:` means `PERCEPTRONICS_T_FLANGE_CAMERA` from `cell.env`. After a new
-  `perceptronics calibrate --apply`, delete that line and restart, or the old value wins.
+- `handeye`: should read `file:/var/lib/perceptronics/captures/calibration/handeye.json`
+  (`install.sh` moves the profile's pose there; `calibrate --apply` replaces it and it
+  survives restarts). `env:` means a `PERCEPTRONICS_T_FLANGE_CAMERA` line came back into
+  `cell.env` by hand: re-run the deploy, which takes it out again.
 
 Report the doctor's failures verbatim, each with its fix. Don't paraphrase them into
 "mostly fine".

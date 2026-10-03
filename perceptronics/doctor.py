@@ -21,6 +21,7 @@ won't) or is a warning (``warn``: works, but you should know).
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import platform
 import socket
@@ -33,8 +34,9 @@ from urctl.config import RobotConfig
 from urctl.safety import normalize_model
 
 from .cell import ENV_CELL, describe_cell
+from .cellnet import CELL_PREFIX, PICK_PC_ADDRESS
 from .config import PerceptionConfig
-from .handeye import ENV_BRACKET, ENV_T_FLANGE_CAMERA, HandEye
+from .handeye import ENV_BRACKET, HandEye
 
 PROBE_TIMEOUT_S = 2.0
 STREAM_FRAMES = 15
@@ -282,6 +284,76 @@ def check_stream(report: Report, camera, frames: int = STREAM_FRAMES) -> None:
     )
 
 
+def source_address(host: str) -> str | None:
+    """The local address this machine would reach ``host`` from (a UDP "connect" picks the
+    route; nothing is sent), or None when there is no route."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect((host, 9))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def check_network(
+    report: Report, config: RobotConfig, source: Callable[[str], str | None] = source_address
+) -> None:
+    """Is this machine on the robot's network, and what goes in the pendant's Cockpit field?
+
+    The URCap's empty field means the pick PC's factory address (:data:`PICK_PC_ADDRESS`);
+    any other address must be typed there. A robot reached through a router (another
+    subnet) is a cell that works today and breaks when the office network changes.
+    """
+    try:
+        robot = ipaddress.IPv4Address(config.host)
+    except ValueError:
+        return  # a host name, or empty (robot.host says so)
+    if robot.is_loopback:
+        return  # a simulator on this machine
+    net = ipaddress.IPv4Interface(f"{robot}/{CELL_PREFIX}").network
+    src = source(config.host)
+    if src is None:
+        report.add(
+            Check(
+                "network",
+                False,
+                f"no route to {robot}",
+                fix=f"plug this machine's Ethernet into the robot or the cell switch (an address on {net})",
+                severity="warn",
+            )
+        )
+        return
+    here = ipaddress.IPv4Address(src)
+    if here not in net:
+        report.add(
+            Check(
+                "network",
+                False,
+                f"{robot} is reached from {here}, which is not on its network {net}",
+                fix=f"plug this machine's Ethernet into the robot (a pick PC: deploy/pi/install.sh gives it "
+                f"{PICK_PC_ADDRESS}/{CELL_PREFIX}), or give it an address on {net}",
+                severity="warn",
+                data={"robot": str(robot), "local": str(here), "network": str(net)},
+            )
+        )
+        return
+    default = str(here) == PICK_PC_ADDRESS
+    pendant = (
+        "the pendant's Cockpit field can stay empty (its default)"
+        if default
+        else f"on the pendant: Installation → URCaps → Perceptronic → Cockpit = {here}"
+    )
+    report.add(
+        Check(
+            "network",
+            True,
+            f"this machine is {here} on {net}; {pendant}",
+            severity="info",
+            data={"robot": str(robot), "local": str(here), "network": str(net), "pendant_default": default},
+        )
+    )
+
+
 def check_robot_reachability(report: Report, config: RobotConfig) -> bool:
     if not config.host:
         report.add(
@@ -465,7 +537,7 @@ def check_flange_and_handeye(report: Report, robot, handeye: HandEye, env=None) 
             handeye.calibrated or None,
             f"{handeye.source}"
             + ("" if handeye.calibrated else " (uncalibrated seed: expect mm + ~1° error)"),
-            fix=f"run a hand-eye calibration and set {ENV_T_FLANGE_CAMERA}",
+            fix="run `perceptronics calibrate --apply` (it saves the solve to PERCEPTRONICS_HANDEYE_FILE)",
             severity="warn",
             data=handeye.as_dict(),
         )
@@ -676,6 +748,7 @@ def run_doctor(
     if robot:
         cfg = robot_config or RobotConfig.from_env()
         cfg = RobotConfig(**{**cfg.__dict__, "timeout": min(cfg.timeout, 5.0)})
+        check_network(report, cfg)
         if check_robot_reachability(report, cfg):
             if robot_factory is not None:
                 rb = robot_factory(cfg)

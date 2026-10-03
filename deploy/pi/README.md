@@ -91,7 +91,7 @@ because the node is Java on the controller, not a web page.
 | stop / start | `sudo systemctl stop perceptronics-cockpit` / `sudo systemctl start perceptronics-cockpit` |
 | the cockpit UI from a laptop | `ssh -L 7621:127.0.0.1:7621 pi@192.168.3.20`, then open http://127.0.0.1:7621 |
 | config | edit `/etc/perceptronics/cell.env`, then `sudo systemctl restart perceptronics-cockpit` |
-| calibration | `perceptronics calibrate --apply` saves to `/var/lib/perceptronics/captures/calibration/handeye.json`. Then **delete the `PERCEPTRONICS_T_FLANGE_CAMERA` line** in `cell.env` and restart, because an environment value wins over the file (CLAUDE.md, the stale hand-eye gotcha). |
+| calibration | `perceptronics calibrate --apply` saves to `/var/lib/perceptronics/captures/calibration/handeye.json` and takes effect at once. `install.sh` keeps `PERCEPTRONICS_T_FLANGE_CAMERA` out of `cell.env` (it seeds that file from the profile instead), because an environment value would win over every calibration at the next restart. Command: `PLUG-AND-PLAY.md` §6. |
 | audit | every robot action: `/var/lib/perceptronics/audit.jsonl` |
 
 **Update:** run the same `scripts/deploy-pi.sh pi@<ip>` from a newer checkout. It

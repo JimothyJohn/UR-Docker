@@ -320,8 +320,9 @@ lines = [
     "# /etc/perceptronics/cell.env - written by /opt/perceptronics/deploy/install.sh",
     f"# from the shipped cell {cell!r} + cell.env.template. Read by perceptronics-cockpit.service",
     "# (EnvironmentFile=) and by `perceptronics --cell /etc/perceptronics/cell.env ...`.",
-    "# After `perceptronics calibrate --apply` on this PC, delete the PERCEPTRONICS_T_FLANGE_CAMERA",
-    "# line and restart: an environment value wins over the saved hand-eye file.",
+    "# The hand-eye is not here: install.sh moves the profile's PERCEPTRONICS_T_FLANGE_CAMERA into",
+    "# PERCEPTRONICS_HANDEYE_FILE, which `perceptronics calibrate --apply` replaces (an environment",
+    "# value would win over every calibration made on this PC).",
 ]
 for key, value in values.items():
     if bad & set(value):
@@ -337,6 +338,46 @@ PY
 }
 
 cell_value() { sed -n "s/^$1=//p" "$CELL_ENV" | tail -n 1; }
+
+# The hand-eye lives in PERCEPTRONICS_HANDEYE_FILE, never in cell.env: HandEye.from_env takes
+# the environment first, so a PERCEPTRONICS_T_FLANGE_CAMERA line would silently undo every
+# `perceptronics calibrate --apply` on this PC at the next restart. The profile's value seeds
+# the file when there is none; a file already there is a calibration made here and is kept.
+# Runs on every install, so a cell.env written before this rule is fixed too.
+handeye_out_of_env() {
+    local py="${CURRENT}/bin/python" file result
+    file="$(cell_value PERCEPTRONICS_HANDEYE_FILE)"
+    [ -n "$file" ] || { log "hand-eye: no PERCEPTRONICS_HANDEYE_FILE in ${CELL_ENV}: left as is"; return; }
+    result="$("$py" - "$CELL_ENV" "$file" "${CELL_ENV}.new" <<'PY'
+import sys
+from pathlib import Path
+
+from perceptronics.cell import without_key
+from perceptronics.handeye import ENV_T_FLANGE_CAMERA, parse_pose_text, seed_calibration_file
+
+cell_env, file, out = sys.argv[1:4]
+rest, raw = without_key(Path(cell_env).read_text(encoding="utf-8"), ENV_T_FLANGE_CAMERA)
+if raw is None:
+    print("none")
+    sys.exit(0)
+wrote = seed_calibration_file(file, parse_pose_text(raw), source=f"cell profile, seeded by install.sh from {cell_env}")
+Path(out).write_text(rest, encoding="utf-8")
+print("seeded" if wrote else "kept")
+PY
+)"
+    case "$result" in
+        none) return ;;
+        seeded) log "hand-eye: the profile's pose seeded ${file} (calibrate --apply replaces it)" ;;
+        kept) log "hand-eye: kept ${file} (a calibration made on this PC); dropped the profile's pose" ;;
+        *) die "hand-eye: could not move PERCEPTRONICS_T_FLANGE_CAMERA out of ${CELL_ENV}" ;;
+    esac
+    cp -p "$CELL_ENV" "${CELL_ENV}.$(date +%Y%m%d-%H%M%S)"
+    chown root:"$SVC_USER" "${CELL_ENV}.new"
+    chmod 0640 "${CELL_ENV}.new"
+    mv "${CELL_ENV}.new" "$CELL_ENV"
+    chown "$SVC_USER":"$SVC_USER" "$file"
+    chmod 0640 "$file"
+}
 
 # ---- firewall --------------------------------------------------------------------------
 cell_net() {
@@ -584,6 +625,7 @@ main() {
     else
         log "kept ${CELL_ENV} (--reconfigure rewrites it from the cell profile)"
     fi
+    handeye_out_of_env
     local net
     net="$(cell_net "$allow_from")"
     install_firewall "$net" "$cell_if"
