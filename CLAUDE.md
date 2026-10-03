@@ -414,7 +414,7 @@ robot's /24 and what the pendant's Cockpit field needs (nothing at 192.168.3.20)
 **Settled 2026-10-01 (Nick):** green overlays for pickable parts and yellow for *marginal* ones (the
 server's `near` flag) is the intended picture — nothing is drawn for what is nothing like the part;
 the 3D Pick node's picture carries no watermark; the **UR7e is the UR5e's arm and the UR12e the
-UR10e's** (`armfk.DH` aliases, so `armik` judges them; only the UR30 is still left to the controller).
+UR10e's** (`armfk.DH` aliases, so `armik` judges them). The UR30 and UR15 rows are UR's published table (2026-10-02); an arm not in `armfk.DH` is left to the controller.
 
 **Three traps from the 2026-10-02 sessions.** (1) **Every request the URCap pages make to the
 camera computer is bounded** (`AbortController` + `setTimeout`; `test_every_request_to_the_camera_computer_can_time_out`
