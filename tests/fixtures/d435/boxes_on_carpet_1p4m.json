@@ -1,0 +1,50 @@
+{
+ "width": 848,
+ "height": 480,
+ "depth_scale_m": 0.0010000000474974513,
+ "intrinsics": {
+  "width": 848,
+  "height": 480,
+  "fx": 617.8555908203125,
+  "fy": 618.2134399414062,
+  "ppx": 426.5736999511719,
+  "ppy": 243.31895446777344,
+  "model": "inverse_brown_conrady",
+  "coeffs": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "fov_deg": [
+   68.91929456404054,
+   42.4339616103857
+  ]
+ },
+ "what": "4 boxes 110 x 70 x 30 mm lying flat on carpet, white labels on top, camera 61 deg off straight down, 1.26-1.49 m away, room lit dimly; pick PC (Pi 5) D435 fw 5.12.7.100, default filter chain, 2026-10-03",
+ "part_mm": [
+  110,
+  70,
+  30
+ ],
+ "count": 4,
+ "pixels": [
+  [
+   385,
+   339
+  ],
+  [
+   481,
+   337
+  ],
+  [
+   376,
+   278
+  ],
+  [
+   488,
+   287
+  ]
+ ]
+}

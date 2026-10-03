@@ -6,9 +6,10 @@ top face measures ``length × width`` (either way round) and, when a height is g
 that stand ``height`` above the surface around them — each within ``tol`` (a fraction,
 never tighter than :data:`MIN_SLACK_M`, the measurement's own noise at working range).
 
-The dimensions are **as the part lies on the table**: length and width are its
-footprint, height is how far its top is above the table. The table is flat and
-parallel to the base XY plane, so the top face is the face the camera measures.
+The dimensions are the part's own: a box may lie on **any** of its faces (Nick, 2026-10-03),
+so ``60x40x30`` is also a 60 × 30 footprint 40 tall and a 40 × 30 one 60 tall
+(:meth:`PartSpec.poses`); a cylinder stands on its end. The table is flat and parallel to
+the base XY plane, so the top face is the face the camera measures.
 
 A **cylinder** (``shape=cyl``) stands on its end: its top face is a disc, so length and
 width are both its diameter and it has no long side — the grasp keeps the wrist where it
@@ -80,50 +81,101 @@ class PartSpec:
     def is_round(self) -> bool:
         return self.shape == "cyl"
 
-    def slack(self, dim_m: float) -> float:
-        return max(self.tol * dim_m, MIN_SLACK_M)
+    def slack(self, dim_m: float, floor_m: float = 0.0) -> float:
+        """How far off ``dim_m`` may measure: the tolerance, never under the measurement's own
+        noise (:data:`MIN_SLACK_M`, or ``floor_m`` — the caller's, which grows with range)."""
+        return max(self.tol * dim_m, MIN_SLACK_M, floor_m)
 
-    def why_not(self, major_m: float, minor_m: float, height_m: float | None) -> str | None:
-        """Why a candidate with these measurements is not this part, or None when it is.
-        An unmeasured height (no surface visible around it) is not held against it."""
-        lo, hi = lambda d: d - self.slack(d), lambda d: d + self.slack(d)  # noqa: E731
-        if major_m > hi(self.length_m):
-            n = round(major_m / self.length_m)
-            if n >= 2 and abs(major_m - n * self.length_m) <= self.slack(n * self.length_m):
+    def poses(self) -> list[tuple[float, float, float | None]]:
+        """The ways it can lie on the table, as ``(footprint length, footprint width, height)``:
+        a box with a height on any of its three faces (Nick, 2026-10-03: "it should be assumed
+        that they could be lying on either face"), a cylinder on its end, a part with no height
+        as given. Distinct poses only, the given one first."""
+        L, W, Hh = self.length_m, self.width_m, self.height_m
+        if Hh is None or self.is_round:
+            return [(L, W, Hh)]
+        out: list[tuple[float, float, float | None]] = []
+        for a, b, h in ((L, W, Hh), (L, Hh, W), (W, Hh, L)):
+            pose = (max(a, b), min(a, b), h)
+            if not any(all(abs(x - y) < 1e-9 for x, y in zip(pose, q, strict=True)) for q in out):  # type: ignore[arg-type]
+                out.append(pose)
+        return out
+
+    def heights(self) -> list[float]:
+        """Every height its top can stand at (empty: no height given)."""
+        return sorted({h for _, _, h in self.poses() if h is not None})
+
+    def why_not(
+        self, major_m: float, minor_m: float, height_m: float | None, floor_m: float = 0.0
+    ) -> str | None:
+        """Why a candidate with these measurements is not this part lying on any of its faces
+        (:meth:`poses`), or None when it is. The reason is the nearest pose's. An unmeasured
+        height (no surface visible around it) is not held against it. ``floor_m``: no
+        tolerance tighter than this (:meth:`slack`)."""
+        best: tuple[tuple[float, float], str] | None = None
+        for pose in self.poses():
+            why = self._why_not_as(pose, major_m, minor_m, height_m, floor_m)
+            if why is None:
+                return None
+            off = self._offness(pose, major_m, minor_m, height_m, floor_m)
+            if best is None or off < best[0]:
+                best = (off, why)
+        return best[1] if best else None
+
+    def _offness(
+        self, pose, major_m: float, minor_m: float, height_m: float | None, floor_m: float = 0.0
+    ) -> tuple[float, float]:
+        """How many tolerances the footprint is off ``pose`` (worst side), then the height: the
+        operator is told about the face the camera saw — "too tall" for the right footprint
+        standing too high, not "too long" against some other face."""
+        sl = lambda d: self.slack(d, floor_m)  # noqa: E731
+        foot = max(abs(major_m - pose[0]) / sl(pose[0]), abs(minor_m - pose[1]) / sl(pose[1]))
+        up = 0.0 if pose[2] is None or height_m is None else abs(height_m - pose[2]) / sl(pose[2])
+        return foot, up
+
+    def _why_not_as(
+        self, pose, major_m: float, minor_m: float, height_m: float | None, floor_m: float = 0.0
+    ) -> str | None:
+        length, width, height = pose
+        lo, hi = lambda d: d - self.slack(d, floor_m), lambda d: d + self.slack(d, floor_m)  # noqa: E731
+        if major_m > hi(length):
+            n = round(major_m / length)
+            if n >= 2 and abs(major_m - n * length) <= self.slack(n * length, floor_m):
                 return f"{n} parts touching?"
             return "too long"
-        if minor_m > hi(self.width_m):
-            n = round(minor_m / self.width_m)
-            if n >= 2 and abs(minor_m - n * self.width_m) <= self.slack(n * self.width_m):
+        if minor_m > hi(width):
+            n = round(minor_m / width)
+            if n >= 2 and abs(minor_m - n * width) <= self.slack(n * width, floor_m):
                 return f"{n} parts touching?"
             return "too wide"
-        if major_m < lo(self.length_m):
+        if major_m < lo(length):
             return "too short"
-        if minor_m < lo(self.width_m):
+        if minor_m < lo(width):
             return "too narrow"
-        if self.height_m is not None and height_m is not None:
-            if height_m > hi(self.height_m):
+        if height is not None and height_m is not None:
+            if height_m > hi(height):
                 return "too tall"
-            if height_m < lo(self.height_m):
+            if height_m < lo(height):
                 return "too flat"
         return None
 
-    def near_miss(self, major_m: float, minor_m: float, height_m: float | None) -> bool:
+    def near_miss(self, major_m: float, minor_m: float, height_m: float | None, floor_m: float = 0.0) -> bool:
         """Is a candidate that is *not* this part still close enough to be worth showing the
-        operator — every measurement within :data:`NEAR_MISS_SLACKS` tolerances, a side
-        that is two or three parts' worth counting too (parts touching)?"""
+        operator — every measurement within :data:`NEAR_MISS_SLACKS` tolerances of one of its
+        poses, a side that is two or three parts' worth counting too (parts touching)?"""
         k = NEAR_MISS_SLACKS
 
         def close(got: float, want: float, multiples: bool) -> bool:
-            if abs(got - want) <= k * self.slack(want):
+            if abs(got - want) <= k * self.slack(want, floor_m):
                 return True
-            return multiples and any(abs(got - n * want) <= self.slack(n * want) for n in (2, 3))
+            return multiples and any(abs(got - n * want) <= self.slack(n * want, floor_m) for n in (2, 3))
 
-        if not close(major_m, self.length_m, True) or not close(minor_m, self.width_m, True):
-            return False
-        if self.height_m is not None and height_m is not None:
-            return close(height_m, self.height_m, False)
-        return True
+        for length, width, height in self.poses():
+            if not close(major_m, length, True) or not close(minor_m, width, True):
+                continue
+            if height is None or height_m is None or close(height_m, height, False):
+                return True
+        return False
 
     def token(self) -> str:
         """``part=60x40x30 tol=25`` — what the node sends and :func:`parse` reads back."""

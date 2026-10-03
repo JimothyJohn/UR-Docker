@@ -652,7 +652,7 @@ def test_api_surface_covers_every_call_the_urcap_makes():
 def test_read_yaml_reads_the_real_manifest():
     manifest = track.read_yaml((ROOT / "urcap/perceptronic/manifest.yaml").read_text(encoding="utf-8"))
     assert manifest["metadata"]["vendorID"] == "advin"
-    assert manifest["metadata"]["version"] == "0.6.0"
+    assert manifest["metadata"]["version"] == "0.7.0"
     assert manifest["artifacts"]["webArchives"] == [
         {"id": "perceptronic-frontend", "folder": "perceptronic-frontend"}
     ]
