@@ -235,6 +235,41 @@ def test_malformed_bodies(server):
     assert post(base, "/api/segment", b"{" + b"\x00" * 70000 + b"}", raw=True)[0] == 400
 
 
+def _raw_post(base: str, path: str, head_length: str, body: bytes, timeout: float = 5.0) -> bytes:
+    """One POST over a bare socket, the whole body sent before reading: what came back."""
+    host, port = base.removeprefix("http://").split(":")
+    with socket.create_connection((host, int(port)), timeout=timeout) as s:
+        s.sendall(
+            f"POST {path} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+            f"Content-Length: {head_length}\r\n\r\n".encode()
+            + body
+        )
+        out = b""
+        while chunk := s.recv(65536):
+            out += chunk
+        return out
+
+
+def test_an_oversized_body_is_read_and_the_connection_closed_cleanly(server):
+    # The handler used to answer 400 without reading the body and keep the connection: the unread
+    # bytes turned the close into a reset and macOS clients lost the response (CI, 2026-10-03).
+    base, _, _ = server
+    reply = _raw_post(base, "/api/segment", "70002", b"{" + b"\x00" * 70000 + b"}")
+    head = reply.split(b"\r\n\r\n", 1)[0].lower()
+    assert head.startswith(b"http/1.1 400") and b"connection: close" in head
+    assert b"too large" in reply
+
+
+@pytest.mark.parametrize("length", ["-1", "abc", "99999999999999999999"])
+def test_a_nonsense_content_length_is_refused_without_waiting_for_the_client(server, length):
+    # -1 reached rfile.read(-1), which reads until the client hangs up: one request pinned a thread.
+    base, _, _ = server
+    t0 = time.monotonic()
+    reply = _raw_post(base, "/api/segment", length, b"{}", timeout=3.0)
+    assert reply.lower().startswith(b"http/1.1 400"), reply[:200]
+    assert time.monotonic() - t0 < 2.0
+
+
 def test_pump_recovers_from_open_failure(tmp_path):
     app = ViewerApp(FlakyCamera(fail_opens=1, width=32, height=24, fps=0))
     app.start()
