@@ -65,7 +65,7 @@ jobs:
           echo "$SHA256  $name" > "$JAR.sha256"
           prev=$(git describe --tags --abbrev=0 --match 'urcap5-v*' "$TAG^" 2>/dev/null || true)
           {
-            echo "Perceptronic URCap for **PolyScope 5 (e-Series)**: the Perceptronic installation node and the Perceptronic Pick program node."
+            echo "Perceptronic URCap for **PolyScope 5 (e-Series)**: the Perceptronic installation node, the 3D Pick program node and the P toolbar button."
             echo
             echo "**Install:** copy \`$name\` to a FAT32 USB stick (on a Mac: \`scripts/urcap5-usb.sh\`, which keeps macOS \`._\` files off it), then on the pendant ☰ → Settings → System → URCaps → **+** → the file → Open → **Restart**."
             echo
