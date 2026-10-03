@@ -6,6 +6,7 @@
 #   sudo ./install.sh --wheel ur_docker-0.1.0-py3-none-any.whl [--cell ur3] \
 #                     [--robot-host 192.168.3.3] [--allow-from 192.168.3.0/24] [--reconfigure]
 #                     [--cell-if eth0|none] [--cell-address 192.168.3.20/24]
+#   sudo ./install.sh --wheel ... --image        # into an image root under chroot (no live system)
 #   sudo /opt/perceptronics/deploy/install.sh --rollback        # back to the previous release
 #   sudo /opt/perceptronics/deploy/install.sh --uninstall [--purge]
 #
@@ -25,7 +26,12 @@
 # — but only when no other DHCP server answers there. A port already on another network
 # (the bench's office LAN) is left alone. --cell-if none skips all of it.
 #   stop:  sudo systemctl disable --now perceptronics-cell-dhcp   logs: journalctl -u perceptronics-cell-dhcp
+# --image: the root is an image being built (deploy/pi/image/build.sh runs this under chroot),
+# not a running PC. Units are enabled but nothing is started or reloaded: no udev reload (no
+# udevd in a chroot), and no firewall load, which would land in the BUILD host's kernel.
 set -euo pipefail
+
+IMAGE=0
 
 # ---- pins ----------------------------------------------------------------------------
 # perceptronics/realsense.py binds the C API with ctypes and checks enum ordinals written
@@ -210,8 +216,10 @@ install_librealsense() {
     # 0b07): with them a normal user opens the camera over libusb — no root in the service.
     if ! cmp -s "${LIBREALSENSE_PREFIX}/99-realsense-libusb.rules" "$UDEV_RULES"; then
         install -m 0644 "${LIBREALSENSE_PREFIX}/99-realsense-libusb.rules" "$UDEV_RULES"
-        udevadm control --reload-rules
-        udevadm trigger --subsystem-match=usb
+        if [ "$IMAGE" = 0 ]; then
+            udevadm control --reload-rules
+            udevadm trigger --subsystem-match=usb
+        fi
         log "udev: installed ${UDEV_RULES} (re-plug the camera if it was already attached)"
     fi
 }
@@ -408,7 +416,7 @@ install_firewall() {
     install -m 0644 "$rendered" "$NFT_CONF"
     rm -f "$rendered"
     systemctl enable -q nftables.service
-    systemctl restart nftables.service
+    [ "$IMAGE" = 1 ] || systemctl restart nftables.service
     log "firewall: inbound SSH from anywhere; :7621/:7622 from ${net} only; DHCP on ${cell_if}; everything else dropped"
 }
 
@@ -429,6 +437,10 @@ prefix_mask() {
 # already on another network: on the bench that is the office LAN this install runs over.
 configure_cell_address() {
     local cell_if="$1" cidr="$2" have con
+    if [ "$IMAGE" = 1 ]; then
+        write_cell_keyfile "$cell_if" "$cidr"
+        return
+    fi
     if ! command -v nmcli >/dev/null || ! nmcli -t general status >/dev/null 2>&1; then
         log "cell port: NetworkManager not running — give ${cell_if} ${cidr} (no gateway) by hand"
         return
@@ -475,6 +487,32 @@ configure_cell_address() {
     log "cell port: ${cell_if} = ${cidr} (NetworkManager profile ${NM_CELL_CON}; up when a cable is in)"
 }
 
+# The image has no running NetworkManager: write the profile nmcli would have made. Every
+# board flashed from it comes up with the cell address on the cell port.
+write_cell_keyfile() {
+    local cell_if="$1" cidr="$2" dir=/etc/NetworkManager/system-connections
+    [ -d /etc/NetworkManager ] || die "cell port: no NetworkManager in the image"
+    install -d -m 0755 "$dir"
+    (umask 077 && cat >"${dir}/${NM_CELL_CON}.nmconnection") <<KEYFILE
+[connection]
+id=${NM_CELL_CON}
+type=ethernet
+interface-name=${cell_if}
+autoconnect=true
+autoconnect-priority=100
+
+[ipv4]
+method=manual
+address1=${cidr}
+never-default=true
+
+[ipv6]
+method=link-local
+KEYFILE
+    chmod 0600 "${dir}/${NM_CELL_CON}.nmconnection"
+    log "cell port: ${cell_if} = ${cidr} (image: ${dir}/${NM_CELL_CON}.nmconnection)"
+}
+
 # One DHCP lease, the cell's UR_HOST, on the cell port — started only after no other DHCP
 # server answered there (perceptronics.cellnet probe).
 install_cell_dhcp() {
@@ -500,6 +538,11 @@ install_cell_dhcp() {
         install -m 0755 "${BUILD_ROOT}.50-perceptronics-cell" "$NM_HOOK"
     fi
     rm -f "${BUILD_ROOT}.cell-dhcp.conf" "${BUILD_ROOT}.${CELL_DHCP_UNIT}" "${BUILD_ROOT}.50-perceptronics-cell"
+    if [ "$IMAGE" = 1 ]; then
+        systemctl enable -q "$CELL_DHCP_UNIT"
+        log "cell DHCP: ${CELL_DHCP_UNIT} enabled for ${robot} on ${cell_if} (image: probes on the first boot)"
+        return
+    fi
     systemctl daemon-reload
     systemctl enable -q "$CELL_DHCP_UNIT"
     systemctl restart "$CELL_DHCP_UNIT"
@@ -521,6 +564,11 @@ remove_cell_dhcp() {
 install_units() {
     install -m 0644 "${HERE}/${UNIT}" "/etc/systemd/system/${UNIT}"
     install -m 0755 "${HERE}/perceptronics-doctor" /usr/local/bin/perceptronics-doctor
+    if [ "$IMAGE" = 1 ]; then
+        systemctl enable -q "$UNIT"
+        log "systemd: ${UNIT} enabled (image: starts on the first boot)"
+        return
+    fi
     systemctl daemon-reload
     systemctl enable -q "$UNIT"
     systemctl restart "$UNIT"
@@ -593,6 +641,7 @@ main() {
             --cell-if) cell_if="${2:?--cell-if needs an interface or none}"; shift 2 ;;
             --cell-address) cell_address="${2:?--cell-address needs a CIDR}"; shift 2 ;;
             --reconfigure) reconfigure=1; shift ;;
+            --image) IMAGE=1; shift ;;
             --rollback) action=rollback; shift ;;
             --uninstall) action=uninstall; shift ;;
             --purge) purge=1; shift ;;
@@ -638,7 +687,11 @@ main() {
         configure_cell_address "$cell_if" "$cell_address"
         install_cell_dhcp "$cell_if" "$cell_address"
     fi
-    log "done. Check it: sudo perceptronics-doctor"
+    if [ "$IMAGE" = 1 ]; then
+        log "done (image root)"
+    else
+        log "done. Check it: sudo perceptronics-doctor"
+    fi
 }
 
 main "$@"
