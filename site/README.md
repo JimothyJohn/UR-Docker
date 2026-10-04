@@ -1,7 +1,8 @@
 # The product page: perceptronics.advin.io
 
-One static page for Universal Robots users: what the Perceptronic URCap does, when to use
-it, what it needs, its limits, and the two downloads. Built with the
+One static page: 3D picking off flat surfaces for any industrial robot, when to use it, the
+connectors (Universal Robots first: the two URCap downloads and the UR Quickstart guide) and
+what a cell needs. Specs live on the datasheet, install steps in the Quickstart. Built with the
 [statician](https://github.com/JimothyJohn/statician) skill's stack: a private S3 bucket
 behind CloudFront, a Route53 record and an ACM certificate, with a strict Content Security
 Policy (no inline scripts, nothing loaded from another host).
@@ -20,11 +21,13 @@ supported PolyScope ranges from the CI matrices (`urcap/ps5_matrix.py`,
 `urcap/perceptronic-ps5/screens/`. `tests/test_site.py` builds it and checks the result
 against the CSP.
 
-**The datasheet** (`public/datasheet.html`, one US Letter page) is printed to
-`site/datasheet/perceptronics-datasheet.pdf` by a local Chrome: `site/site.sh datasheet`,
-then commit the PDF and its `datasheet.html.sha256` stamp. CI has no browser, so the test
-compares the stamp with the page as built: a new URCap version or an edit to the datasheet
-fails it until the PDF is printed again. Its performance figures are conservative
+**The PDFs**: the datasheet (`public/datasheet.html`, one US Letter page) and the UR
+Quickstart guide (`public/quickstart-ur.html`) are printed to `site/print/` by a local
+Chrome: `site/site.sh datasheet`, then commit each PDF and its `<page>.sha256` stamp. CI has
+no browser, so the test compares each stamp with the page as built: a new URCap version or
+an edit to either page fails it until the PDFs are printed again. Chrome writes a new PDF
+even for an unchanged page; restore an unchanged one from git rather than committing the
+noise. Its performance figures are conservative
 estimates (marked E) drawn from the code's limits and programmed speeds, not measurements;
 replace them as cells are tested and move `SHEET_DATE` in `build.py`.
 

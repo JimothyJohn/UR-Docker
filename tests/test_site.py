@@ -61,7 +61,12 @@ def pages(built: Path) -> dict[str, _Page]:
 
 
 def test_build_writes_both_pages_with_every_placeholder_filled(built: Path):
-    assert sorted(p.name for p in built.glob("*.html")) == ["datasheet.html", "error.html", "index.html"]
+    assert sorted(p.name for p in built.glob("*.html")) == [
+        "datasheet.html",
+        "error.html",
+        "index.html",
+        "quickstart-ur.html",
+    ]
     for page in built.glob("*.html"):
         text = page.read_text(encoding="utf-8")
         assert "{{" not in text and "}}" not in text, page.name
@@ -165,19 +170,40 @@ def test_pages_have_title_description_and_viewport(pages):
         assert page.all("title"), name
 
 
-def test_datasheet_pdf_is_the_print_of_the_current_page(built: Path):
-    # CI has no browser: the PDF is committed with the sha256 of the page it was printed from.
-    # A new URCap version or an edited datasheet changes the page -> `site/site.sh datasheet`.
-    stamp = site_build.SHEET_STAMP.read_text(encoding="utf-8").strip()
-    assert stamp == site_build.sheet_digest(built), "datasheet changed: run site/site.sh datasheet and commit"
-
-
-def test_datasheet_pdf_is_one_page_and_is_what_the_site_serves(built: Path, pages):
-    pdf = (site_build.SHEET_DIR / site_build.SHEET_PDF).read_bytes()
+@pytest.mark.parametrize("page", sorted(site_build.PRINTS))
+def test_each_pdf_is_the_print_of_the_current_page(built: Path, pages, page: str):
+    # CI has no browser: each PDF is committed with the sha256 of the page it was printed from.
+    # A new URCap version or an edited page changes the page -> `site/site.sh datasheet`.
+    stamp = site_build.stamp_path(page).read_text(encoding="utf-8").strip()
+    assert stamp == site_build.page_digest(built, page), f"{page} changed: run site/site.sh datasheet"
+    name = site_build.PRINTS[page]
+    pdf = (site_build.PRINT_DIR / name).read_bytes()
     assert pdf.startswith(b"%PDF")
+    assert (built / "downloads" / name).read_bytes() == pdf
+    assert f"/downloads/{name}" in [a["href"] for a in pages["index.html"].all("a")]
+
+
+def test_datasheet_pdf_is_one_page():
+    pdf = (site_build.PRINT_DIR / site_build.SHEET_PDF).read_bytes()
     assert len(re.findall(rb"/Type\s*/Page\b", pdf)) == 1
-    assert (built / "downloads" / site_build.SHEET_PDF).read_bytes() == pdf
-    assert f"/downloads/{site_build.SHEET_PDF}" in [a["href"] for a in pages["index.html"].all("a")]
+
+
+def test_quickstart_names_the_urcaps_it_installs(built: Path):
+    text = (built / "quickstart-ur.html").read_text(encoding="utf-8")
+    values = site_build.facts()
+    for key in ("PS5_FILE", "PSX_FILE", "PS5_VERSION", "PSX_VERSION", "QUICKSTART_DATE"):
+        assert values[key] in text, key
+    # the address the URCap's Cockpit field defaults to (and the camera computer gives itself)
+    java = (
+        REPO / "urcap" / "perceptronic-ps5" / "src" / "io" / "advin" / "perceptronic" / "Cockpit.java"
+    ).read_text(encoding="utf-8")
+    default = re.search(r'DEFAULT_HOST\s*=\s*"([^"]+)"', java).group(1)
+    assert f"<code>{default}</code>" in text
+
+
+def test_index_no_longer_carries_specs_or_install_steps(pages):
+    ids = {a["id"] for _, a in pages["index.html"].tags if a.get("id")}
+    assert not ids & {"specs", "install"}
 
 
 def test_datasheet_says_its_figures_are_untested_estimates(built: Path):
