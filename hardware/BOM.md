@@ -20,17 +20,16 @@
 | K4 | High-flex USB 3.2 A to C cable, dual screw-lock, 3 m | Newnex U3HLA01C12-030 | 1 | $188.00 | $188.00 |
 | K5 | Shielded Cat6 patch cable, 10 ft (3.0 m) | L-com TRD695SCR-BLK-10 | 1 | $42.19 | $42.19 |
 | K6 | Cable management: hook-and-loop, 1/2 in x 25 yd roll | VELCRO Brand ONE-WRAP, black, 189755 | 1 roll | $50.00 | $50.00 |
-| K7 | Bracket print material: PPA-CF, about 31 g per e-Series bracket | Bambu Lab PPA-CF N06-K0-1.75-750-SPL | 31 g | $0.20/g ($149.99 per 0.75 kg) | $6.20 |
-| K8 | Camera screw: 1/4-20 UNC x 1/2 in flat head socket cap, 82 deg, 18-8 SS | U-Turn SCFH025C0050SS | 1 | $0.08 | $0.08 |
-| K9 | Camera screws: M3 x 8 Phillips flat head, DIN 965, A2 | Monster Bolts "SA2 M03 x 008.0010" (10-pack) | 2 (1 pack) | $0.89 / 10 | $0.89 |
+| K7 | Bracket print material: PPA-CF, about 40 g per e-Series bracket (Rev C, estimated) | Bambu Lab PPA-CF N06-K0-1.75-750-SPL | 40 g | $0.20/g ($149.99 per 0.75 kg) | $8.00 |
+| K8 | Camera screw: 1/4-20 UNC x 3/8 in flat head socket cap, 82 deg, 18-8 SS (Rev C: the only camera screw) | U-Turn Fasteners, 3/8 in length of the K8 line below (part number not checked) | 1 | not checked | not checked |
 | K10 | Tool bolts through the adapter: M6 low-head socket cap, DIN 7984, A2 (length: see §2 K10) | Monster Bolts "SHCS Low - SA2 M06 x 016.0010" (10-pack) | 4 (1 pack) | $3.05 / 10 | $3.05 |
 | K11 | Dowel pin, dia. 6 m6 x 20 (robot side, through the adapter's pin slot) | ISO 8734, 6 m6 x 20 | 1 | not found | not found |
 | K12 | Medium-strength threadlocker (Loctite 243 class) | — | small amount | not found | not found |
-| | **Kit subtotal (priced lines)** | | | | **$784.56** |
+| | **Kit subtotal (priced lines)** | | | | **$785.39** |
 
-With an **industrial PC** in place of K1, K1b, K1c and K2 (the 24 V HDR-60-24, $20.10, replaces the 5 V supply): KUNBUS RevPi Connect 5 100416 ($796.00) makes the kit **$1,420.51**; CompuLab IOT-GATE-RPI5 8 GB / 64 GB eMMC ($485.00 plus its $2.50 DIN clip) makes it **$1,112.01**. See §K1-alt for when that is worth it.
+With an **industrial PC** in place of K1, K1b, K1c and K2 (the 24 V HDR-60-24, $20.10, replaces the 5 V supply): KUNBUS RevPi Connect 5 100416 ($796.00) makes the kit **$1,421.34**; CompuLab IOT-GATE-RPI5 8 GB / 64 GB eMMC ($485.00 plus its $2.50 DIN clip) makes it **$1,112.84**. See §K1-alt for when that is worth it.
 
-K11 and K12 are real parts that are not in any subtotal because I could not verify a price. Both cost a few dollars. The subtotal also leaves out the RealSense store's tariff surcharge (in force since 2026-02-03, amount not published on the product page), shipping, and US import duty on the EUR-sourced RevPi if you buy direct from KUNBUS.
+K8 (Rev C's 3/8 in screw), K11 and K12 are real parts that are not in any subtotal because I could not verify a price. All three cost a few dollars. The subtotal also leaves out the RealSense store's tariff surcharge (in force since 2026-02-03, amount not published on the product page), shipping, and US import duty on the EUR-sourced RevPi if you buy direct from KUNBUS.
 
 ### Customer-supplied / reference (not in the kit)
 
@@ -164,7 +163,7 @@ The $175 figure is the sum of Raspberry Pi's own announcements. The official pro
 [camelcamelcamel B07BLS5477](https://camelcamelcamel.com/product/B07BLS5477) (the Amazon listing) blocks the fetcher, so the Amazon history is not found.
 
 - **D435 vs D435i vs D405** ([store list prices, 2026-09-28](https://store.realsenseai.com/)):
-  - **D435 ($314)** is what is used and what `bracket.py` locates by its tripod boss and M3 holes.
+  - **D435 ($314)** is what is used and what `bracket.py` locates by its tripod boss and body outline (Rev C).
   - **D435i ($334)** is the same body with an IMU. The pick pipeline does not use the IMU, so the $20 buys nothing here. The bracket fits it, since the body and mounting points are the same.
   - **D436 ($354)** is listed as a D435i with a 1 MP global-shutter, wider-FOV RGB sensor ([librealsense #14858](https://github.com/realsenseai/librealsense/issues/14858)). Not evaluated.
   - **D405 ($272)** is short range (7 to 50 cm), has no IR projector, takes its RGB from the depth imagers, and measures 42 x 42 x 23 mm ([Robot Report](https://www.therobotreport.com/intel-adds-short-range-realsense-d405-depth-camera/)). It would remove the D435's under-0.2 m blind zone that forces the pick routine's 0.24 m close look. It needs a new bracket and has not been tested with this code. Optional line O5.
@@ -193,16 +192,16 @@ The $175 figure is the sum of Raspberry Pi's own announcements. The official pro
 
 ### K7: Bracket print material: PPA-CF
 
-- The bracket README (§5) specifies PPA-CF (Bambu PPA-CF or Polymaker Fiberon PPA-CF). The e-Series print uses about 27 g of part and about 31 g of filament, printed on a hardened 0.4 mm nozzle at 300 to 320 °C in an enclosure. Alternatives: PA6-CF or PET-CF.
-- **Bambu Lab PPA-CF, black, 0.75 kg with spool, SKU N06-K0-1.75-750-SPL:** **$149.99**, available, from the [Bambu US store product JSON](https://bambulab-us.myshopify.com/products/ppa-cf) (2026-09-28). That is $0.20/g, so 31 g = **$6.20** per bracket. Distributor: [MatterHackers](https://www.matterhackers.com/store/l/bambu-lab-ppa-cf-filament/sk/MF7C2ZUL), $198.00 per 0.75 kg (search snippet). History: not found.
+- The bracket README (§5) specifies PPA-CF (Bambu PPA-CF or Polymaker Fiberon PPA-CF). The e-Series Rev C print is estimated at about 36 g of part and about 40 g of filament (Rev B.2: 27 g / 31 g), printed on a hardened 0.4 mm nozzle at 300 to 320 °C in an enclosure. Alternatives: PA6-CF or PET-CF.
+- **Bambu Lab PPA-CF, black, 0.75 kg with spool, SKU N06-K0-1.75-750-SPL:** **$149.99**, available, from the [Bambu US store product JSON](https://bambulab-us.myshopify.com/products/ppa-cf) (2026-09-28). That is $0.20/g, so 40 g = **$8.00** per bracket. Distributor: [MatterHackers](https://www.matterhackers.com/store/l/bambu-lab-ppa-cf-filament/sk/MF7C2ZUL), $198.00 per 0.75 kg (search snippet). History: not found.
 - **Polymaker Fiberon PPA-CF:** I found no such product in Polymaker's shop on 2026-09-28. The nearest Fiberon grade is [Fiberon PA6-CF20](https://shop.polymaker.com/products/fiberon-pa6-cf20) (FG03001): $39.99 per 0.5 kg, in stock, with 3 kg for $159.99. The README's "Polymaker Fiberon PPA-CF" should be checked.
-- **Heat-set inserts:** **none.** The bracket README's hardware list (§4) has no inserts. The camera screws go into the D435's own 1/4-20 and M3 threads, and the tool bolts pass straight through the plate into the flange.
-- The UR20/UR30 print uses about 45 g of filament (about $9). It is not part of the UR3e kit.
+- **Heat-set inserts:** **none.** The bracket README's hardware list (§4) has no inserts. The one camera screw goes into the D435's own 1/4-20 thread (Rev C: the lip locates the camera, the M3s are unused), and the tool bolts pass straight through the plate into the flange.
+- The UR20/UR30 Rev C print is estimated at about 60 g of filament (about $12). It is not part of the UR3e kit.
 
 ### K8 to K12: Fasteners (bracket README §4)
 
-- **K8. 1/4-20 UNC x 1/2 in flat head socket cap, 82 deg, 18-8 stainless, qty 1:** [U-Turn Fasteners SCFH025C0050SS](https://www.uturnfasteners.com/1-4-20-x-1-2-flat-head-socket-cap-screw-18-8-stainless-steel/), **$0.08**, 255 in stock, 2026-09-28. The README says to measure the D435's thread depth first (A4); a 7/16 in screw is the fallback. Torque 1.5 N·m. History: not found.
-- **K9. M3 x 8 flat head, 90 deg, DIN 965, A2, qty 2:** [Monster Bolts](https://monsterbolts.com/products/mach-phil-flat-a2-m3), 10-pack "SA2 M03 x 008.0010", **$0.89**, in stock, 2026-09-28. The camera allows **at most 3 mm engagement and 0.4 N·m**. History: not found.
+- **K8. 1/4-20 UNC x 3/8 in flat head socket cap, 82 deg, 18-8 stainless, qty 1 (Rev C, 2026-10-02):** the Rev C wall is thinner, so the 1/2 in screw would go ≈ 8.9 mm into the camera; 3/8 in gives ≈ 5.7 mm. The 1/2 in version was [U-Turn Fasteners SCFH025C0050SS](https://www.uturnfasteners.com/1-4-20-x-1-2-flat-head-socket-cap-screw-18-8-stainless-steel/), **$0.08**, 255 in stock, 2026-09-28; the 3/8 in part number and price are **not checked**. The README says to measure the D435's thread depth first (A4); a 5/16 in screw is the fallback. Torque 1.5 N·m. History: not found.
+- **K9. Removed in bracket Rev C (2026-10-02):** the two M3 x 8 flat heads ([Monster Bolts](https://monsterbolts.com/products/mach-phil-flat-a2-m3), $0.89 / 10) are no longer used; a chamfered lip locates the camera.
 - **K10. Tool bolts, qty 4.** The README rule is "the tool's own bolts, 8 mm longer". The Hand-E e-Series coupling (GRP-ES-CPL-062) mounts with M6 x 10 low-head socket cap screws: the manual lists M6-1.0 low-head clearance on the ISO 50-4-M6 coupling and M6 x 10 screws for coupling mounting ([Hand-E e-Series manual PDF](https://assets.robotiq.com/website-assets/support_documents/document/Hand-E_Instruction_Manual_e-Series_PDF_20190122.pdf), §3.4.2 and §6). Two things need checking before the first fit:
   - "+8 mm" gives M6 x 18, but the adapter plate is only **6 mm** thick, so M6 x 18 adds 2 mm of engagement in the flange. The flange allows **≤ 8 mm** of engagement (README §2).
   - Monster Bolts stocks DIN 7984 A2 M6 in 12, 16 and 20 mm, not 18.
@@ -228,14 +227,14 @@ The $175 figure is the sum of Raspberry Pi's own announcements. The official pro
 
 | Group | Amount |
 |-------|--------|
-| **Kit per cell, primary PC (Raspberry Pi 4 4 GB + case + microSD + 5 V PSU)** | **$784.56** + K11, K12 (not found) |
-| Kit per cell, industrial PC (RevPi Connect 5, 100416 + HDR-60-24) | $1,420.51 + K11, K12 |
-| Kit per cell, industrial PC (CompuLab IOT-GATE-RPI5 8 GB + DIN clip + HDR-60-24) | $1,112.01 + K11, K12 |
-| Kit per cell, RevPi bought from KUNBUS direct instead of Phytools (EUR 659 = $749.81) | $1,374.32 + K11, K12 + import duty/shipping |
+| **Kit per cell, primary PC (Raspberry Pi 4 4 GB + case + microSD + 5 V PSU)** | **$785.39** + K8, K11, K12 (not found) |
+| Kit per cell, industrial PC (RevPi Connect 5, 100416 + HDR-60-24) | $1,421.34 + K8, K11, K12 |
+| Kit per cell, industrial PC (CompuLab IOT-GATE-RPI5 8 GB + DIN clip + HDR-60-24) | $1,112.84 + K8, K11, K12 |
+| Kit per cell, RevPi bought from KUNBUS direct instead of Phytools (EUR 659 = $749.81) | $1,375.15 + K8, K11, K12 + import duty/shipping |
 | Customer-supplied (UR3e + Hand-E kit) | $39,268.41 |
 | Optional upgrades (O1 igus dress pack + O2 active 5 m cable, if both) | about $673.38 |
 
-Recurring consumables are counted per cell: the ONE-WRAP roll ($50.00) and the PPA-CF spool ($149.99, about 24 brackets per spool) are bought once and shared across builds. Costing only what one cell uses, the primary kit is about **$739** (hook-and-loop about $4, filament $6.20); the RevPi kit about $1,375.
+Recurring consumables are counted per cell: the ONE-WRAP roll ($50.00) and the PPA-CF spool ($149.99, about 18 Rev C brackets per spool) are bought once and shared across builds. Costing only what one cell uses, the primary kit is about **$740** (hook-and-loop about $4, filament $8.00); the RevPi kit about $1,375.
 
 ---
 

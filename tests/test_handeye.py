@@ -30,14 +30,23 @@ def _close(a, b, tol=1e-9):
     return all(abs(x - y) < tol for x, y in zip(a, b, strict=True))
 
 
+C5, S5 = math.cos(math.radians(5.0)), math.sin(math.radians(5.0))
+SEED_ORIGIN = (0.0175, 0.063922336, 0.000626916)
+
+
 def test_bracket_nominal_matches_readme_section_3():
-    # depth origin (17.5, 66.5, 1.7) mm; x_cam = -X, y_cam = -Y, z_cam = +Z (camera on +Y)
-    assert _close(BRACKET_NOMINAL.translation, (0.0175, 0.0665, 0.0017))
+    # Rev C: depth origin (17.5, 63.9, 0.6) mm; x_cam = -X, the optical axis drafted 5° from +Z
+    # toward the flange axis (the camera is on +Y, so z_cam leans to -Y), y_cam follows it
+    assert _close(BRACKET_NOMINAL.translation, SEED_ORIGIN)
     assert _close(BRACKET_NOMINAL.rotate((1, 0, 0)), (-1, 0, 0))
-    assert _close(BRACKET_NOMINAL.rotate((0, 1, 0)), (0, -1, 0))
-    assert _close(BRACKET_NOMINAL.rotate((0, 0, 1)), (0, 0, 1))
-    # a point 300 mm straight out of the lens sits 303.7 mm out of the flange face
-    assert _close(HandEye().camera_to_flange((0, 0, 0.3)), (0.0175, 0.0665, 0.3017))
+    assert _close(BRACKET_NOMINAL.rotate((0, 1, 0)), (0, -C5, -S5))
+    assert _close(BRACKET_NOMINAL.rotate((0, 0, 1)), (0, -S5, C5))
+    # a point 300 mm out of the lens is 26 mm nearer the flange axis than the lens is
+    x, y, z = HandEye().camera_to_flange((0, 0, 0.3))
+    assert _close((x, y, z), (0.0175, SEED_ORIGIN[1] - 0.3 * S5, SEED_ORIGIN[2] + 0.3 * C5))
+    assert SEED_ORIGIN[1] - y == pytest.approx(0.02615, abs=1e-5)
+    # the optical axis crosses the flange's YZ-plane centre line ~0.73 m out
+    assert SEED_ORIGIN[1] / math.tan(math.radians(5.0)) == pytest.approx(0.7306, abs=1e-4)
 
 
 def test_extrinsics_move_the_colour_origin():
@@ -46,7 +55,8 @@ def test_extrinsics_move_the_colour_origin():
     # SDK convention: p_color = R·p_depth + t, so the *depth* origin sits at
     # +15 mm along colour x; a point on the colour axis is at depth x = -15 mm,
     # and camera x is flange -X.
-    assert _close(he.camera_to_flange((0, 0, 0.3)), (0.0175 + 0.015, 0.0665, 0.3017))
+    base = HandEye().camera_to_flange((0, 0, 0.3))
+    assert _close(he.camera_to_flange((0, 0, 0.3)), (base[0] + 0.015, base[1], base[2]))
     assert _close(transform_from_extrinsics(None).translation, (0, 0, 0))
     assert he.as_dict()["depth_to_color_translation"] == [0.015, 0.0, 0.0]
     assert HandEye().with_extrinsics(None).flange_to_color == HandEye().flange_to_depth
@@ -74,15 +84,16 @@ def test_locate_geometry_tool_down():
     base_from_flange = Transform.from_pose(flange)
     expect_base = base_from_flange.apply(he.camera_to_flange((0, 0, 0.3)))
     assert _close(out["point_base_m"], expect_base, 1e-9)
-    # tool down => the camera looks along base -Z; the object is 0.3017 below the flange
-    assert _close(out["view_ray_base"], (0, 0, -1), 1e-9)
-    assert out["point_base_m"][2] == pytest.approx(0.5 - 0.3017, abs=1e-9)
-    # approach = 50 mm short of the object along that ray, current tool orientation kept
-    assert out["approach_pose"][2] == pytest.approx(0.5 - 0.3017 + 0.05, abs=1e-9)
+    # tool down => the camera looks down, drafted 5° back toward the flange axis (flange y is kept
+    # under the π about Y, and the camera sits on flange +Y)
+    assert _close(out["view_ray_base"], (0, -S5, -C5), 1e-9)
+    assert out["point_base_m"][2] == pytest.approx(0.5 - SEED_ORIGIN[2] - 0.3 * C5, abs=1e-9)
+    # approach = 50 mm short of the object along the tool axis (the fingertip default), orientation kept
+    assert out["approach_pose"][2] == pytest.approx(out["point_base_m"][2] + 0.05, abs=1e-9)
     assert out["approach_pose"][3:] == tcp[3:]
     # the lateral camera offset on the bracket shows up in base xy (flange x flips under the π about Y)
     assert out["point_base_m"][0] == pytest.approx(0.5 - 0.0175, abs=1e-9)
-    assert out["point_base_m"][1] == pytest.approx(0.0 + 0.0665, abs=1e-9)
+    assert out["point_base_m"][1] == pytest.approx(SEED_ORIGIN[1] - 0.3 * S5, abs=1e-9)
     assert out["handeye"]["source"] == "bracket-nominal:eseries" and out["standoff_m"] == 0.05
 
 

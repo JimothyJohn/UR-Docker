@@ -38,27 +38,33 @@ from dataclasses import dataclass, replace
 
 from urctl.pose import Transform, Vec3, pose_inv, pose_trans
 
-# Bracket README §3 (Rev B.2), one seed per print (``hardware/d435-tool-bracket/
+# Bracket README §3 (Rev C), one seed per print (``hardware/d435-tool-bracket/
 # bracket.py`` VARIANTS; the numbers are ``out/build_info.json`` →
 # ``export.variants.<variant>.derived`` and the unit tests hold them to it).
 #
 # ``eseries`` (UR3e/UR5e/UR10e/UR16e, ISO-50 flange), ARM_ANGLE_DEG = 90 — the
-# camera hangs beside the wrist on +Y (the tool-I/O connector side): camera
-# axes in flange axes are x_cam = −X, y_cam = −Y (image-down points at the
-# mounting wall), z_cam = +Z (optical axis out of the flange); depth origin
-# (left imager) at (17.5, 66.5, 1.7) mm — wall at r = 48…54 beside the Ø90
-# wrist, front plate flush with the adapter's tool face (z = 6), zero-depth
-# plane 4.3 mm behind it (Intel's URDF: 4.2 glass + 0.1).
+# camera hangs beside the wrist on +Y (the tool-I/O connector side) on a seat
+# drafted 5° (CAM_TILT_DEG), so the optical axis tips 5° in toward the flange
+# axis: camera axes in flange axes are x_cam = −X, y_cam = (0, −cos 5°, −sin 5°)
+# (image-down points at the mounting wall), z_cam = (0, −sin 5°, cos 5°); depth
+# origin (left imager) at (17.5, 63.9, 0.6) mm — wall r = 48…51 beside the Ø90
+# wrist, the camera leaning about its outer front edge on the tool face (z = 6),
+# zero-depth plane 4.3 mm behind the front plate (Intel's URDF: 4.2 glass + 0.1).
+_TILT = math.radians(5.0)
+_CT, _ST = math.cos(_TILT), math.sin(_TILT)
 BRACKET_NOMINAL_ESERIES = Transform.from_axes(
-    (-1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (0.0175, 0.0665, 0.0017)
+    (-1.0, 0.0, 0.0), (0.0, -_CT, -_ST), (0.0, -_ST, _CT), (0.0175, 0.063922336, 0.000626916)
 )
-# ``ur20`` (UR20/UR30, ISO-50 + ISO-80 on a Ø96 plate): the wall is clocked
-# 45° off the M8 socket (UR20_ARM_ANGLE_DEG) and sits 5 mm further out (wall
-# r = 53…59), so the camera axes are the e-Series ones rotated −45° about Z and
-# the depth origin lands at (62.9, 38.2, 1.7) mm.
-_C45 = math.sqrt(0.5)
+# ``ur20`` (UR20/UR30, ISO-50 + ISO-80 on a Ø96 plate): the wall is clocked to
+# 30° (UR20_ARM_ANGLE_DEG, 60° off the M8 socket — Rev C's seat is 95 wide) and
+# sits 5 mm further out (wall r = 53…56), so the camera axes are the e-Series
+# ones rotated −60° about Z and the depth origin lands at (68.4, 19.3, 0.6) mm.
+_C30, _S30 = math.sqrt(3.0) / 2.0, 0.5
 BRACKET_NOMINAL_UR20 = Transform.from_axes(
-    (-_C45, _C45, 0.0), (-_C45, -_C45, 0.0), (0.0, 0.0, 1.0), (0.062932504, 0.038183766, 0.0017)
+    (-_S30, _C30, 0.0),
+    (-_CT * _C30, -_CT * _S30, -_ST),
+    (-_ST * _C30, -_ST * _S30, _CT),
+    (0.068438494, 0.019305723, 0.000626916),
 )
 BRACKET_SEEDS: dict[str, Transform] = {"eseries": BRACKET_NOMINAL_ESERIES, "ur20": BRACKET_NOMINAL_UR20}
 DEFAULT_BRACKET = "eseries"
