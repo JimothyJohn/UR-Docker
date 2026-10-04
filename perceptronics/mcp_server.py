@@ -169,6 +169,16 @@ COCKPIT_TOOLS: list[CockpitTool] = [
         lambda c, p: c.doctor(robot=p.get("robot", True)),
     ),
     CockpitTool(
+        "cell_workplane_check",
+        "Compare a workplane from the cell store (the table touched off at three points with the TCP: the "
+        "`workplane` robot tool, any arm) with the table the camera sees now: offset_mm (the camera's table "
+        "above the taught plane, at the area's centre), tilt_deg between the two planes, the points and "
+        "area coverage used. Within ~1-2 mm and a fraction of a degree means the TCP touch-off and the "
+        "hand-eye calibration agree. Needs the live robot pose.",
+        _schema({"name": {"type": "string"}}, required=["name"]),
+        lambda c, p: c.workplane_check(p["name"]),
+    ),
+    CockpitTool(
         "cal_status",
         "Hand-eye calibration session: the touched mark (base frame), the recorded views, the solve result "
         "if any, and the hand-eye transform currently active (bracket seed / file / env / calibrated).",

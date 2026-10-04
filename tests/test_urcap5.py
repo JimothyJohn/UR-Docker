@@ -33,7 +33,7 @@ import urcap5  # noqa: E402
 
 SRC = ROOT / "urcap" / "perceptronic-ps5"
 JAVA = SRC / "src" / "io" / "advin" / "perceptronic"
-DIST = ROOT / "urcap" / "dist" / "perceptronic-ps5-0.8.0.urcap"
+DIST = ROOT / "urcap" / "dist" / "perceptronic-ps5-0.9.0.urcap"
 JAVAC = shutil.which("javac")
 # the screens (pure Swing): the harness lays them out off-screen
 SCREEN_JAVA = ("PickScreen.java", "LiveView.java", "LocationsScreen.java")
@@ -245,7 +245,17 @@ public class Harness {
                 List<Object> toks = new ArrayList<Object>();
                 for (int i = -1; i < s.points.size(); i++) toks.add(s.tokens(i));
                 m.put("tokens", toks);
+                List<Object> teach = new ArrayList<Object>();
+                for (int i = -1; i < s.points.size(); i++) teach.add(s.teachTokens(i));
+                m.put("teach_tokens", teach);
                 out = m;
+                break;
+            }
+            case "at": {
+                // the Part step's tap: what Scene.at finds under picture pixel (u, v)
+                Scene sc = Scene.parse(Json.parseObject(a[1]));
+                Scene.Part p = sc.at(Integer.parseInt(a[2]), Integer.parseInt(a[3]), Integer.parseInt(a[4]));
+                out = p == null ? null : java.util.Arrays.asList(p.lengthMm, p.widthMm, p.heightMm);
                 break;
             }
             case "set": {
@@ -422,6 +432,9 @@ public class Harness {
                         screen.show(ps, rows, Math.max(0, n - 1));
                         if (args[5].equals("part")) screen.showOptions(0);
                         if (args[5].equals("approach")) screen.showOptions(1);
+                        if (args[5].equals("look")) screen.showStep(PickScreen.LOOK);
+                        if (args[5].equals("teach")) screen.showStep(PickScreen.PART);
+                        if (args[5].equals("grip")) screen.showStep(PickScreen.GRIP);
                         screen.setSize(Integer.parseInt(args[1]), Integer.parseInt(args[2]));
                         layout(screen);
                         List<Object> clipped = new ArrayList<Object>();
@@ -648,9 +661,10 @@ def java_client(tmp_path_factory):
 
 
 def test_cockpit_url_rules_match_the_polyscope_x_node(java_client):
-    # The PolyScope X node's cockpitBase table, with "this host" = the controller.
+    # The PolyScope X node's cockpitBase table, with "this host" = the controller; empty is
+    # the pick PC's factory address, so a robot nobody configured needs nothing typed.
     cases = {
-        "": "http://127.0.0.1:7621",
+        "": "http://192.168.3.20:7621",
         ":7621": "http://127.0.0.1:7621",
         "7621": "http://127.0.0.1:7621",
         " :7622/ ": "http://127.0.0.1:7622",
@@ -746,6 +760,11 @@ def test_a_lost_camera_computer_says_what_to_check_and_the_long_story_goes_to_th
     assert "not the camera program" in remote["summary"]
     assert [c.split(":")[0] for c in remote["checks"]] == ["IP address", "Camera program", "Firewall"]
     assert "loopback" in remote["detail"]
+    # the pick PC at its factory address and silent: the robot is probably not on its network
+    factory = java_client("explain", "timeout", "http://192.168.3.20:7621")
+    robot_net = [c for c in factory["checks"] if c.startswith("Robot network:")]
+    assert len(robot_net) == 1 and "DHCP" in robot_net[0] and "192.168.3.3" in robot_net[0]
+    assert not any(c.startswith("IP address:") for c in factory["checks"])
     dns = java_client("explain", "dns", "http://jetson:7621")
     assert "jetson" in dns["summary"] and dns["checks"][0].startswith("IP address:")
     assert "is not an address" in java_client("explain", "url", "ht!tp://x")["summary"]

@@ -5,11 +5,16 @@
 #   scripts/deploy-pi.sh pi@192.168.3.10                      # cell ur3 (the default)
 #   scripts/deploy-pi.sh pi@192.168.3.10 --cell ur3 --robot-host 192.168.3.3
 #   scripts/deploy-pi.sh pi@192.168.3.10 --allow-from 192.168.3.0/24
+#   scripts/deploy-pi.sh pi@10.0.0.56 --cell-if eth0 --cell-address 192.168.3.20/24   # the defaults
+#   scripts/deploy-pi.sh pi@10.0.0.56 --cell-if none          # leave the PC's network alone
 #   scripts/deploy-pi.sh pi@192.168.3.10 --doctor-only
 #   scripts/deploy-pi.sh pi@192.168.3.10 --rollback            # previous release, restart
 #
+# PYTHON=/path/to/python3 picks the Python that builds the wheel (default: the first with pip).
 # --cell / --robot-host rewrite /etc/perceptronics/cell.env on the PC (the old one is kept
-# beside it); without them an existing cell.env is left alone. Authentication is your
+# beside it); without them an existing cell.env is left alone. --cell-if / --cell-address
+# set the cell port up for a robot nobody configured (install.sh: a fixed address, and a
+# one-lease DHCP server for the robot when no other DHCP server answers there). Authentication is your
 # SSH key (or ssh's own password prompt); sudo on the PC prompts on the terminal (ssh -t),
 # or, run without a terminal (an agent), must be passwordless (`sudo -n`, fails fast).
 # Nothing here reads, stores or echoes a password.
@@ -33,7 +38,7 @@ mode=deploy
 reconfigure=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --cell | --robot-host | --allow-from)
+        --cell | --robot-host | --allow-from | --cell-if | --cell-address)
             [ $# -ge 2 ] || die "$1 needs a value"
             install_args+=("$1" "$2")
             case "$1" in --cell | --robot-host) reconfigure=1 ;; esac
@@ -88,14 +93,24 @@ case "$mode" in
         ;;
 esac
 
-python3 -m pip --version >/dev/null 2>&1 || die "python3 with pip not found (needed to build the wheel)"
+# The wheel is built with the first Python that has pip: $PYTHON, then python3 on PATH, then
+# the usual installs. A repo .venv made from requirements-dev.txt has no pip and is often
+# first on PATH (it was on the Mac Studio, 2026-10-02), so PATH alone isn't enough.
+py=""
+for cand in ${PYTHON:+"$PYTHON"} python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -m pip --version >/dev/null 2>&1; then
+        py="$cand"
+        break
+    fi
+done
+[ -n "$py" ] || die "no python3 with pip found (needed to build the wheel); set PYTHON=/path/to/python3"
 arch="$(ssh "${ssh_opts[@]}" "$target" uname -m)"
 [ "$arch" = aarch64 ] || log "warning: ${target} is ${arch}, not aarch64 — install.sh builds natively, carrying on"
 
 stage_local="$(mktemp -d)"
 trap 'rm -rf "$stage_local"' EXIT
-log "building the wheel (pip wheel)"
-python3 -m pip wheel "$repo" --no-deps --wheel-dir "$stage_local" -q
+log "building the wheel ($py -m pip wheel)"
+"$py" -m pip wheel "$repo" --no-deps --wheel-dir "$stage_local" -q
 wheel="$(find "$stage_local" -maxdepth 1 -name '*-py3-none-any.whl' | head -n 1)"
 [ -n "$wheel" ] || die "pip wheel produced no pure-Python wheel"
 log "built $(basename "$wheel")"
@@ -113,5 +128,14 @@ ssh "${ssh_opts[@]}" "$target" "$(remote_cmd rm -rf "$stage_remote")" || true
 [ "$status" -eq 0 ] || die "install.sh failed on ${target} (exit ${status})"
 
 run_doctor
-host="${target#*@}"
-log "done. On the pendant: Installation -> URCaps -> Perceptronic -> Cockpit = http://${host}:7621 -> Save"
+cell_address=192.168.3.20
+for ((i = 0; i < ${#install_args[@]}; i++)); do
+    [ "${install_args[$i]}" = --cell-address ] && cell_address="${install_args[$((i + 1))]%/*}"
+done
+if [ "$cell_address" = 192.168.3.20 ]; then
+    log "done. On the pendant nothing to type: the URCap's Cockpit field defaults to this PC's cell address 192.168.3.20;" \
+        "a robot already on 192.168.3.x/24 (the UR3e: 192.168.3.3) stays as it is; one on DHCP gets 192.168.3.3 from this PC." \
+        "The whole procedure: PLUG-AND-PLAY.md"
+else
+    log "done. On the pendant: Installation -> URCaps -> Perceptronic -> Cockpit = ${cell_address} -> Save"
+fi

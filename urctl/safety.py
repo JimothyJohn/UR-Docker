@@ -63,6 +63,8 @@ MODEL_REACH_M: dict[str, float] = {
     "UR16E": 0.9,
     "UR20": 1.75,
     "UR30": 1.3,
+    # UFACTORY (urctl.ufactory): the 850's datasheet reach is 850 mm.
+    "UF850": 0.85,
 }
 
 

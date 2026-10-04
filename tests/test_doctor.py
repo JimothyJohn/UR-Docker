@@ -164,6 +164,22 @@ def test_bracket_model_mismatch_is_flagged(listener, monkeypatch):
     assert c["handeye.bracket"]["ok"] is False and "PERCEPTRONICS_BRACKET=ur20" in c["handeye.bracket"]["fix"]
 
 
+def test_a_ufactory_850_expects_the_uf850_print(listener, monkeypatch):
+    cfg, robot = _fake_robot(listener, monkeypatch)
+    env = {"UR_ROBOT_MODEL": "UF850", "PERCEPTRONICS_BRACKET": "eseries"}
+    c = _by_name(
+        run_doctor(robot_config=cfg, camera=False, robot_factory=lambda _c: robot, env=env).as_dict()
+    )
+    assert (
+        c["handeye.bracket"]["ok"] is False and "PERCEPTRONICS_BRACKET=uf850" in c["handeye.bracket"]["fix"]
+    )
+    env["PERCEPTRONICS_BRACKET"] = "uf850"
+    c = _by_name(
+        run_doctor(robot_config=cfg, camera=False, robot_factory=lambda _c: robot, env=env).as_dict()
+    )
+    assert "handeye.bracket" not in c
+
+
 def test_render_lists_fixes_under_failures():
     cfg = RobotConfig(
         host="127.0.0.1", platform="polyscopex", robot_api_port=_closed_port(), dashboard_port=_closed_port()
@@ -207,3 +223,161 @@ def test_approach_check_names_the_tool_offset_every_move_runs_with():
     assert flange.ok is None and flange.severity == "warn" and "fingertip" in flange.fix
     bad = approach_check([0] * 6, {"PERCEPTRONICS_TIP_M": "-1"})
     assert bad.ok is False and bad.severity == "critical"
+
+
+# ----- the camera a running cockpit owns (first Pi deploy, 2026-10-02) ----------------
+
+
+@pytest.fixture
+def cockpit_info():
+    """A real HTTP server answering ``/api/info`` with whatever the test puts in
+    ``info`` — the running cockpit, as the doctor sees it."""
+    import json
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    info: dict = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps(info).encode()
+            self.send_response(200 if self.path == "/api/info" else 404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield info, f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+
+
+D435 = {"name": "RealSense D435", "serial": "832112072004", "firmware": "5.12.7.100", "usb_type": "3.2"}
+
+
+def _camera_is_busy(monkeypatch, wait_s: float = 0.0):
+    """What librealsense answers a second process while the cockpit streams."""
+    from perceptronics import doctor, realsense
+
+    monkeypatch.setattr(doctor, "COCKPIT_OPEN_WAIT_S", wait_s)
+
+    def busy(library=None):
+        raise realsense.RealSenseError("rs2_create_device(info_list, index:0): failed to set power state")
+
+    monkeypatch.setattr(doctor, "check_sdk", lambda report, library=None: True)
+    monkeypatch.setattr(realsense, "list_devices", busy)
+
+
+def test_camera_held_by_the_running_cockpit_is_not_a_failure(cockpit_info, monkeypatch):
+    info, url = cockpit_info
+    info.update(camera={"kind": "realsense", "open": True, "device": D435}, fps=29.97, seq=480)
+    _camera_is_busy(monkeypatch)
+    report = run_doctor(robot=False, cockpit_url=url, env={})
+    cam = _by_name(report.as_dict())["camera"]
+    assert cam["ok"] is True
+    assert "832112072004" in cam["detail"] and "usb 3.2" in cam["detail"] and "cockpit" in cam["detail"]
+    assert report.ok
+
+
+def test_cockpit_camera_on_usb2_still_warns(cockpit_info, monkeypatch):
+    info, url = cockpit_info
+    info.update(camera={"kind": "realsense", "open": True, "device": {**D435, "usb_type": "2.1"}})
+    _camera_is_busy(monkeypatch)
+    cam = _by_name(run_doctor(robot=False, cockpit_url=url, env={}).as_dict())["camera"]
+    assert cam["ok"] is False and cam["severity"] == "warn" and "USB 2" in cam["fix"]
+
+
+@pytest.mark.parametrize(
+    "camera",
+    [
+        {"kind": "realsense", "open": False, "device": D435},  # the cockpit lost it
+        {"kind": "realsense", "open": True, "device": None},
+        {"kind": "synthetic", "open": True, "device": D435},  # a --fake cockpit owns no camera
+        {},
+    ],
+)
+def test_camera_the_cockpit_does_not_hold_is_still_checked(cockpit_info, monkeypatch, camera):
+    info, url = cockpit_info
+    info.update(camera=camera)
+    _camera_is_busy(monkeypatch)
+    report = run_doctor(robot=False, cockpit_url=url, env={})
+    cam = _by_name(report.as_dict())["camera"]
+    assert cam["ok"] is False and "failed to set power state" in cam["detail"]
+    assert not report.ok
+
+
+def test_camera_is_checked_directly_when_no_cockpit_answers(monkeypatch):
+    _camera_is_busy(monkeypatch)
+    report = run_doctor(robot=False, cockpit_url=f"http://127.0.0.1:{_closed_port()}", env={})
+    assert _by_name(report.as_dict())["camera"]["ok"] is False
+
+
+def test_doctor_waits_for_a_cockpit_that_is_still_opening_the_camera(cockpit_info, monkeypatch):
+    """deploy-pi.sh runs the doctor the second the service restarts: the cockpit
+    answers, its camera isn't open yet, and the device is already claimed."""
+    info, url = cockpit_info
+    info.update(camera={"kind": "realsense", "open": False, "device": None}, fps=0.0, seq=0)
+    _camera_is_busy(monkeypatch, wait_s=10.0)
+
+    def opens():
+        info.update(camera={"kind": "realsense", "open": True, "device": D435}, fps=29.9, seq=12)
+
+    timer = threading.Timer(0.4, opens)
+    timer.start()
+    try:
+        checks = _by_name(run_doctor(robot=False, cockpit_url=url, env={}).as_dict())
+    finally:
+        timer.cancel()
+    assert checks["camera"]["ok"] is True
+    assert "seq 12" in checks["cockpit"]["detail"]
+
+
+# -- network: on the robot's network, and what the pendant's Cockpit field needs ----------------
+
+
+def _network(host: str, local: str | None) -> dict | None:
+    from perceptronics.doctor import check_network
+
+    rep = Report()
+    check_network(rep, RobotConfig(host=host), source=lambda _h: local)
+    found = [c for c in rep.as_dict()["checks"] if c["name"] == "network"]
+    return found[0] if found else None
+
+
+def test_the_pick_pc_at_its_factory_address_needs_nothing_typed():
+    c = _network("192.168.3.3", "192.168.3.20")
+    assert c["ok"] is True and "can stay empty" in c["detail"]
+    assert c["data"]["pendant_default"] is True
+
+
+def test_another_address_on_the_cell_is_what_the_pendant_must_be_given():
+    c = _network("192.168.3.3", "192.168.3.10")
+    assert c["ok"] is True and "Cockpit = 192.168.3.10" in c["detail"]
+
+
+def test_a_robot_reached_through_a_router_is_flagged_with_the_fix():
+    # the Mac Studio with its cell interface down: the route to .3 goes out of the office LAN
+    c = _network("192.168.3.3", "10.0.0.16")
+    assert c["ok"] is False and c["severity"] == "warn"
+    assert "10.0.0.16" in c["detail"] and "192.168.3.0/24" in c["detail"]
+    assert "192.168.3.20/24" in c["fix"]
+
+
+def test_no_route_is_flagged():
+    c = _network("192.168.3.3", None)
+    assert c["ok"] is False and "no route" in c["detail"]
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "ursim.local", ""])
+def test_no_network_line_for_a_local_sim_a_name_or_no_host(host):
+    assert _network(host, "10.0.0.16") is None
+
+
+def test_source_address_names_a_local_address_without_sending_anything():
+    from perceptronics.doctor import source_address
+
+    assert source_address("127.0.0.1") == "127.0.0.1"

@@ -54,9 +54,30 @@ Vec3 = tuple[float, float, float]
 MAX_RANGE_M = 2.0  # a reflection reads metres away: not the part
 CELL_M = 0.003  # target sample spacing on the surface
 MIN_STRIDE, MAX_STRIDE = 2, 8
-TOP_BAND_M = 0.006  # a flat top's own depth noise at working range
+TOP_BAND_M = 0.004  # a flat top's own depth noise at working range, heights off the fitted plane
+MAX_TILT_DEG = 8.0  # a fitted table further off level than this is not the table: level it is
+TILT_NOTE_DEG = 1.0  # the table reads this far off level: the hand-eye calibration is out
+PLANE_WINDOWS_M = (0.025, 0.012, 0.006, 0.003)
+FINE_EDGE_PX = 0.75  # the eroded fine face's outermost pixel centres sit this far inside the edge
+MAX_LEVELS = 6  # a blob is peeled at most this many heights deep
+LEDGE_RING_M = 0.012  # the ring round a top that must not stand higher than it ...
+LEDGE_FRAC = 0.2  # ... over this much of it (a ledge, not a part)
+SHOULDER_FRAC = 0.35  # a top ringed this much by heights between it and the table: a dome
+SHOULDER_LOW = 0.35  # "between": over this fraction of the top's height
+LEDGE_SEARCH_CELLS = 10  # grid cells round a face searched for its ring (≥ LEDGE_RING_M at any stride)
+NOISE_K = 3.5  # nothing stands off the surface by less than this many of its spreads
+LOCAL_TILE_M = 0.15  # the local floor's tiles: at least this, and three part lengths
+FLOOR_WINDOW_M = 0.015  # the local floor's first pass: heights this near the fitted surface
+MAX_PICK_RANGE_M = 1.6  # past this a D435 can't measure a part (its edges blur by ~2 cm): never picked
+RANGE_SLACK = 0.012  # sizes measure no better than this × the range (the D435's blur: 12-16 mm at 1.4 m)
+BLUR_PER_M = 0.008  # an edge blurs over about this × the range
+RECT_TRIM = 0.02  # a footprint's extents: its 2-98 % quantiles, scaled to the full width
+RAMP_EPS_M = 0.0015  # a cell this much lower than its neighbour toward the camera is on a far-side ramp
+FOOTPRINT_MARGIN_M = 0.005  # a part owns the cells this close round its top's footprint: its sides
 OCCUPIED_FLOOR_M = 0.005  # never call anything flatter than this a part
 LIVE_NUDGE_M = 0.015  # a taught plane follows the live table by at most this much
+CHECK_TILT_NOTE_DEG = 1.0  # taught vs measured table further apart than this: say so
+CHECK_AREA_MARGIN_M = 0.02  # the check samples the taught area and this much round it
 SURFACE_BAND_M = 0.004
 MIN_TOP_CELLS = 10
 EDGE_CELLS = 1  # a blob touching the outermost cells is cut off by the picture's edge
@@ -243,6 +264,11 @@ class Part:
     order: int = 0
     near: bool = True
     near_edge: bool = field(default=False, repr=False)
+    rect_uv: tuple = field(default=(0.0, 0.0, 0.0, 0.0, 0.0), repr=False)  # in the surface's plane
+    range_m: float = field(default=0.0, repr=False)  # camera to its top: what its tolerances grow with
+    margin_m: float = field(
+        default=FOOTPRINT_MARGIN_M, repr=False
+    )  # its edge's blur: cells this near are its
 
     # the names pickcycle / picknode already use for a block
     @property
@@ -282,9 +308,12 @@ class Scene:
     surface: Surface | None
     stride: int
     notes: list[str] = field(default_factory=list)
+    # a taught plane against the table as the camera sees it (:func:`check_surface`)
+    surface_check: dict | None = None
 
     def as_dict(self) -> dict:
         return {
+            "surface_check": self.surface_check,
             "parts": [p.as_dict() for p in self.parts],
             "rejected": [p.as_dict() for p in self.rejected],
             "surface": None if self.surface is None else self.surface.as_dict(),
@@ -297,10 +326,11 @@ class Scene:
 
 
 def occupied_min_m(spec: PartSpec | None) -> float:
-    """Anything standing this far off the surface is *something*: half the part's height
-    (never under :data:`OCCUPIED_FLOOR_M`), 8 mm without a height."""
-    if spec is not None and spec.height_m is not None:
-        return max(OCCUPIED_FLOOR_M, 0.5 * spec.height_m - spec.slack(spec.height_m))
+    """Anything standing this far off the surface is *something*: half the part's lowest
+    height on any face (never under :data:`OCCUPIED_FLOOR_M`), 8 mm without a height."""
+    if spec is not None and spec.heights():
+        low = spec.heights()[0]
+        return max(OCCUPIED_FLOOR_M, 0.5 * low - spec.slack(low))
     return 0.008
 
 
@@ -340,7 +370,9 @@ def find_parts(
     instant (flange pose ∘ hand-eye); None for a camera-only preview (no reach, no base
     heading — the camera frame stands in for the base). ``fingers``: keyword arguments for
     :func:`perceptronics.pickplan.clearance` (``stroke_m``, ``grasp_below_m``, …) — the open
-    fingers' room is checked when given."""
+    fingers' room is checked when given, and the parts are then put in the order that
+    **clears the way** (:func:`clear_the_way`): a part pinned only by other parts is picked
+    after them instead of being turned away. ``order`` breaks the ties."""
     level_ok = T_bc is not None
     T = T_bc if T_bc is not None else Transform()
     if stride is None:
@@ -368,44 +400,76 @@ def find_parts(
     if len(valid) < 50:
         return Scene([], [], surface, stride, ["almost no depth in this frame"])
 
+    check = check_surface(valid, surface) if surface is not None and level_ok else None
+    if check is not None and check["tilt_deg"] > CHECK_TILT_NOTE_DEG:
+        notes.append(
+            f"the table reads {check['tilt_deg']:.1f}° off the taught plane: re-touch it, "
+            "or the hand-eye calibration is out"
+        )
     surf = _surface(valid, surface, level_ok, spec, notes)
     if surf is None:
-        return Scene([], [], None, stride, notes + ["no work surface found in the picture"])
+        return Scene([], [], None, stride, notes + ["no work surface found in the picture"], check)
 
-    occ_min = occupied_min_m(spec)
-    hmax = 0.5 if spec is None or spec.height_m is None else 2.5 * spec.height_m + 0.02
-    hs: list[float | None] = [None] * (gw * gh)
+    hmax = 0.5 if spec is None or not spec.heights() else 2.5 * spec.heights()[-1] + 0.02
+    hs: list[float | None] = [None if p is None else surf.height(p) for p in pts]
+    uvs = [None if p is None else surf.local(p) for p in pts]
+    # the floor near each cell: the surface is never one plane over a whole view (a carpet's
+    # undulation, the D435's swells growing with z²) — 5-7 mm of spread over 3 m of carpet, 1.7 mm
+    # over 30 cm (2026-10-03); and its own roughness there, below which nothing is told from it
+    offs, sig = _local_floor(hs, uvs, spec)
+    hs = [None if hk is None else hk - offs[k] for k, hk in enumerate(hs)]
+    base = occupied_min_m(spec)
+    thr = [max(base, NOISE_K * sg) for sg in sig]
+    rough = sorted(sig[k] for k in range(len(hs)) if hs[k] is not None and NOISE_K * sig[k] > base)
+    if spec is not None and spec.heights() and len(rough) > 0.25 * len(valid):
+        sg = rough[len(rough) // 2]
+        notes.append(
+            f"the surface reads rough (±{sg * 1000:.1f} mm) over much of the picture: nothing under "
+            f"{NOISE_K * sg * 1000:.0f} mm can be told from it there — move the camera closer"
+        )
     occ = bytearray(gw * gh)
-    for k, p in enumerate(pts):
-        if p is None:
-            continue
-        hk = surf.height(p)
-        hs[k] = hk
-        if occ_min < hk < hmax:
+    for k, hk in enumerate(hs):
+        if hk is not None and thr[k] < hk < hmax:
             occ[k] = 1
     _fill_holes(occ, pts, gw, gh)
 
     parts: list[Part] = []
     rejected: list[Part] = []
-    T_cb = T.inverse()
+    blobs: dict[int, list[int]] = {}  # id(part) → its cells, for who-pins-whom
+    ctx = _Ctx(
+        pts,
+        hs,
+        uvs,
+        zc,
+        thr,
+        gw,
+        gh,
+        stride,
+        surf,
+        T,
+        T.inverse(),
+        K,
+        (w, h, depth, depth_scale_m),
+        offs,
+        spec,
+    )
     seen = bytearray(gw * gh)
     for start in range(gw * gh):
         if not occ[start] or seen[start]:
             continue
         blob = _flood(occ, seen, start, gw, gh)
-        part = _measure(
-            blob, pts, hs, zc, gw, gh, stride, surf, T_cb, K, fine=(w, h, depth, depth_scale_m, T)
-        )
-        if part is None:
-            continue
-        part.why = _why_not(part, spec, surf, reach, level_ok)
-        if part.why is None and fingers is not None:
-            part.why = _fingers(part, pts, fingers)
-        part.near = _near(part, spec)
-        (parts if part.why is None else rejected).append(part)
+        for part, own in _parts_in(blob, ctx, [], MAX_LEVELS):
+            part.why = _why_not(part, spec, surf, reach, level_ok)
+            part.near = _near(part, spec)
+            (parts if part.why is None else rejected).append(part)
+            blobs[id(part)] = own
     if order:
         order_parts(parts, T, surf, order)
-    return Scene(parts, rejected, surf, stride, notes)
+    if fingers is not None and parts:
+        for part in clear_the_way(parts, pts, blobs, fingers):
+            part.near = _near(part, spec)
+            rejected.append(part)
+    return Scene(parts, rejected, surf, stride, notes, check)
 
 
 def _surface(
@@ -422,8 +486,79 @@ def _surface(
             dh = math.copysign(LIVE_NUDGE_M, dh)
         return taught.shifted(dh)
     if level_ok:
-        return _level_surface(valid, spec)
+        surf = _level_surface(valid, spec)
+        if surf is not None and surf.tilt_deg() > TILT_NOTE_DEG:
+            notes.append(
+                f"the table reads {surf.tilt_deg():.1f}° off level: the hand-eye calibration is out "
+                "(parts are still measured off the table as seen; re-run perceptronics calibrate)"
+            )
+        return surf
     return _ransac_surface(valid)
+
+
+def check_surface(valid: Sequence[Vec3], taught: Surface) -> dict | None:
+    """The live table against a taught plane, both in the base frame: the points within
+    ``2 × LIVE_NUDGE_M`` of the plane and over its area (+ :data:`CHECK_AREA_MARGIN_M`) are
+    fitted as ``h = a·u + b·v + c`` in the plane's own coordinates (the narrowing windows
+    of :data:`PLANE_WINDOWS_M` drop the parts standing on it). Returns ``offset_mm`` — the
+    measured table's height above the taught plane at the area's centre (positive: the
+    camera sees the table higher than the robot touched it) — ``tilt_deg`` between the two
+    planes, ``tilt_dir_deg`` (the measured plane rises toward that heading in the taught
+    plane's X/Y), the inlier count and ``coverage`` (the share of the area's extent seen).
+    None when too little of the plane is in view. A good touch-off and a good hand-eye
+    calibration read within a millimetre or two and a fraction of a degree."""
+    lim = 2 * LIVE_NUDGE_M
+    if taught.area is not None:
+        x0, x1, y0, y1 = taught.area
+        cu, cv = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    else:
+        cu = cv = 0.0
+    sel = []
+    for p in valid:
+        hh = taught.height(p)
+        if abs(hh) < lim and taught.inside(p, CHECK_AREA_MARGIN_M):
+            u, v = taught.local(p)
+            sel.append((u - cu, v - cv, hh))
+    step = max(1, len(sel) // 6000)
+    sel = sel[::step]
+    fit = (0.0, 0.0, sorted(q[2] for q in sel)[len(sel) // 2] if sel else 0.0)
+    used: list = []
+    for win in (lim, *PLANE_WINDOWS_M):
+        a, b, c = fit
+        used = [q for q in sel if abs(q[2] - (a * q[0] + b * q[1] + c)) < win]
+        if len(used) < 30:
+            return None
+        n = len(used)
+        mu, mv, mh = (sum(q[i] for q in used) / n for i in range(3))
+        suu = suv = svv = suh = svh = 0.0
+        for u, v, hh in used:
+            du, dv, dh = u - mu, v - mv, hh - mh
+            suu += du * du
+            suv += du * dv
+            svv += dv * dv
+            suh += du * dh
+            svh += dv * dh
+        det = suu * svv - suv * suv
+        if det <= 1e-12 * max(1e-12, suu * svv):
+            return None
+        a = (suh * svv - svh * suv) / det
+        b = (svh * suu - suh * suv) / det
+        fit = (a, b, mh - a * mu - b * mv)
+    a, b, c = fit
+    us = [q[0] for q in used]
+    vs = [q[1] for q in used]
+    coverage = None
+    if taught.area is not None:
+        x0, x1, y0, y1 = taught.area
+        span = max(1e-9, x1 - x0) * max(1e-9, y1 - y0)
+        coverage = round(min(1.0, (max(us) - min(us)) * (max(vs) - min(vs)) / span), 2)
+    return {
+        "offset_mm": round(c * 1000.0, 2),
+        "tilt_deg": round(math.degrees(math.atan(math.hypot(a, b))), 3),
+        "tilt_dir_deg": round(math.degrees(math.atan2(b, a)), 1),
+        "points": len(used),
+        "coverage": coverage,
+    }
 
 
 def _level_surface(valid: list[Vec3], spec: PartSpec | None) -> Surface | None:
@@ -438,19 +573,67 @@ def _level_surface(valid: list[Vec3], spec: PartSpec | None) -> Surface | None:
     # smooth over three bins so a table's noise that straddles a boundary still wins
     score = {b: bins.get(b - 1, 0) + bins[b] + bins.get(b + 1, 0) for b in bins}
     best = max(score, key=lambda b: (score[b], -b))
-    if spec is not None and spec.height_m is not None:
+    if spec is not None:
         # parts' tops can outnumber the table in a crowded view: prefer the lower of two
-        # strong bands one part-height apart
-        low = best - round(spec.height_m / 0.002)
-        cand = [b for b in score if abs(b - low) <= 2]
-        if cand:
-            lb = max(cand, key=lambda b: score[b])
-            if score[lb] >= 0.5 * score[best]:
-                best = lb
+        # strong bands one part-height (on any face) apart
+        for hgt in spec.heights():
+            low = best - round(hgt / 0.002)
+            cand = [b for b in score if abs(b - low) <= 2]
+            if cand:
+                lb = max(cand, key=lambda b: score[b])
+                if score[lb] >= 0.5 * score[best]:
+                    best = lb
+                    break
     zs = sorted(p[2] for p in valid if abs(p[2] - (best + 0.5) * 0.002) <= SURFACE_BAND_M)
     if len(zs) < 30:
         return None
-    return Surface.level(zs[len(zs) // 2])
+    z0 = zs[len(zs) // 2]
+    # The table is level, but the hand-eye that puts the picture in the base frame never quite
+    # is: 1.5° of error tilts a 0.4 m view by 10 mm, enough to lift half the table over a low
+    # part's occupied height (the bench: scripts/volume_bench.py). So the band only says where
+    # the table is; the surface is the plane through it, allowed MAX_TILT_DEG off level.
+    plane = _fit_plane_near(valid, z0)
+    if plane is None:
+        return Surface.level(z0)
+    a, b, c, mx, my = plane
+    if math.degrees(math.atan(math.hypot(a, b))) > MAX_TILT_DEG:
+        return Surface.level(z0)
+    n = _unit((-a, -b, 1.0))
+    x = _unit((1.0, 0.0, a))
+    return Surface((mx, my, a * mx + b * my + c), x, _cross(n, x), n)
+
+
+def _fit_plane_near(valid: list[Vec3], z0: float) -> tuple[float, float, float, float, float] | None:
+    """``z = a x + b y + c`` through the points near height ``z0``, by least squares on a
+    window that narrows around the last fit (:data:`PLANE_WINDOWS_M`): the first pass sees a
+    tilted table's whole band, the later ones drop the parts standing on it. Also the
+    inliers' centroid ``(mx, my)``. None when the points don't pin a plane down."""
+    step = max(1, len(valid) // 6000)
+    pts = valid[::step]
+    fit = (0.0, 0.0, z0)
+    mx = my = 0.0
+    for win in PLANE_WINDOWS_M:
+        a, b, c = fit
+        sel = [p for p in pts if abs(p[2] - (a * p[0] + b * p[1] + c)) < win]
+        if len(sel) < 30:
+            return None
+        n = len(sel)
+        mx, my, mz = sum(p[0] for p in sel) / n, sum(p[1] for p in sel) / n, sum(p[2] for p in sel) / n
+        sxx = sxy = syy = sxz = syz = 0.0
+        for p in sel:
+            dx, dy, dz = p[0] - mx, p[1] - my, p[2] - mz
+            sxx += dx * dx
+            sxy += dx * dy
+            syy += dy * dy
+            sxz += dx * dz
+            syz += dy * dz
+        det = sxx * syy - sxy * sxy
+        if det <= 1e-12 * max(1e-12, sxx * syy):
+            return None
+        a = (sxz * syy - syz * sxy) / det
+        b = (syz * sxx - sxz * sxy) / det
+        fit = (a, b, mz - a * mx - b * my)
+    return (*fit, mx, my)
 
 
 def _ransac_surface(valid: list[Vec3]) -> Surface | None:
@@ -523,57 +706,364 @@ def _flood(occ: bytearray, seen: bytearray, start: int, gw: int, gh: int) -> lis
     return out
 
 
-def _measure(
-    blob: list[int],
-    pts: list,
-    hs: list,
-    zc: list[float],
-    gw: int,
-    gh: int,
-    stride: int,
-    surf: Surface,
-    T_cb: Transform,
-    K: dict,
-    fine: tuple | None = None,
-) -> Part | None:
-    heights = sorted(hs[k] for k in blob if hs[k] is not None)
-    if len(heights) < MIN_TOP_CELLS:
-        return None
-    top = heights[int(0.9 * (len(heights) - 1))]
-    face = {k for k in blob if hs[k] is not None and hs[k] >= top - TOP_BAND_M}
-    # a lone cell of the band (a flying pixel on the side) would stretch the rectangle
-    face = {k for k in face if _neighbours(k, face, gw) >= 2}
-    if len(face) < MIN_TOP_CELLS:
-        return None
-    near_edge = False
+@dataclass
+class _Ctx:
+    """One frame's sampled grid, as the measurement needs it."""
+
+    pts: list
+    hs: list  # height off the local floor
+    uvs: list  # in the surface's plane
+    zc: list
+    thr: list  # occupied above this, per cell
+    gw: int
+    gh: int
+    stride: int
+    surf: Surface
+    T: Transform  # camera → base
+    T_cb: Transform
+    K: dict
+    fine: tuple  # (w, h, depth, scale)
+    offs: list  # the local floor's offset, per cell
+    spec: PartSpec | None
+
+
+def _local_floor(hs: list, uvs: list, spec: PartSpec | None) -> tuple[list[float], list[float]]:
+    """The floor's height off the fitted surface near every cell, and its spread there: the
+    median and MAD of the near-floor heights in square tiles of the surface (three part lengths,
+    never under :data:`LOCAL_TILE_M` — a part can't outvote the floor round it), each smoothly
+    interpolated between tile centres. Two passes, the second on what the first left."""
+    n = len(hs)
+    offs, sig = [0.0] * n, [0.0] * n
+    cells = [k for k in range(n) if hs[k] is not None]
+    if len(cells) < 50:
+        return offs, sig
+    longest = max([spec.length_m, *spec.heights()]) if spec is not None else 0.07
+    S = max(LOCAL_TILE_M, 3.0 * longest)
+    u0 = min(uvs[k][0] for k in cells)
+    v0 = min(uvs[k][1] for k in cells)
+    nx = int((max(uvs[k][0] for k in cells) - u0) / S) + 1
+    ny = int((max(uvs[k][1] for k in cells) - v0) / S) + 1
+    step = max(1, len(cells) // 40000)
+    window = [FLOOR_WINDOW_M] * n
+    for _ in range(2):
+        bins: list[list[float]] = [[] for _ in range(nx * ny)]
+        for k in cells[::step]:
+            r = hs[k] - offs[k]
+            if abs(r) < window[k]:
+                t = min(ny - 1, int((uvs[k][1] - v0) / S)) * nx + min(nx - 1, int((uvs[k][0] - u0) / S))
+                bins[t].append(hs[k])
+        med: list[float | None] = [None] * (nx * ny)
+        mad: list[float | None] = [None] * (nx * ny)
+        for t, b in enumerate(bins):
+            if len(b) >= 20:
+                b.sort()
+                m = b[len(b) // 2]
+                med[t] = m
+                d = sorted(abs(x - m) for x in b)
+                mad[t] = 1.4826 * d[len(d) // 2]
+        _fill_tiles(med, nx, ny)
+        _fill_tiles(mad, nx, ny)
+        for k in cells:
+            fx = min(max((uvs[k][0] - u0) / S - 0.5, 0.0), nx - 1.0)
+            fy = min(max((uvs[k][1] - v0) / S - 0.5, 0.0), ny - 1.0)
+            x0, y0 = int(fx), int(fy)
+            a, b = y0 * nx + x0, y0 * nx + min(nx - 1, x0 + 1)
+            cc, dd = min(ny - 1, y0 + 1) * nx + x0, min(ny - 1, y0 + 1) * nx + min(nx - 1, x0 + 1)
+            ax, ay = fx - x0, fy - y0
+            wa, wb, wc, wd = (1 - ax) * (1 - ay), ax * (1 - ay), (1 - ax) * ay, ax * ay
+            offs[k] = med[a] * wa + med[b] * wb + med[cc] * wc + med[dd] * wd
+            sg = mad[a] * wa + mad[b] * wb + mad[cc] * wc + mad[dd] * wd
+            sig[k] = sg
+            window[k] = max(SURFACE_BAND_M, 3.5 * sg)
+    return offs, sig
+
+
+def _fill_tiles(vals: list, nx: int, ny: int) -> None:
+    """Tiles with no floor of their own (all part, or no depth) take their neighbours'."""
+    if all(v is None for v in vals):
+        vals[:] = [0.0] * len(vals)
+        return
+    while any(v is None for v in vals):
+        nxt = list(vals)
+        for t, v in enumerate(vals):
+            if v is not None:
+                continue
+            y, x = divmod(t, nx)
+            got = [
+                vals[yy * nx + xx]
+                for yy in (y - 1, y, y + 1)
+                for xx in (x - 1, x, x + 1)
+                if 0 <= yy < ny and 0 <= xx < nx and vals[yy * nx + xx] is not None
+            ]
+            if got:
+                nxt[t] = sum(got) / len(got)
+        vals[:] = nxt
+
+
+def _pose_height(top: float, spec: PartSpec | None) -> float:
+    """The height the part should stand at: the spec's (on any face) nearest the measured top,
+    else the top itself."""
+    hs = spec.heights() if spec is not None else []
+    return min(hs, key=lambda h: abs(h - top)) if hs else top
+
+
+def _parts_in(blob: list[int], c: _Ctx, found: list[Part], depth: int) -> list[tuple[Part, list[int]]]:
+    """Every part in one blob of occupied cells. The footprint is where the blob stands over
+    **half the part's height** (Nick, 2026-10-03: "drawing a line halfway up the expected part
+    height") — a blurred step's half-height line is its edge, and a white label or a bright patch
+    on the top can't split it the way a band at the top did. The heights a far side reads past
+    the edge (the floor the part hides, filled in by the stereo) are slid back toward the camera
+    onto it (:func:`_unramp`). Footprints that are apart on the surface are separate parts, even
+    when the picture joins them (two tall parts' sides). What is left — a lower part beside a
+    taller one — is looked at again, ``depth`` levels deep. Each part comes with its cells."""
+    hts = sorted(c.hs[k] for k in blob if c.hs[k] is not None)
+    if len(hts) < MIN_TOP_CELLS:
+        return []
+    top = hts[int(0.85 * (len(hts) - 1))]
+    half = max(0.5 * _pose_height(top, c.spec), min(c.thr[k] for k in blob))
+    away, step = _away(blob, c)
+    uv = {k: _unramp(k, c, top, away, step) for k in blob if c.hs[k] is not None}
+    foot = {k: uv[k] for k in uv if c.hs[k] >= half}
+    level: list[tuple[Part, list[int]]] = []
+    for comp in _surface_components(foot, c):
+        if len(comp) < MIN_TOP_CELLS:
+            continue
+        part = _measure(comp, c, half, top, away, step)
+        if part is None:
+            continue
+        beside = [q for q in found + [p for p, _ in level] if _is_the_part(q, c.spec)]
+        if _not_a_top(part, comp, c, beside):
+            continue
+        level.append((part, []))
+    left = []
     for k in blob:
-        j, i = divmod(k, gw)
-        if i < EDGE_CELLS or j < EDGE_CELLS or i >= gw - EDGE_CELLS or j >= gh - EDGE_CELLS:
-            near_edge = True
-            break
-    uv = [surf.local(pts[k]) for k in face]
-    zmed = sorted(zc[k] for k in face)[len(face) // 2]
-    step = stride
-    hface = sorted(hs[k] for k in face)
-    height = hface[len(hface) // 2]
-    if fine is not None and stride > 1:
-        # the coarse cells found the part; its edges come from every pixel of its top face — a
-        # 60 mm part spans ~17 cells of 3 mm, and a rectangle through so few quantises its angle
-        # by a few degrees at some wrist headings (hypothesis found 4.1°)
-        got = _fine_face(face, gw, stride, surf, K, fine, top)
-        if len(got) >= 4 * len(face):
-            uv, step = got, 1
-    cu, cv, ang, length, width = min_area_rect(uv)
-    pad = 0.5 * step * zmed / K["fx"]  # the outermost samples sit ~half a sample inside the edges
+        q = uv.get(k) or c.uvs[k]
+        owner = next((own for part, own in level if q is not None and _owns(part, q, away, c)), None)
+        if owner is not None:
+            owner.append(k)
+        elif c.hs[k] is not None and c.hs[k] < half:
+            left.append(k)
+    out = list(level)
+    if depth > 1 and left and level:
+        for sub in _grid_components(left, c.gw):
+            if len(sub) >= MIN_TOP_CELLS and max(c.hs[k] for k in sub) > 2 * min(c.thr[k] for k in sub):
+                out.extend(_parts_in(sub, c, found + [p for p, _ in out], depth - 1))
+    return out
+
+
+def _away(blob: list[int], c: _Ctx) -> tuple[tuple[float, float], tuple[int, int]]:
+    """In the surface's plane, the unit direction away from the camera at the blob; and the
+    grid step (cells) that goes from a cell toward the camera in the picture."""
+    k = blob[len(blob) // 2]
+    p = c.pts[k]
+    if p is None:
+        p = next(c.pts[q] for q in blob if c.pts[q] is not None)
+    n, cam = c.surf.normal, c.T.translation
+    d = _sub(p, cam)
+    d = _sub(d, tuple(_dot(d, n) * x for x in n))
+    if _dot(d, d) < 1e-12:  # looking straight down at it: nothing hides behind it
+        return (0.0, 0.0), (0, 0)
+    d = _unit(d)
+    a = (_dot(d, c.surf.x_axis), _dot(d, c.surf.y_axis))
+    px0 = _project(c.T_cb, c.K, p)
+    px1 = _project(c.T_cb, c.K, tuple(p[i] - 0.02 * d[i] for i in range(3)))
+    gx, gy = px1[0] - px0[0], px1[1] - px0[1]
+    g = math.hypot(gx, gy) or 1.0
+    return a, (round(2 * gx / g), round(2 * gy / g))
+
+
+def _tan_off_normal(p: Sequence[float], c: _Ctx) -> float:
+    r = _sub(p, c.T.translation)
+    rn = math.sqrt(_dot(r, r)) or 1.0
+    cos = min(1.0, abs(_dot(r, c.surf.normal)) / rn)
+    return math.sqrt(max(0.0, 1 - cos * cos)) / max(cos, 0.05)
+
+
+def _unramp(
+    k: int, c: _Ctx, top: float, away: tuple[float, float], step: tuple[int, int]
+) -> tuple[float, float]:
+    """Cell ``k``'s place on the surface, a far-side ramp undone: behind a part the camera can't
+    see ``top·tanθ`` of floor, and the stereo fills it with a slope down from the top's far edge.
+    A cell lower than its neighbour toward the camera is on such a slope: it belongs ``(top −
+    h)·tanθ`` nearer, on the edge."""
+    u, v = c.uvs[k]
+    if not step[0] and not step[1]:
+        return u, v
+    j, i = divmod(k, c.gw)
+    jj, ii = j + step[1], i + step[0]
+    if not (0 <= jj < c.gh and 0 <= ii < c.gw):
+        return u, v
+    h, hn = c.hs[k], c.hs[jj * c.gw + ii]
+    if hn is None or hn <= h + RAMP_EPS_M or h >= top:
+        return u, v
+    d = (top - h) * _tan_off_normal(c.pts[k], c)
+    return u - d * away[0], v - d * away[1]
+
+
+def _surface_components(foot: dict[int, tuple[float, float]], c: _Ctx) -> list[set[int]]:
+    """The footprint cells grouped by where they stand on the surface (8-connected on a raster a
+    little coarser than the cells), not by where the picture puts them."""
+    if not foot:
+        return []
+    ks = list(foot)
+    z = sorted(c.zc[k] for k in ks)[len(ks) // 2]
+    pitch = max(0.002, 1.6 * c.stride * z / c.K["fx"] * (1 + _tan_off_normal(c.pts[ks[0]], c) * 0.5))
+    raster: dict[tuple[int, int], list[int]] = {}
+    for k, (u, v) in foot.items():
+        raster.setdefault((math.floor(u / pitch), math.floor(v / pitch)), []).append(k)
+    out, seen = [], set()
+    for start in raster:
+        if start in seen:
+            continue
+        comp, stack = set(), [start]
+        seen.add(start)
+        while stack:
+            key = stack.pop()
+            comp.update(raster[key])
+            for du in (-1, 0, 1):
+                for dv in (-1, 0, 1):
+                    nb = (key[0] + du, key[1] + dv)
+                    if nb in raster and nb not in seen:
+                        seen.add(nb)
+                        stack.append(nb)
+        out.append(comp)
+    return out
+
+
+def _grid_components(cells: list[int], gw: int) -> list[list[int]]:
+    have = set(cells)
+    out, seen = [], set()
+    for start in cells:
+        if start in seen:
+            continue
+        comp, stack = [], [start]
+        seen.add(start)
+        while stack:
+            k = stack.pop()
+            comp.append(k)
+            j, i = divmod(k, gw)
+            for dj in (-1, 0, 1):
+                for di in (-1, 0, 1):
+                    if not 0 <= i + di < gw:
+                        continue
+                    kk = (j + dj) * gw + i + di
+                    if kk in have and kk not in seen:
+                        seen.add(kk)
+                        stack.append(kk)
+        out.append(comp)
+    return out
+
+
+def _in_footprint(part: Part, uv: tuple[float, float], margin: float = FOOTPRINT_MARGIN_M) -> bool:
+    cu, cv, ang, length, width = part.rect_uv
+    du, dv = uv[0] - cu, uv[1] - cv
+    co, si = math.cos(ang), math.sin(ang)
+    return abs(du * co + dv * si) <= length / 2 + margin and abs(-du * si + dv * co) <= width / 2 + margin
+
+
+def _owns(part: Part, uv: tuple[float, float], away: tuple[float, float], c: _Ctx) -> bool:
+    """Is the cell at ``uv`` this part's: inside its footprint (a blur's width round it), or in
+    its shadow — the floor it hides from the camera, ``height·tanθ`` behind it, which the
+    stereo fills with whatever it likes."""
+    if _in_footprint(part, uv, part.margin_m):
+        return True
+    if not away[0] and not away[1]:
+        return False
+    reach = part.height_m * _tan_off_normal(part.centre, c)
+    for f in (0.25, 0.5, 0.75, 1.0):
+        q = (uv[0] - f * reach * away[0], uv[1] - f * reach * away[1])
+        if _in_footprint(part, q, part.margin_m):
+            return True
+    return False
+
+
+def _is_the_part(part: Part, spec: PartSpec | None) -> bool:
+    if spec is None:
+        return not (part.length_m > 0.07 or part.width_m > 0.06 or part.width_m < 0.010)
+    return spec.why_not(part.length_m, part.width_m, part.height_m, RANGE_SLACK * part.range_m) is None
+
+
+def _not_a_top(part: Part, comp: set[int], c: _Ctx, found: list[Part]) -> bool:
+    """Is this footprint something other than a part? A part drops to the floor all round, a
+    blur's width past its half-height edge (``margin_m``). In the ring beyond that, out to
+    :data:`LEDGE_RING_M` more:
+
+    - higher ground (over :data:`LEDGE_FRAC` of it) makes it a **ledge** — a slice of something
+      taller — except where it is a part already found (``found``; a lump's summit is higher
+      ground, a part beside a part is not);
+    - heights still well off the floor but under the half-height line (over
+      :data:`SHOULDER_FRAC`) make it a **dome** — a lump's flank, not a part's edge.
+
+    The real carpet frame, 2026-10-03: a 25-40 mm lump that otherwise yielded part-sized
+    slices."""
+    js = [k // c.gw for k in comp]
+    is_ = [k % c.gw for k in comp]
+    r = LEDGE_SEARCH_CELLS
+    ring = higher = shoulder = 0
+    top = part.height_m
+    inner, outer = part.margin_m, part.margin_m + LEDGE_RING_M
+    for j in range(max(0, min(js) - r), min(c.gh, max(js) + r + 1)):
+        for i in range(max(0, min(is_) - r), min(c.gw, max(is_) + r + 1)):
+            k = j * c.gw + i
+            if c.hs[k] is None:
+                continue
+            uv = c.uvs[k]
+            if not _in_footprint(part, uv, outer) or _in_footprint(part, uv, inner):
+                continue
+            if any(_in_footprint(q, uv, q.margin_m) for q in found):
+                continue
+            ring += 1
+            h = c.hs[k]
+            if h > top + max(TOP_BAND_M, 0.15 * top):
+                higher += 1
+            elif max(SHOULDER_LOW * top, c.thr[k]) < h < 0.5 * top:
+                shoulder += 1
+    return ring >= 8 and (higher >= LEDGE_FRAC * ring or shoulder >= SHOULDER_FRAC * ring)
+
+
+def _spread(hs: list) -> float:
+    """1.4826 × the median absolute height of the points near the surface (within 20 mm)."""
+    near = [abs(h) for h in hs[:: max(1, len(hs) // 8000)] if h is not None and abs(h) < 0.02]
+    if len(near) < 50:
+        return 0.0
+    near.sort()
+    return 1.4826 * near[len(near) // 2]
+
+
+def _measure(
+    comp: set[int], c: _Ctx, half: float, top: float, away: tuple[float, float], step: tuple[int, int]
+) -> Part | None:
+    """One footprint (coarse cells) measured: its rectangle from every pixel over the half-height
+    line at full resolution when there are enough of them (ramp undone, eroded one pixel), else
+    from the cells; its height the top of what it holds."""
+    gw, gh = c.gw, c.gh
+    near_edge = any(
+        i <= EDGE_CELLS or j <= EDGE_CELLS or i >= gw - 1 - EDGE_CELLS or j >= gh - 1 - EDGE_CELLS
+        for j, i in (divmod(k, gw) for k in comp)
+    )
+    hts = sorted(c.hs[k] for k in comp)
+    height = hts[int(0.8 * (len(hts) - 1))]
+    zmed = sorted(c.zc[k] for k in comp)[len(comp) // 2]
+    uv = [_unramp(k, c, top, away, step) for k in comp]
+    pitch_step = c.stride
+    if c.stride > 1:
+        got = _fine_foot(comp, c, half, top, away, step)
+        if len(got) >= 0.4 * c.stride * c.stride * len(comp):
+            uv, pitch_step = got, 1
+    cu, cv, ang, length, width = robust_rect(uv)
+    pad = (2 * FINE_EDGE_PX if pitch_step == 1 else 0.5 * pitch_step) * zmed / c.K["fx"]
     length, width = length + pad, width + pad
-    centre = surf.point(cu, cv, height)
+    surf = c.surf
+    # the centre at the part's top, on the local floor (its offset off the fitted surface)
+    off = sorted(c.offs[k] for k in comp)[len(comp) // 2]
+    centre = surf.point(cu, cv, off + height)
     ax = tuple(math.cos(ang) * surf.x_axis[i] + math.sin(ang) * surf.y_axis[i] for i in range(3))
     theta = math.atan2(ax[1], ax[0])
     corners = []
     ca, sa = math.cos(ang), math.sin(ang)
     for su, sv in ((1, 1), (-1, 1), (-1, -1), (1, -1)):
         du, dv = su * length / 2, sv * width / 2
-        corners.append(surf.point(cu + du * ca - dv * sa, cv + du * sa + dv * ca, height))
+        corners.append(surf.point(cu + du * ca - dv * sa, cv + du * sa + dv * ca, off + height))
     return Part(
         centre=centre,
         theta=_wrap_half(theta),
@@ -581,40 +1071,89 @@ def _measure(
         width_m=width,
         height_m=height,
         corners=corners,
-        pixel=_project(T_cb, K, centre),
-        corners_px=[_project(T_cb, K, c) for c in corners],
-        cells=len(face),
+        pixel=_project(c.T_cb, c.K, centre),
+        corners_px=[_project(c.T_cb, c.K, q) for q in corners],
+        cells=len(comp),
         near_edge=near_edge,
+        rect_uv=(cu, cv, ang, length, width),
+        range_m=zmed,
+        margin_m=max(FOOTPRINT_MARGIN_M, BLUR_PER_M * zmed * 2),
     )
 
 
-def _fine_face(
-    face: set[int], gw: int, stride: int, surf: Surface, K: dict, fine: tuple, top: float
+def _fine_foot(
+    comp: set[int], c: _Ctx, half: float, top: float, away: tuple[float, float], step: tuple[int, int]
 ) -> list[tuple[float, float]]:
-    """The top face at full resolution: every pixel whose coarse cell is on the face (or next to
-    it, for the edges) and whose height is within :data:`TOP_BAND_M` of the top — in the
-    surface's plane coordinates."""
-    w, h, depth, scale, T = fine
-    fx, fy, ppx, ppy = K["fx"], K["fy"], K["ppx"], K["ppy"]
-    near = set()
-    for k in face:
+    """The footprint at full resolution: every pixel of the footprint's cells (and the ring
+    next to them, for the edges) standing over the half-height line off its cell's local floor,
+    its far-side ramp undone (:func:`_unramp`, pixel by pixel), kept when its four neighbours
+    are too — a flying pixel off the side has one that isn't; the edge loses one pixel, which
+    the caller adds back (:data:`FINE_EDGE_PX`)."""
+    w, h, depth, scale = c.fine
+    gw, stride = c.gw, c.stride
+    fx, fy, ppx, ppy = c.K["fx"], c.K["fy"], c.K["ppx"], c.K["ppy"]
+    surf, T = c.surf, c.T
+    cells = set()
+    for k in comp:
         for d in (-gw - 1, -gw, -gw + 1, -1, 0, 1, gw - 1, gw, gw + 1):
-            near.add(k + d)
-    out = []
-    half = stride // 2
-    for k in near:
+            cells.add(k + d)
+    half_s = stride // 2
+    # only this part's pixels: none much taller than it (a taller neighbour next to it in the
+    # picture), none off its own patch of the surface
+    ks = list(comp)
+    cap = max(top, sorted(c.hs[k] for k in ks)[int(0.95 * (len(ks) - 1))]) + max(TOP_BAND_M, 0.25 * top)
+    z = sorted(c.zc[k] for k in ks)[len(ks) // 2]
+    pitch = max(0.002, 1.6 * stride * z / fx * (1 + _tan_off_normal(c.pts[ks[0]], c) * 0.5))
+    mine = set()
+    for k in ks:
+        u0, v0 = _unramp(k, c, top, away, step)
+        cu, cv = math.floor(u0 / pitch), math.floor(v0 / pitch)
+        mine.update((cu + du, cv + dv) for du in (-1, 0, 1) for dv in (-1, 0, 1))
+    hgt: dict[tuple[int, int], float] = {}
+    pos: dict[tuple[int, int], tuple] = {}
+
+    def at(x: int, y: int):
+        key = (x, y)
+        if key in hgt:
+            return hgt[key]
+        if not (0 <= x < w and 0 <= y < h):
+            hgt[key] = None
+            return None
+        d = depth[2 * (y * w + x)] | (depth[2 * (y * w + x) + 1] << 8)
+        if not d:
+            hgt[key] = None
+            return None
+        z = d * scale
+        p = T.apply(((x - ppx) * z / fx, (y - ppy) * z / fy, z))
+        kk = min(c.gh - 1, (y + half_s) // stride) * gw + min(gw - 1, (x + half_s) // stride)
+        hv = surf.height(p) - c.offs[kk]
+        hgt[key], pos[key] = hv, p
+        return hv
+
+    band = {}
+    sx, sy = step[0] * max(1, stride), step[1] * max(1, stride)
+    for k in cells:
+        if not 0 <= k < len(c.pts):
+            continue
         j, i = divmod(k, gw)
-        for y in range(max(0, j * stride - half), min(h, j * stride - half + stride)):
-            row = y * w
-            for x in range(max(0, i * stride - half), min(w, i * stride - half + stride)):
-                d = depth[2 * (row + x)] | (depth[2 * (row + x) + 1] << 8)
-                if not d:
+        for y in range(max(0, j * stride - half_s), min(h, j * stride - half_s + stride)):
+            for x in range(max(0, i * stride - half_s), min(w, i * stride - half_s + stride)):
+                hv = at(x, y)
+                if hv is None or hv < half or hv > cap:
                     continue
-                z = d * scale
-                p = T.apply(((x - ppx) * z / fx, (y - ppy) * z / fy, z))
-                if abs(surf.height(p) - top) <= TOP_BAND_M:
-                    out.append(surf.local(p))
-    return out
+                u, v = surf.local(pos[(x, y)])
+                if sx or sy:
+                    hn = at(x + sx, y + sy)
+                    if hn is not None and hn > hv + RAMP_EPS_M and hv < top:
+                        dd = (top - hv) * _tan_off_normal(pos[(x, y)], c)
+                        u, v = u - dd * away[0], v - dd * away[1]
+                if (math.floor(u / pitch), math.floor(v / pitch)) in mine:
+                    band[(x, y)] = (u, v)
+    return [
+        q
+        for (x, y), q in band.items()
+        if (x - 1, y) in band and (x + 1, y) in band and (x, y - 1) in band and (x, y + 1) in band
+    ]
 
 
 def _why_not(
@@ -622,8 +1161,10 @@ def _why_not(
 ) -> str | None:
     if part.near_edge:
         return "cut off by the edge of the picture"
+    if part.range_m > MAX_PICK_RANGE_M:
+        return f"too far from the camera to measure ({part.range_m:.1f} m)"
     if spec is not None:
-        why = spec.why_not(part.length_m, part.width_m, part.height_m)
+        why = spec.why_not(part.length_m, part.width_m, part.height_m, RANGE_SLACK * part.range_m)
         if why is not None:
             return why
     elif part.length_m > 0.07 or part.width_m > 0.06 or part.width_m < 0.010:
@@ -638,16 +1179,20 @@ def _why_not(
 def _near(part: Part, spec: PartSpec | None) -> bool:
     """Nearly the part? Without a size, everything found is; a piece cut off by the picture's
     edge is when what shows of it is no bigger than the part."""
+    if part.range_m > MAX_PICK_RANGE_M:
+        return False
     if spec is None or part.why is None:
         return True
     if part.near_edge:
-        return part.length_m <= spec.length_m + spec.slack(spec.length_m) and (
-            part.width_m <= spec.width_m + spec.slack(spec.width_m)
+        return part.length_m <= spec.length_m + spec.slack(spec.length_m, RANGE_SLACK * part.range_m) and (
+            part.width_m <= spec.width_m + spec.slack(spec.width_m, RANGE_SLACK * part.range_m)
         )
-    return spec.near_miss(part.length_m, part.width_m, part.height_m)
+    return spec.near_miss(part.length_m, part.width_m, part.height_m, RANGE_SLACK * part.range_m)
 
 
-def _fingers(part: Part, pts: list, fingers: dict) -> str | None:
+def _fingers(part: Part, pts: list, fingers: dict) -> dict:
+    """:func:`perceptronics.pickplan.clearance` for ``part`` against ``pts`` (None entries
+    skipped) — only the points near enough to matter."""
     from .pickplan import clearance
 
     fingers = dict(fingers)
@@ -657,10 +1202,74 @@ def _fingers(part: Part, pts: list, fingers: dict) -> str | None:
     rect = {"centre": list(part.centre), "theta": part.theta, "minor_m": part.width_m}
     if long_way:
         rect = {**rect, "theta": part.theta + math.pi / 2, "minor_m": part.length_m}
-    got = clearance(rect, near, **fingers)
-    if got["clear"]:
-        return None
+    return clearance(rect, near, **fingers)
+
+
+def _no_room(got: dict) -> str:
     return f"no room for a finger beside it ({got['worst_mm']:.0f} mm too high)"
+
+
+def clear_the_way(parts: list[Part], pts: list, blobs: dict[int, list[int]], fingers: dict) -> list[Part]:
+    """Put ``parts`` (already in the picture's order) in the order that clears the way, and
+    return the ones that can't be picked at all (``why`` set), taken out of ``parts``.
+
+    Nick, 2026-10-02: pick the parts that make other parts easier to pick. A part whose
+    finger zone is blocked *only by other parts* can go once they have gone; one blocked by
+    anything else (a wall, a wrong-size thing — what never leaves) can't. Greedy: of the
+    parts free now, take the one that frees the most others (the picture's order breaks
+    ties), and repeat. Parts that pin each other with nothing free to start from stay out."""
+    owner: dict[int, int] = {}
+    for n, p in enumerate(parts):
+        for cell in blobs.get(id(p), ()):
+            owner[cell] = n
+    background = [q for cell, q in enumerate(pts) if q is not None and cell not in owner]
+    cells_of = [[pts[c] for c in blobs.get(id(p), ()) if pts[c] is not None] for p in parts]
+    reach = [p.length_m + 0.08 + (fingers.get("room_m") or 0.0) for p in parts]
+    # the background near each part, once: a full frame is tens of thousands of points
+    around = [
+        [q for q in background if math.dist(q[:2], p.centre[:2]) < reach[n]] for n, p in enumerate(parts)
+    ]
+    blockers: list[set[int] | None] = []  # None: pinned by something that never leaves
+    for n, p in enumerate(parts):
+        if not _fingers(p, around[n], fingers)["clear"]:
+            blockers.append(None)
+            continue
+        near = [
+            m
+            for m, q in enumerate(parts)
+            if m != n and math.dist(q.centre[:2], p.centre[:2]) < reach[n] + q.length_m
+        ]
+        if _fingers(p, around[n] + [c for m in near for c in cells_of[m]], fingers)["clear"]:
+            blockers.append(set())
+            continue
+        mine = {m for m in near if not _fingers(p, around[n] + cells_of[m], fingers)["clear"]}
+        blockers.append(mine or set(near))  # several together, none alone: all of them
+    gone: set[int] = set()
+    plan: list[int] = []
+    left = [n for n in range(len(parts)) if blockers[n] is not None]
+
+    def free(n: int, after: set[int]) -> bool:
+        b = blockers[n]
+        return b is not None and b <= after
+
+    while True:
+        now = [n for n in left if n not in gone and free(n, gone)]
+        if not now:
+            break
+        pending = [n for n in left if n not in gone and not free(n, gone)]
+        pick = max(now, key=lambda n: (sum(free(m, gone | {n}) for m in pending), -n))
+        plan.append(pick)
+        gone.add(pick)
+    out = []
+    for n, p in enumerate(parts):
+        if n not in gone:
+            others = [c for m, cs in enumerate(cells_of) if m != n for c in cs]
+            p.why = _no_room(_fingers(p, around[n] + others, fingers))
+            out.append(p)
+    parts[:] = [parts[n] for n in plan]
+    for k, p in enumerate(parts, 1):
+        p.order = k
+    return out
 
 
 # -- pick order -----------------------------------------------------------------------------
@@ -749,6 +1358,48 @@ def min_area_rect(points: Sequence[tuple[float, float]]) -> tuple[float, float, 
     um, vm = (u0 + u1) / 2, (v0 + v1) / 2
     cx, cy = um * c - vm * s, um * s + vm * c
     lu, lv = u1 - u0, v1 - v0
+    if lv > lu:
+        a, lu, lv = a + math.pi / 2, lv, lu
+    return cx, cy, _wrap_half(a), lu, lv
+
+
+def robust_rect(
+    points: Sequence[tuple[float, float]], trim: float = RECT_TRIM
+) -> tuple[float, float, float, float, float]:
+    """:func:`min_area_rect` that a few stray points can't stretch: the headings are the hull's
+    edges, but each heading's extents are the ``trim``..``1 - trim`` quantiles of the points
+    along it, scaled back to a full width as for points spread evenly over the rectangle — the
+    real frames' footprints carry a few percent of noise and leftover ramp past their edges."""
+    pts = list(points)
+    if len(pts) < 40:
+        return min_area_rect(pts)
+    hull = convex_hull(pts)
+    if len(hull) < 3:
+        return min_area_rect(pts)
+    lo_i = int(trim * (len(pts) - 1))
+    hi_i = int((1 - trim) * (len(pts) - 1))
+    scale = 1.0 / (1.0 - 2.0 * trim)
+    sample = pts[:: max(1, len(pts) // 1500)]
+    lo_s = int(trim * (len(sample) - 1))
+    hi_s = int((1 - trim) * (len(sample) - 1))
+    best = None
+    for k in range(len(hull)):
+        (x0, y0), (x1, y1) = hull[k], hull[(k + 1) % len(hull)]
+        a = math.atan2(y1 - y0, x1 - x0)
+        c, s = math.cos(a), math.sin(a)
+        us = sorted(x * c + y * s for x, y in sample)
+        vs = sorted(-x * s + y * c for x, y in sample)
+        area = (us[hi_s] - us[lo_s]) * (vs[hi_s] - vs[lo_s])
+        if best is None or area < best[0]:
+            best = (area, a)
+    a = best[1]  # type: ignore[index]
+    c, s = math.cos(a), math.sin(a)
+    us = sorted(x * c + y * s for x, y in pts)
+    vs = sorted(-x * s + y * c for x, y in pts)
+    u0, u1, v0, v1 = us[lo_i], us[hi_i], vs[lo_i], vs[hi_i]
+    um, vm = (u0 + u1) / 2, (v0 + v1) / 2
+    lu, lv = (u1 - u0) * scale, (v1 - v0) * scale
+    cx, cy = um * c - vm * s, um * s + vm * c
     if lv > lu:
         a, lu, lv = a + math.pi / 2, lv, lu
     return cx, cy, _wrap_half(a), lu, lv

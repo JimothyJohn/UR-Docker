@@ -20,7 +20,7 @@ the same glyph is the toolbar button, every screen's header and a faint watermar
 Installation's and the popup's live picture (`Logo.java` draws it with Java2D; a test holds
 it equal to the SVG).
 
-Download: [`../dist/perceptronic-ps5-0.8.0.urcap`](../dist/perceptronic-ps5-0.8.0.urcap)
+Download: [`../dist/perceptronic-ps5-0.9.0.urcap`](../dist/perceptronic-ps5-0.9.0.urcap)
 
 ## Install on the robot
 
@@ -29,7 +29,7 @@ You need a USB stick and nothing else: no tools, no command line. Two files matt
 
 | File | What it is |
 | --- | --- |
-| [`perceptronic-ps5-0.8.0.urcap`](../dist/perceptronic-ps5-0.8.0.urcap) | The URCap. Always needed. |
+| [`perceptronic-ps5-0.9.0.urcap`](../dist/perceptronic-ps5-0.9.0.urcap) | The URCap. Always needed. |
 | [`urmagic_perceptronic.sh`](../dist/urmagic_perceptronic.sh) | Optional. Lets the robot install the URCap by itself when the stick goes in (B below). |
 
 ### 1. Put the files on a stick
@@ -46,14 +46,14 @@ You need a USB stick and nothing else: no tools, no command line. Two files matt
    Trash) before pulling it out. A stick pulled early can hold a half-written file.
 
 On a Mac, Finder also writes hidden `._…` companions next to each file. They are harmless
-except that PolyScope's file picker lists `._perceptronic-ps5-0.8.0.urcap` too — pick the
+except that PolyScope's file picker lists `._perceptronic-ps5-0.9.0.urcap` too — pick the
 one **without** `._`. `scripts/urcap5-usb.sh` does the whole of this step without them.
 
 ### 2A. Install by hand on the pendant (always works)
 
 1. Plug the stick into the pendant.
 2. Tap ☰ (top right) → **Settings** → **System** → **URCaps**.
-3. Tap **+**, tap `perceptronic-ps5-0.8.0.urcap`, tap **Open**.
+3. Tap **+**, tap `perceptronic-ps5-0.9.0.urcap`, tap **Open**.
 4. Tap **Restart** when PolyScope asks.
 5. After the restart: **Installation** tab → **URCaps** → **Perceptronic**.
 
@@ -120,8 +120,12 @@ listening on the network:
 
     perceptronics --cell ur3 gui --bind 0.0.0.0
 
-and type `http://<that-computer's-ip>:7621` into **Cockpit** (the pendant keyboard opens
-when you tap the field), then **Save** — it is kept in the installation. No `--cors` is
+The **Cockpit** field starts at `192.168.3.20`, the pick PC's address out of the box
+(`deploy/pi/`): with the robot's network on **DHCP** (Settings → System → Network) the pick PC
+gives the robot 192.168.3.3 and there is nothing to type. A camera computer anywhere else:
+type its address (`host`, `host:port` or a URL; the pendant keyboard opens when you tap the
+field), then **Save** — it is kept in the installation. `:7621` alone means a cockpit on the
+controller itself. No `--cors` is
 needed: the node is Java on the controller, not a web page.
 
 ## What is the same as PolyScope X, and what is not
@@ -158,15 +162,13 @@ urcap5-package`, commit `dist/`, then tag. The Python package's `v*` tags are a 
     python3 urcap/preview5.py --snapshot out.png --view part       # one screen, no display
 
 A 1280 × 800 window (the pendant's size) with the 3D Pick node's and the Installation node's
-own screens: add picture points, tap the order tiles, switch the picture to depth, open
+own screens: walk the three steps, tap a part to teach it, switch the picture to depth, open
 Options, teach pick areas. What is outlined is the real detector's answer. What only a robot
 can do is stood in for (no arm moves; a pick area's touches are a sample rectangle; typed
 values come from a dialog). Needs a JDK. The simulated picture is stamped **NO CAMERA
 CONNECTED — SIMULATED TEST SCENE**.
 
-## 3D Pick (0.8.0): survey, find the part by its size, go to the grip
-
-![The 3D Pick node's main screen](screens/pick-main.png)
+## 3D Pick (0.9.0): survey, find the part by its size, go to the grip
 
 *Rendered off-pendant from the same Swing classes (`PickScreen`), 1000 × 560, with a
 ray-cast scene through the real detector (`python3 urcap/preview5.py --screens
@@ -197,25 +199,47 @@ yellow; the ramp spans what the frame holds):
 
 ![The depth view](screens/pick-depth.png)
 
-Beside the picture, all an operator does day to day:
+Beside the picture, **three steps** (0.9.0, Nick 2026-10-02: at most three simple stages,
+fewer screens). The rail at the top shows them, with a tick on each one done; tap a step to
+go back to it, **Next** to go on.
 
-1. **Picture points** — up to 12, as a fixed grid of numbered buttons. Move the arm to where
-   the camera sees the parts (≥ 0.3 m away: the D435 is blind closer) and tap **+**;
-   PolyScope's own move screen confirms the position. Tap a number to select it: **Go**
-   moves back there, **Here** retakes it, **✕** removes it, and its second line chooses the
-   **pick area** it looks at (taught in the Installation, below) or the live table. The
-   program visits the points in turn: an empty one sends the arm on to the next.
-2. **Pick order** — eight tiles: left→right or right→left, rows front→back or back→front,
-   or by columns. Front is the **bottom of the picture** as the pendant shows it. Tapping a
-   tile renumbers the green parts at once.
-3. **Options** — two tabs, and nothing about speeds or the gripper:
+![Step 1: Look](screens/pick-look.png)
+
+1. **Look** — move the arm to where the camera sees the parts (≥ 0.3 m away: the D435 is
+   blind closer) and tap **Use this view**; PolyScope's own move screen confirms the
+   position. More views are optional: up to 12, a row of numbered buttons; tap one to
+   select it (**Go** moves back there, **Here** retakes it, **✕** removes it). The table is
+   found live in every picture; a **pick area** taught in the Installation is an extra, named
+   under the view only when one is in use. The program visits the views in turn: an empty
+   one sends the arm on to the next.
+
+![Step 2: Part](screens/pick-part.png)
+
+2. **Part** — **tap one part in the picture.** The node asks the camera computer to measure
+   everything in view with no size given, takes what is under your finger, and makes its
+   length × width × height the part's; every part like it turns green with its number. Tap
+   another to teach that one instead. A cylinder, or a size typed by hand: **Options**.
+
+![Step 3: Grip](screens/pick-grip.png)
+
+3. **Grip** — how far below the part's top the fingertips go (15 mm), drawn to scale, and
+   **Check approach**: PolyScope's move screen takes the arm over the first part with the
+   fingers open.
+
+**The pick order is not a step.** The camera computer **clears the way**: a part pinned by a
+neighbouring part (one in its finger room) is picked after that neighbour instead of being
+turned away, and a part that frees others goes first. When it does not matter, **Order** on
+the Approach tab breaks the tie (left to right, front first; tap to change). Front is the
+**bottom of the picture** as the pendant shows it.
+
+**Options** — two tabs, and nothing about speeds or the gripper:
 
 ![Options: the part](screens/pick-options.png)
 
 | Tab | Settings (default) |
 | --- | ------------------ |
 | **Part** | **Box** or **Cylinder**; length × width × height as it lies (50 × 30 × 30 mm) — a cylinder: diameter × height; tolerance (±25 %, never tighter than ±5 mm) |
-| **Approach** | approach: fingertips 25 mm over the top; grip depth 15 mm; **Grip check** (on) with its **Finger room** (20 mm); **Grip across the long side** (off); **Closer look** (on) |
+| **Approach** | approach: fingertips 25 mm over the top; grip depth 15 mm; **Grip check** (on) with its **Finger room** (20 mm); **Grip across the long side** (off); **Closer look** (on); **Order** when it does not matter (left to right, front first) |
 
 ![Options: the approach](screens/pick-approach.png)
 
@@ -332,17 +356,20 @@ through the arm's nominal geometry (UR3e/5e/10e/16e; `PoseMath.flange`, the rows
 `perceptronics/armfk.py`). `python3 urcap/urcap5.py check --sdk <dir>` holds the URCap to any
 version's jars (`urcap5.py sdk --image 5.12.8 --dir <dir>`).
 
-## Status (2026-10-01, 0.8.0)
+## Status (2026-10-02, 0.9.0)
 
 - Compiles against PolyScope 5.4's URCap API (and each version's own, in the matrix) with
-  `-Xlint:all -Werror`; the script, the option tokens, the order tiles, the plane and pose
+  `-Xlint:all -Werror`; the script, the option tokens, the order, the plane and pose
   maths, the reach table and the scene parsing are tested against the Python they stand
   for, under a JDK (`tests/test_urcap5_pick.py`).
 - The screens are pure Swing (no UR API) and render in a harness; a test lays each one out
   at two panel sizes with 0, 1 and 12 picture points and fails if any control is past the
   edge or a scroll pane exists. **Not yet seen on a pendant** — PolyScope's JVM crashes
   under emulation on the Mac, and CI checks the bundle and the script, not pixels.
-- 0.7.0 / 0.8.0 have **not run on a robot**: the closer look's aim, the finger room, the
+- 0.9.0's three steps and tap to teach are tested in the harness (each step laid out at both
+  panel sizes; a tap on a ray-cast part outside the node's size returns that part's size);
+  the PolyScope X node still has the 0.8.0 screen.
+- 0.7.0 / 0.8.0 / 0.9.0 have **not run on a robot**: the closer look's aim, the finger room, the
   long-side grip and the reach by kinematics are verified against ray-cast scenes and the
   arm's forward kinematics only.
 - `get_inverse_kin_has_solution` / `get_inverse_kin` verified on the UR3e (PolyScope

@@ -5,6 +5,8 @@ surface (fitted, taught, nudged), the reach annulus, the pick order the pendant 
 from __future__ import annotations
 
 import math
+import random
+import statistics
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -73,7 +75,8 @@ def test_things_the_wrong_size_are_rejected_with_the_reason():
     why = {(round(p.centre[0], 2), round(p.centre[1], 2)): p.why for p in sc.rejected}
     assert why[(0.40, -0.07)] == "too long"
     assert why[(0.30, 0.07)] == "too tall"
-    assert why[(0.40, 0.07)] == "too short"
+    # 30 x 30 fits the part's 40 x 30 end face, which would stand 60 tall (a box lies on any face)
+    assert why[(0.40, 0.07)] == "too flat"
 
 
 def test_two_parts_touching_end_to_end_are_named_as_such():
@@ -249,6 +252,50 @@ def test_a_neighbour_where_a_finger_goes_down_blocks_the_pick():
     assert not crowded.parts
 
 
+# -- clear the way (Nick, 2026-10-02: pick the parts that make other parts easier to pick) ----
+
+FINGERS = {"grasp_below_m": 0.015, "stroke_m": 0.050}
+# B lies along X, so its fingers come down beside it along Y — where A stands. A lies along Y,
+# its fingers come down along X, clear of B: A can go now, B once A is gone.
+PINNED = Box(0.35, 0.0, 0.06, 0.04, 0.03)
+BLOCKER = Box(0.35, 0.06, 0.06, 0.04, 0.03, math.pi / 2)  # 10 mm off B, 9 mm into its finger zone
+
+
+def test_a_part_pinned_only_by_a_pickable_neighbour_is_picked_after_it():
+    sc = detect([PINNED, BLOCKER], spec=SPEC, fingers=FINGERS)
+    assert not sc.rejected and len(sc.parts) == 2
+    first, second = sorted(sc.parts, key=lambda p: p.order)
+    assert math.dist(first.centre[:2], (BLOCKER.x, BLOCKER.y)) < 0.005  # the blocker goes first
+    assert math.dist(second.centre[:2], (PINNED.x, PINNED.y)) < 0.005
+    assert [p.order for p in sc.parts] == [1, 2]  # the list is in pick order
+
+
+def test_the_same_holds_with_the_nodes_finger_room():
+    room = {"grasp_below_m": 0.015, "room_m": 0.020}
+    sc = detect([PINNED, BLOCKER], spec=SPEC, fingers=room)
+    assert not sc.rejected and [round(p.centre[1], 2) for p in sc.parts] == [0.06, 0.0]
+
+
+def test_a_part_pinned_by_something_that_is_not_a_part_stays_out():
+    post = Box(0.35, 0.04, 0.02, 0.02, 0.03)  # too small to be the part: it never leaves
+    sc = detect([PINNED, post], spec=SPEC, fingers=FINGERS)
+    assert not sc.parts
+    pinned = [p for p in sc.rejected if math.dist(p.centre[:2], (PINNED.x, PINNED.y)) < 0.005]
+    assert pinned and pinned[0].why.startswith("no room for a finger")
+
+
+def test_the_part_that_frees_another_goes_before_the_pictures_first():
+    # FREE is first in the picture's order (front row, left) but frees nobody
+    free = Box(0.27, -0.06, 0.06, 0.04, 0.03)
+    sc = detect([free, PINNED, BLOCKER], spec=SPEC, fingers=FINGERS, order=("LR", "FB"))
+    assert len(sc.parts) == 3 and not sc.rejected
+    first = min(sc.parts, key=lambda p: p.order)
+    assert math.dist(first.centre[:2], (BLOCKER.x, BLOCKER.y)) < 0.005
+    # without the finger check there is nothing to clear, and the picture's order stands
+    plain = detect([free, PINNED, BLOCKER], spec=SPEC, order=("LR", "FB"))
+    assert math.dist(min(plain.parts, key=lambda p: p.order).centre[:2], (free.x, free.y)) < 0.005
+
+
 # -- pick order -----------------------------------------------------------------------------
 
 GRID = [Box(0.28 + 0.07 * c, -0.07 + 0.07 * r, 0.05, 0.035, 0.03) for r in range(3) for c in range(3)]
@@ -386,3 +433,177 @@ def test_garbage_depth_never_raises(noise):
     depth = (noise * (W * H * 2 // max(1, len(noise)) + 1))[: W * H * 2] if noise else bytes(W * H * 2)
     sc = find_parts(W, H, depth, 0.001, K, CAM, spec=SPEC)
     assert isinstance(sc.parts, list)
+
+
+def packed(rng, n):
+    """Up to ``n`` parts, each lying along X or Y, 8 mm or more apart: never touching (one
+    blob), often inside each other's finger zones."""
+    rects = []
+    for _ in range(200):
+        if len(rects) == n:
+            break
+        turned = rng.random() < 0.5
+        hx, hy = (0.02, 0.03) if turned else (0.03, 0.02)
+        x, y = rng.uniform(0.24, 0.46), rng.uniform(-0.09, 0.09)
+        gap = min(
+            (max(abs(x - a) - hx - ahx, abs(y - b) - hy - ahy) for a, b, ahx, ahy, _ in rects), default=1
+        )
+        if gap >= 0.008:
+            rects.append((x, y, hx, hy, turned))
+    return [Box(x, y, 0.06, 0.04, 0.03, math.pi / 2 if t else 0.0) for x, y, _, _, t in rects]
+
+
+@settings(max_examples=30, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(st.integers(0, 2**32 - 1), st.integers(2, 7))
+def test_every_part_in_the_plan_is_free_once_the_ones_before_it_are_gone(seed, n):
+    """The contract of clearing the way, checked against fresh pictures: take the planned
+    part out of the scene, re-render, and the next planned part must be pickable *then*.
+    (These layouts pin parts often: over 40 of them the old rule turned away 10 parts
+    that clearing the way picks.)"""
+    boxes = packed(random.Random(seed), n)
+
+    def box_of(part, among):
+        return min(among, key=lambda b: math.dist(part.centre[:2], (b.x, b.y)))
+
+    sc = detect(boxes, spec=SPEC, fingers=FINGERS)
+    plan = [box_of(p, boxes) for p in sorted(sc.parts, key=lambda p: p.order)]
+    left = list(boxes)
+    for box in plan:
+        now = detect(left, spec=SPEC, fingers=FINGERS)
+        assert box in [box_of(p, left) for p in now.parts], (
+            "a planned part is still pinned when its turn comes"
+        )
+        left.remove(box)
+
+
+# -- the real sensor: noise, swells, shadows, flying pixels, a hand-eye that is a little off --------
+# Sized from the Pi's D435 (synthscene.Sensor); scripts/volume_bench.py is the long version.
+
+from perceptronics.synthscene import D435, Sensor, camera_looking_at, sense  # noqa: E402
+
+LOW = PartSpec.from_mm(30, 20, 12)  # a small, low part: the one the old detector lost first
+
+
+def sensed(boxes, T=CAM, sensor=D435, seed=3, T_det=None, spec=SPEC):
+    depth = sense(scene(boxes, T), W, H, K, T, boxes, table_z=TABLE, sensor=sensor, seed=seed)
+    return find_parts(W, H, depth, 0.001, K, T_det or T, spec=spec)
+
+
+def off_by(T, deg, axis=(0.6, 0.8, 0.0)):
+    """``T`` as a hand-eye that is ``deg`` out about ``axis`` would place it."""
+    a = math.radians(deg)
+    return T.compose(Transform.from_pose([0.002, -0.001, 0.0, axis[0] * a, axis[1] * a, axis[2] * a]))
+
+
+def test_a_low_part_is_found_through_a_hand_eye_two_degrees_out_and_the_tilt_is_named():
+    # 2° tilts a 0.4 m view ~14 mm: a level table would rise over the 5 mm occupied height
+    # across half the picture and swallow the part (the old detector: one 300 mm blob)
+    T = camera_looking_at((0.30, 0.0, TABLE + 0.40), (0.34, 0.02, TABLE))
+    box = Box(0.34, 0.02, 0.030, 0.020, 0.012, 0.3)
+    sc = sensed([box], T=T, T_det=off_by(T, 2.0), spec=LOW)
+    assert len(sc.parts) == 1, [(p.why, round(p.length_m * 1000)) for p in sc.rejected]
+    assert sc.surface.tilt_deg() == pytest.approx(2.0, abs=0.4)
+    assert any("hand-eye" in n for n in sc.notes)
+
+
+def test_flying_pixels_on_the_edges_do_not_grow_the_part():
+    # the old detector read every part 3-6 mm big with real edges: a 30 x 20 part read "too wide"
+    boxes = [
+        Box(0.30 + 0.07 * (k % 3), -0.05 + 0.08 * (k // 3), 0.030, 0.020, 0.012, 0.4 * k) for k in range(6)
+    ]
+    sc = sensed(boxes, spec=LOW, sensor=Sensor(skirt_px=2))
+    assert len(sc.parts) == 6, [
+        (p.why, round(p.length_m * 1000), round(p.width_m * 1000)) for p in sc.rejected
+    ]
+    assert statistics.median(p.length_m for p in sc.parts) == pytest.approx(0.030, abs=0.0015)
+    assert statistics.median(p.width_m for p in sc.parts) == pytest.approx(0.020, abs=0.0015)
+
+
+def test_two_tall_parts_whose_sides_meet_are_two_parts_and_a_low_one_beside_them_is_found():
+    # standing on end (any face, Nick 2026-10-03), seen from the side their faces join one blob
+    # of occupied cells; the old detector fitted one 150 mm rectangle round both tops and never
+    # looked lower in the blob for the third
+    spec = PartSpec.from_mm(100, 50, 25)
+    T = camera_looking_at((0.22, -0.05, TABLE + 0.32), (0.33, 0.0, TABLE))
+    boxes = [
+        Box(0.33, -0.03, 0.050, 0.025, 0.100),
+        Box(0.33, 0.035, 0.050, 0.025, 0.100),
+        Box(0.40, 0.00, 0.100, 0.050, 0.025, 1.4),
+    ]
+    sc = sensed(boxes, T=T, spec=spec)
+    assert len(sc.parts) == 3, [(p.why, p.centre) for p in sc.rejected]
+    for b in boxes:
+        assert min(math.dist(p.centre[:2], (b.x, b.y)) for p in sc.parts) < 0.005
+
+
+def test_a_box_is_found_on_whichever_face_it_lies():
+    spec = PartSpec.from_mm(60, 40, 30)
+    boxes = [
+        Box(0.29, -0.06, 0.060, 0.040, 0.030),  # flat
+        Box(0.29, 0.06, 0.060, 0.030, 0.040, 0.7),  # on its long side
+        Box(0.41, 0.00, 0.040, 0.030, 0.060, -0.4),  # on its end
+    ]
+    sc = sensed(boxes, spec=spec)
+    assert len(sc.parts) == 3, [(p.why, p.centre) for p in sc.rejected]
+    hs = sorted(p.height_m for p in sc.parts)
+    assert hs == pytest.approx([0.030, 0.040, 0.060], abs=0.002)
+
+
+def test_an_empty_table_through_the_real_sensor_is_no_parts_and_no_near_misses():
+    sc = sensed([], T=off_by(CAM, 1.5), sensor=Sensor(warp_m=0.009, jitter_m=0.001), spec=LOW)
+    assert sc.parts == [] and not [p for p in sc.rejected if p.near]
+
+
+# -- real D435 frames (tests/fixtures/d435: the pick PC's camera, 2026-10-03) -----------------------
+
+import json  # noqa: E402
+import zlib  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+REAL = Path(__file__).parent / "fixtures" / "d435"
+
+
+def real(name, spec):
+    meta = json.loads((REAL / f"{name}.json").read_text())
+    depth = zlib.decompress((REAL / f"{name}.depth.zlib").read_bytes())
+    sc = find_parts(
+        meta["width"], meta["height"], depth, meta["depth_scale_m"], meta["intrinsics"], None, spec=spec
+    )
+    return meta, sc
+
+
+def test_four_labelled_boxes_on_carpet_at_one_and_a_half_metres_are_four_parts():
+    # the old detector: one of four (a single global plane under a carpet, a top band that the white
+    # labels and the 1.4 m blur cut into pieces); the half-height footprint on the local floor finds all
+    meta, sc = real("boxes_on_carpet_1p4m", PartSpec.from_mm(110, 70, 30))
+    assert len(sc.parts) == 4, [(p.pixel, p.why) for p in sc.rejected if p.near]
+    for px in meta["pixels"]:
+        assert min(math.dist(px, p.pixel) for p in sc.parts) < 15
+
+
+@pytest.mark.parametrize("dims", [(60, 40, 20), (200, 150, 30), (110, 70, 80)])
+def test_the_same_boxes_are_not_a_part_of_another_size(dims):
+    _, sc = real("boxes_on_carpet_1p4m", PartSpec.from_mm(*dims))
+    assert sc.parts == []
+
+
+@pytest.mark.parametrize("dims", [(50, 30, 30), (40, 30, 20), (60, 40, 40)])
+def test_a_carpet_with_a_lump_on_it_is_no_part(dims):
+    _, sc = real("carpet_lump_0p85m", PartSpec.from_mm(*dims))
+    assert sc.parts == []
+
+
+def test_two_flat_and_two_standing_boxes_at_three_quarters_of_a_metre_are_four_parts():
+    # High Density preset (High Accuracy left the near standing box's dark top 57 % holes: missed);
+    # the standing ones show their 110 x 30 face, 70 tall — a box on any face
+    meta, sc = real("boxes_flat_and_on_side_0p75m", PartSpec.from_mm(110, 70, 30))
+    assert len(sc.parts) == 4, [(p.pixel, p.why) for p in sc.rejected if p.near]
+    for px in meta["pixels"]:
+        assert min(math.dist(px, p.pixel) for p in sc.parts) < 15
+    assert sorted(round(p.height_m * 1000, -1) for p in sc.parts) == [30, 30, 70, 70]
+
+
+@pytest.mark.parametrize("dims", [(60, 40, 20), (200, 150, 30)])
+def test_flat_and_standing_boxes_are_not_a_part_of_another_size(dims):
+    _, sc = real("boxes_flat_and_on_side_0p75m", PartSpec.from_mm(*dims))
+    assert sc.parts == []

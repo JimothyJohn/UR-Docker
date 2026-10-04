@@ -40,7 +40,7 @@ import java.util.Map;
  * </ol>
  */
 final class PickScript {
-    static final String VERSION = "0.8.0";
+    static final String VERSION = "0.9.0";
     static final int DEFAULT_PICK_PORT = 7622;
     static final String SOCKET = "rs_pick";
     static final int MAX_POINTS = 12;
@@ -282,6 +282,23 @@ final class PickScript {
         b.append(" node=").append(nodeId);
         if (i >= 0) b.append(" loc=").append(i + 1);
         b.append(" locs=").append(Math.max(1, points.size())).append(" proto=2");
+        return b.toString();
+    }
+
+    /**
+     * {@link #tokens} without the part's size (no {@code part=}, {@code tol=}, {@code shape=})
+     * and without the grip check: what the Part step asks for when the operator taps the
+     * picture, so everything in view is measured whatever size the node holds now (0.9.0).
+     */
+    String teachTokens(int i) {
+        StringBuilder b = new StringBuilder();
+        for (String t : tokens(i).trim().split(" ")) {
+            if (t.startsWith("part=") || t.startsWith("tol=") || t.startsWith("shape=") || t.startsWith("room=")
+                    || t.startsWith("across=")) {
+                continue;
+            }
+            b.append(' ').append(t.startsWith("gripcheck=") ? "gripcheck=0" : t);
+        }
         return b.toString();
     }
 

@@ -10,6 +10,7 @@ the same under perceptronics's own parser, and the firewall must drop by default
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -29,6 +30,9 @@ UNIT = PI / "perceptronics-cockpit.service"
 NFT = PI / "nftables.conf"
 TEMPLATE = PI / "cell.env.template"
 DOCTOR = PI / "perceptronics-doctor"
+CELL_DHCP_CONF = PI / "cell-dhcp.conf"
+CELL_DHCP_UNIT = PI / "perceptronics-cell-dhcp.service"
+NM_HOOK = PI / "50-perceptronics-cell"
 DEPLOY = ROOT / "scripts" / "deploy-pi.sh"
 BASH_SCRIPTS = [INSTALL, DEPLOY]
 
@@ -161,7 +165,7 @@ def test_installed_library_is_what_the_template_points_at():
 
 def test_installer_copies_only_files_that_exist():
     m = re.search(r"for f in ([^;]+); do", _text(INSTALL))
-    names = m.group(1).split()
+    names = [n for n in m.group(1).split() if n != "\\"]
     assert names, "copy_deploy_files names no files"
     for name in names:
         assert (PI / name).is_file(), f"install.sh copies {name}, which is not in deploy/pi/"
@@ -354,7 +358,10 @@ def test_firewall_opens_only_ssh_and_the_cockpit_to_the_cell():
     port_rules = [r for r in accepts if "dport" in r and "udp sport 67" not in r]
     assert "tcp dport 22 accept" in port_rules
     cockpit = [r for r in port_rules if r != "tcp dport 22 accept"]
-    assert cockpit == ["ip saddr $CELL_NET tcp dport $COCKPIT_PORTS accept"]
+    assert cockpit == [
+        "iifname $CELL_IF udp dport 67 accept",  # the robot's DHCP request, on the cell port only
+        "ip saddr $CELL_NET tcp dport $COCKPIT_PORTS accept",
+    ]
     assert re.search(
         rf"define COCKPIT_PORTS = \{{ {webapp.DEFAULT_PORT}, {DEFAULT_PICK_PORT} \}}", _text(NFT)
     )
@@ -367,3 +374,183 @@ def test_firewall_subnet_is_substituted_by_the_installer():
     marker = re.search(r'NFT_MARKER="([^"]+)"', _text(INSTALL)).group(1)
     assert marker in _text(NFT), "install.sh recognises its own /etc/nftables.conf by this marker"
     assert "flush ruleset" not in _code(_text(NFT)), "only our own table is replaced"
+
+
+# ----- the cell port: fixed address + one-lease DHCP for a robot nobody configured ----------
+
+
+def _render(path: Path) -> str:
+    """The file as install.sh writes it for the defaults (eth0, the ur3 cell's UR_HOST)."""
+    from perceptronics import cellnet
+
+    return (
+        _text(path)
+        .replace("@CELL_IF@", "eth0")
+        .replace("@ROBOT_ADDRESS@", cellnet.ROBOT_ADDRESS)
+        .replace("@CELL_MASK@", "255.255.255.0")
+    )
+
+
+def test_every_placeholder_in_the_cell_files_is_one_the_installer_fills():
+    filled = set(re.findall(r'-e "s#(@[A-Z_]+@)#', _text(INSTALL)))
+    for path in (CELL_DHCP_CONF, CELL_DHCP_UNIT, NM_HOOK, NFT):
+        used = set(re.findall(r"@[A-Z_]+@", _text(path)))
+        assert used <= filled | {"@CELL_NET@"}, f"{path.name}: {used - filled} never substituted"
+        assert not re.findall(r"@[A-Z_]+@", _render(path).replace("@CELL_NET@", "x"))
+
+
+def test_cell_dhcp_serves_one_address_and_nothing_else():
+    from perceptronics import cellnet
+
+    lines = [ln for ln in _render(CELL_DHCP_CONF).splitlines() if ln and not ln.startswith("#")]
+    assert "port=0" in lines, "no DNS server"
+    assert "interface=eth0" in lines and "except-interface=lo" in lines
+    ranges = [ln for ln in lines if ln.startswith("dhcp-range=")]
+    a = cellnet.ROBOT_ADDRESS
+    assert ranges == [f"dhcp-range={a},{a},255.255.255.0,12h"], "one lease: the robot's address never moves"
+    # an empty option is sent as "none": no default route and no DNS offered, the cell stays offline
+    assert "dhcp-option=option:router" in lines and "dhcp-option=option:dns-server" in lines
+    banned = ("dhcp-authoritative", "server=", "address=", "enable-tftp")
+    assert not any(ln.startswith(banned) for ln in lines)
+
+
+def test_cell_dhcp_only_starts_after_the_probe_heard_no_other_server():
+    unit = _unit(CELL_DHCP_UNIT)
+    assert set(unit) == {"Unit", "Service", "Install"}
+    cond = _one(unit["Service"], "ExecCondition")
+    assert cond == "/opt/perceptronics/current/bin/python -m perceptronics.cellnet probe @CELL_IF@"
+    start = _one(unit["Service"], "ExecStart")
+    assert start == "/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/perceptronics/cell-dhcp.conf"
+    doc = _text(CELL_DHCP_UNIT)
+    assert "stop:" in doc and "journalctl -u perceptronics-cell-dhcp" in doc
+
+
+def test_link_up_re_probes(tmp_path):
+    hook = _render(NM_HOOK)
+    assert hook.startswith("#!/bin/sh")
+    assert "systemctl restart --no-block perceptronics-cell-dhcp.service" in hook
+    # NetworkManager only runs an executable hook: what ships is git's mode, not the checkout's
+    # (a Windows checkout has no exec bit at all)
+    staged = subprocess.run(
+        ["git", "ls-files", "--stage", str(NM_HOOK.relative_to(ROOT))],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if staged.returncode == 0 and staged.stdout:
+        assert staged.stdout.startswith("100755 "), staged.stdout
+    else:
+        assert NM_HOOK.stat().st_mode & 0o111
+    script = tmp_path / "hook"
+    script.write_text(hook, encoding="utf-8")
+    subprocess.run(["sh", "-n", str(script)], check=True)
+    if shutil.which("shellcheck"):
+        r = subprocess.run(["shellcheck", "-s", "sh", str(script)], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout
+
+
+def test_installer_defaults_and_its_guards():
+    code = _code(_text(INSTALL))
+    assert 'cell_if="eth0" cell_address="192.168.3.20/24"' in code
+    assert "--cell-if)" in code and "--cell-address)" in code
+    # a port already on another network (the bench's office LAN) is never re-addressed
+    assert re.search(r'if \[ -n "\$have" \]; then\n\s+log "cell port: .* is on another network', code)
+    # the lease must be on the pick PC's network, or nothing is served
+    assert "is not on ${cidr} — not serving" in code
+    assert "/usr/sbin/dnsmasq --test" in code
+    # Raspberry Pi OS's own eth0 profile names no interface (netplan `match: {}`) and still
+    # owns the port: one that already carries the address is kept, not duplicated
+    assert '" 802-3-ethernet "*' in code
+    assert "dnsmasq-base" in code
+
+
+# ----- the hand-eye lives in the calibration file, not cell.env ---------------------------------
+
+
+def _handeye_snippet() -> str:
+    """The Python install.sh's handeye_out_of_env runs, exactly as written there."""
+    body = _text(INSTALL).split("handeye_out_of_env() {", 1)[1]
+    return body.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+
+
+def _run_handeye(tmp_path, cell_text: str, existing: str | None = None):
+    cell_env, file, out = tmp_path / "cell.env", tmp_path / "cal" / "handeye.json", tmp_path / "cell.env.new"
+    cell_env.write_text(cell_text, encoding="utf-8")
+    if existing is not None:
+        file.parent.mkdir()
+        file.write_text(existing, encoding="utf-8")
+    ran = subprocess.run(
+        [sys.executable, "-", str(cell_env), str(file), str(out)],
+        input=_handeye_snippet(),
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=True,
+    )
+    return ran.stdout.strip(), file, out
+
+
+def test_the_profiles_hand_eye_seeds_the_file_and_leaves_the_environment(tmp_path):
+    from perceptronics.cell import load_cell
+    from perceptronics.handeye import ENV_HANDEYE_FILE, ENV_T_FLANGE_CAMERA, HandEye
+
+    pose = load_cell("ur3")[ENV_T_FLANGE_CAMERA]
+    said, file, out = _run_handeye(tmp_path, f"UR_HOST=192.168.3.3\n{ENV_T_FLANGE_CAMERA}={pose}\n")
+    assert said == "seeded"
+    assert ENV_T_FLANGE_CAMERA not in parse_env_text(out.read_text(encoding="utf-8"))
+    he = HandEye.from_env({ENV_HANDEYE_FILE: str(file)})
+    assert he.source == f"file:{file}"
+    assert he.as_dict()["flange_to_depth_pose"] == pytest.approx(json.loads(pose))
+
+
+def test_a_calibration_made_on_the_pc_survives_a_redeploy(tmp_path):
+    saved = '{"flange_to_depth_pose": [0.02, 0.05, 0.01, 0.1, -0.16, 3.1], "source": "touch-and-click"}'
+    said, file, out = _run_handeye(
+        tmp_path, "UR_HOST=192.168.3.3\nPERCEPTRONICS_T_FLANGE_CAMERA=[0,0,0,0,0,0]\n", existing=saved
+    )
+    assert said == "kept" and file.read_text(encoding="utf-8") == saved
+    assert "PERCEPTRONICS_T_FLANGE_CAMERA" not in out.read_text(encoding="utf-8")
+
+
+def test_a_cell_env_without_a_hand_eye_is_left_alone(tmp_path):
+    said, file, out = _run_handeye(tmp_path, "UR_HOST=192.168.3.3\n")
+    assert said == "none" and not file.exists() and not out.exists()
+
+
+def test_the_installer_runs_the_move_on_every_install():
+    code = _code(_text(INSTALL))
+    main = code.split("main() {", 1)[1]
+    assert main.index("write_cell_env") < main.index("handeye_out_of_env") < main.index("install_units")
+    # and the cell.env it writes no longer tells anyone to delete the line by hand
+    assert "delete the PERCEPTRONICS_T_FLANGE_CAMERA" not in _text(INSTALL)
+
+
+# ----- deploy-pi.sh: the Python that builds the wheel ---------------------------------------
+
+
+def _python_with_pip() -> str | None:
+    for cand in (sys.executable, shutil.which("python3"), "/opt/homebrew/bin/python3", "/usr/bin/python3"):
+        if cand and subprocess.run([cand, "-m", "pip", "--version"], capture_output=True).returncode == 0:
+            return cand
+    return None
+
+
+def test_deploy_skips_a_python_without_pip(tmp_path):
+    # Regression (2026-10-02): the repo's .venv (no pip) was first on PATH and the deploy died
+    # with "python3 with pip not found" although Homebrew's python3 had pip.
+    bash, good = _real_bash(), _python_with_pip()
+    if bash is None or good is None or sys.platform == "win32":
+        pytest.skip("needs bash and some python3 with pip")
+    code = _text(DEPLOY)
+    loop = code[code.index('py=""\n') : code.index('[ -n "$py" ]')]
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    nopip = fake / "python3"
+    nopip.write_text('#!/bin/sh\n[ "$2" = pip ] && exit 1\nexit 0\n', encoding="utf-8")
+    nopip.chmod(0o755)
+    script = f'{loop}\nprintf "%s" "$py"\n'
+    env = {"PATH": f"{fake}:/usr/bin:/bin", "PYTHON": str(nopip)}
+    picked = subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True).stdout
+    assert picked not in (str(nopip), "python3")  # never the pip-less one (a later install, or none)
+    env["PYTHON"] = good
+    assert subprocess.run([bash, "-c", script], env=env, capture_output=True, text=True).stdout == good

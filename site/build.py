@@ -7,10 +7,11 @@ sha256 and size), the supported PolyScope ranges are the CI matrices' own lists
 pendant screens in ``urcap/perceptronic-ps5/screens/``. A ``{{NAME}}`` left in the output
 is an error. Stdlib only: ``python3 site/build.py [--out DIR]``.
 
-The one-page datasheet is ``public/datasheet.html`` printed to PDF by a local Chrome
-(``python3 site/build.py --pdf``; CI has no browser, so the PDF is committed in
-``site/datasheet/`` next to the sha256 of the page it was printed from). A test holds the
-two together: change the datasheet, or ship a new URCap, and it says to print it again.
+The printed documents — the one-page datasheet (``public/datasheet.html``) and the UR
+Quickstart guide (``public/quickstart-ur.html``) — are printed to PDF by a local Chrome
+(``python3 site/build.py --pdf``; CI has no browser, so each PDF is committed in
+``site/print/`` next to the sha256 of the page it was printed from). A test holds them
+together: change a page, or ship a new URCap, and it says to print it again.
 """
 
 from __future__ import annotations
@@ -32,12 +33,19 @@ PUBLIC = SITE / "public"
 DIST = REPO / "urcap" / "dist"
 SCREENS = REPO / "urcap" / "perceptronic-ps5" / "screens"
 # the pendant screens the page shows (all 1000 x 560)
-SCREEN_NAMES = ("pick-main.png", "pick-options.png", "installation-areas.png")
-SHEET_DIR = SITE / "datasheet"
-SHEET_PDF = "perceptronics-datasheet.pdf"
-SHEET_STAMP = SHEET_DIR / "datasheet.html.sha256"
+SCREEN_NAMES = ("pick-part.png", "pick-options.png", "installation-areas.png")
+PRINT_DIR = SITE / "print"
+# page -> the PDF it is printed to (committed in PRINT_DIR with "<page>.sha256" beside it)
+PRINTS = {
+    "datasheet.html": "perceptronics-datasheet.pdf",
+    "quickstart-ur.html": "perceptronics-ur-quickstart.pdf",
+}
+SHEET_PDF = PRINTS["datasheet.html"]
+QUICKSTART_PDF = PRINTS["quickstart-ur.html"]
 # the datasheet's revision date: move it when its figures or wording change
-SHEET_DATE = "2026-10-02"
+SHEET_DATE = "2026-10-03"
+# the UR Quickstart's revision date
+QUICKSTART_DATE = "2026-10-03"
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PLACEHOLDER = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
 
@@ -92,6 +100,8 @@ def facts() -> dict[str, str]:
         "PSX_RANGE": _span(list(psx_matrix.RELEASES)),
         "SHEET_DATE": SHEET_DATE,
         "SHEET_PDF": SHEET_PDF,
+        "QUICKSTART_DATE": QUICKSTART_DATE,
+        "QUICKSTART_PDF": QUICKSTART_PDF,
     }
 
 
@@ -116,23 +126,28 @@ def build(out: Path) -> Path:
         shutil.copyfile(DIST / name, out / "downloads" / name)
     for name in SCREEN_NAMES:
         shutil.copyfile(SCREENS / name, out / "screens" / name)
-    if (SHEET_DIR / SHEET_PDF).is_file():
-        shutil.copyfile(SHEET_DIR / SHEET_PDF, out / "downloads" / SHEET_PDF)
+    for pdf in PRINTS.values():
+        if (PRINT_DIR / pdf).is_file():
+            shutil.copyfile(PRINT_DIR / pdf, out / "downloads" / pdf)
     return out
 
 
-def sheet_digest(out: Path) -> str:
-    """sha256 of the built datasheet page, line endings normalised (Windows checkouts)."""
-    text = (out / "datasheet.html").read_text(encoding="utf-8").replace("\r\n", "\n")
+def stamp_path(page: str) -> Path:
+    return PRINT_DIR / f"{page}.sha256"
+
+
+def page_digest(out: Path, page: str) -> str:
+    """sha256 of a built page, line endings normalised (Windows checkouts)."""
+    text = (out / page).read_text(encoding="utf-8").replace("\r\n", "\n")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def print_sheet(out: Path, chrome: str) -> Path:
-    """Print the built datasheet to ``site/datasheet/`` with headless Chrome and stamp it."""
+def print_page(out: Path, page: str, chrome: str) -> Path:
+    """Print one built page to ``site/print/`` with headless Chrome and stamp it."""
     if not Path(chrome).is_file():
         raise SystemExit(f"no Chrome at {chrome}: set CHROME to a Chrome or Chromium binary")
-    SHEET_DIR.mkdir(exist_ok=True)
-    pdf = SHEET_DIR / SHEET_PDF
+    PRINT_DIR.mkdir(exist_ok=True)
+    pdf = PRINT_DIR / PRINTS[page]
     pdf.unlink(missing_ok=True)
     profile = out.parent / "_chrome"
     # headless Chrome does not always exit after printing: wait for the file, then stop it
@@ -145,7 +160,7 @@ def print_sheet(out: Path, chrome: str) -> Path:
             f"--user-data-dir={profile}",
             "--no-pdf-header-footer",
             f"--print-to-pdf={pdf}",
-            (out / "datasheet.html").as_uri(),
+            (out / page).as_uri(),
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -162,20 +177,21 @@ def print_sheet(out: Path, chrome: str) -> Path:
         proc.wait(timeout=10)
         shutil.rmtree(profile, ignore_errors=True)
     if not pdf.is_file() or not pdf.read_bytes().startswith(b"%PDF"):
-        raise SystemExit("Chrome did not write the datasheet PDF")
-    SHEET_STAMP.write_text(sheet_digest(out) + "\n", encoding="utf-8")
-    shutil.copyfile(pdf, out / "downloads" / SHEET_PDF)
+        raise SystemExit(f"Chrome did not write {pdf.name}")
+    stamp_path(page).write_text(page_digest(out, page) + "\n", encoding="utf-8")
+    shutil.copyfile(pdf, out / "downloads" / pdf.name)
     return pdf
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, default=SITE / "_build")
-    ap.add_argument("--pdf", action="store_true", help="also print the datasheet PDF (needs Chrome)")
+    ap.add_argument("--pdf", action="store_true", help="also print the PDFs (needs Chrome)")
     args = ap.parse_args(argv)
     out = build(args.out)
     if args.pdf:
-        print(print_sheet(out, os.environ.get("CHROME", CHROME)))
+        for page in PRINTS:
+            print(print_page(out, page, os.environ.get("CHROME", CHROME)))
     print(out)
     return 0
 

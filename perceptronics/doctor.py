@@ -21,6 +21,7 @@ won't) or is a warning (``warn``: works, but you should know).
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import platform
 import socket
@@ -33,11 +34,15 @@ from urctl.config import RobotConfig
 from urctl.safety import normalize_model
 
 from .cell import ENV_CELL, describe_cell
+from .cellnet import CELL_PREFIX, PICK_PC_ADDRESS
 from .config import PerceptionConfig
-from .handeye import ENV_BRACKET, ENV_T_FLANGE_CAMERA, HandEye
+from .handeye import ENV_BRACKET, HandEye
 
 PROBE_TIMEOUT_S = 2.0
 STREAM_FRAMES = 15
+# How long the doctor waits for a cockpit that answers but hasn't opened its camera yet
+# (a service restarted a moment ago). The open itself takes about 2 s on a Pi 5.
+COCKPIT_OPEN_WAIT_S = 15.0
 
 
 @dataclass
@@ -197,6 +202,12 @@ def check_devices(report: Report, library: str | None = None) -> list[dict]:
             )
         )
         return []
+    _add_device_checks(report, devices)
+    return devices
+
+
+def _add_device_checks(report: Report, devices: list[dict], held_by: str = "") -> None:
+    """One ``camera`` line per device; ``held_by`` names the cockpit that reported it."""
     for d in devices:
         usb = str(d.get("usb_type") or "?")
         fw = d.get("firmware") or "?"
@@ -205,7 +216,8 @@ def check_devices(report: Report, library: str | None = None) -> list[dict]:
             Check(
                 "camera",
                 not slow,
-                f"{d.get('name')} sn {d.get('serial')} fw {fw} usb {usb}",
+                f"{d.get('name')} sn {d.get('serial')} fw {fw} usb {usb}"
+                + (f" (streaming in the cockpit at {held_by})" if held_by else ""),
                 fix=(
                     "USB 2 link: the stream negotiates the fastest mode both sensors share "
                     "(640×480 @ 15 on a D435 — no 848×480 colour there); a direct USB 3 port (blue), "
@@ -215,7 +227,6 @@ def check_devices(report: Report, library: str | None = None) -> list[dict]:
                 data=dict(d),
             )
         )
-    return devices
 
 
 def check_stream(report: Report, camera, frames: int = STREAM_FRAMES) -> None:
@@ -269,6 +280,76 @@ def check_stream(report: Report, camera, frames: int = STREAM_FRAMES) -> None:
             fix=fix,
             severity="critical" if black else "warn",
             data={"fps": frames / elapsed, "mean_rgb": mean_rgb, "depth": stats, "frame": frame.summary()},
+        )
+    )
+
+
+def source_address(host: str) -> str | None:
+    """The local address this machine would reach ``host`` from (a UDP "connect" picks the
+    route; nothing is sent), or None when there is no route."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect((host, 9))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def check_network(
+    report: Report, config: RobotConfig, source: Callable[[str], str | None] = source_address
+) -> None:
+    """Is this machine on the robot's network, and what goes in the pendant's Cockpit field?
+
+    The URCap's empty field means the pick PC's factory address (:data:`PICK_PC_ADDRESS`);
+    any other address must be typed there. A robot reached through a router (another
+    subnet) is a cell that works today and breaks when the office network changes.
+    """
+    try:
+        robot = ipaddress.IPv4Address(config.host)
+    except ValueError:
+        return  # a host name, or empty (robot.host says so)
+    if robot.is_loopback:
+        return  # a simulator on this machine
+    net = ipaddress.IPv4Interface(f"{robot}/{CELL_PREFIX}").network
+    src = source(config.host)
+    if src is None:
+        report.add(
+            Check(
+                "network",
+                False,
+                f"no route to {robot}",
+                fix=f"plug this machine's Ethernet into the robot or the cell switch (an address on {net})",
+                severity="warn",
+            )
+        )
+        return
+    here = ipaddress.IPv4Address(src)
+    if here not in net:
+        report.add(
+            Check(
+                "network",
+                False,
+                f"{robot} is reached from {here}, which is not on its network {net}",
+                fix=f"plug this machine's Ethernet into the robot (a pick PC: deploy/pi/install.sh gives it "
+                f"{PICK_PC_ADDRESS}/{CELL_PREFIX}), or give it an address on {net}",
+                severity="warn",
+                data={"robot": str(robot), "local": str(here), "network": str(net)},
+            )
+        )
+        return
+    default = str(here) == PICK_PC_ADDRESS
+    pendant = (
+        "the pendant's Cockpit field can stay empty (its default)"
+        if default
+        else f"on the pendant: Installation → URCaps → Perceptronic → Cockpit = {here}"
+    )
+    report.add(
+        Check(
+            "network",
+            True,
+            f"this machine is {here} on {net}; {pendant}",
+            severity="info",
+            data={"robot": str(robot), "local": str(here), "network": str(net), "pendant_default": default},
         )
     )
 
@@ -449,14 +530,20 @@ def check_flange_and_handeye(report: Report, robot, handeye: HandEye, env=None) 
     env = os.environ if env is None else env
     bracket = env.get(ENV_BRACKET, "eseries")
     model = (env.get("UR_ROBOT_MODEL") or "").upper()
-    expected = "ur20" if model.startswith(("UR20", "UR30")) else "eseries"
+    expected = (
+        "ur20"
+        if model.startswith(("UR20", "UR30"))
+        else "uf850"
+        if model.startswith(("UF850", "850"))
+        else "eseries"
+    )
     report.add(
         Check(
             "handeye",
             handeye.calibrated or None,
             f"{handeye.source}"
             + ("" if handeye.calibrated else " (uncalibrated seed: expect mm + ~1° error)"),
-            fix=f"run a hand-eye calibration and set {ENV_T_FLANGE_CAMERA}",
+            fix="run `perceptronics calibrate --apply` (it saves the solve to PERCEPTRONICS_HANDEYE_FILE)",
             severity="warn",
             data=handeye.as_dict(),
         )
@@ -551,7 +638,8 @@ def approach_check(active_offset, env=None) -> Check:
     )
 
 
-def check_cockpit(report: Report, url: str) -> None:
+def cockpit_info(url: str) -> dict | None:
+    """The running cockpit's ``/api/info``, or ``None`` when nothing answers at ``url``."""
     import json
     import urllib.request
 
@@ -559,6 +647,30 @@ def check_cockpit(report: Report, url: str) -> None:
         with urllib.request.urlopen(url.rstrip("/") + "/api/info", timeout=PROBE_TIMEOUT_S) as r:
             info = json.loads(r.read())
     except Exception:
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def cockpit_camera(info: dict | None) -> dict | None:
+    """The RealSense a running cockpit has open, as its device-info dict. One process
+    owns the USB camera: while the cockpit streams, a second open answers ``failed to
+    set power state`` (RS2_USB_STATUS_BUSY), so the cockpit's own report is the only
+    truthful source for the ``camera`` line."""
+    cam = (info or {}).get("camera") or {}
+    device = cam.get("device")
+    if cam.get("kind") == "realsense" and cam.get("open") is True and isinstance(device, dict) and device:
+        return device
+    return None
+
+
+def _cockpit_is_opening(info: dict | None) -> bool:
+    """A cockpit with a RealSense it has not opened yet and no error from trying."""
+    cam = (info or {}).get("camera") or {}
+    return cam.get("kind") == "realsense" and not cam.get("open") and not (info or {}).get("last_error")
+
+
+def check_cockpit(report: Report, url: str, info: dict | None) -> None:
+    if info is None:
         report.add(
             Check("cockpit", None, f"no cockpit at {url} (start one: perceptronics gui)", severity="info")
         )
@@ -603,12 +715,24 @@ def run_doctor(
     report = Report()
     check_host(report, env)
     fake = str(env.get("PERCEPTRONICS_FAKE", "")).strip().lower() in ("1", "true", "yes", "on")
+    info = cockpit_info(cockpit_url) if cockpit_url else None
+    deadline = time.monotonic() + COCKPIT_OPEN_WAIT_S
+    while _cockpit_is_opening(info) and time.monotonic() < deadline:
+        time.sleep(0.25)
+        info = cockpit_info(cockpit_url) or info
+    held = cockpit_camera(info)
     if camera and not fake:
         if check_sdk(report, library):
-            devices = check_devices(report, library)
-            if stream and devices:
-                cam = camera_factory() if camera_factory else _default_camera(perceptronics_config, library)
-                check_stream(report, cam)
+            if held:
+                # --stream can't open it either; the cockpit line carries its fps and seq.
+                _add_device_checks(report, [held], held_by=cockpit_url or "")
+            else:
+                devices = check_devices(report, library)
+                if stream and devices:
+                    cam = (
+                        camera_factory() if camera_factory else _default_camera(perceptronics_config, library)
+                    )
+                    check_stream(report, cam)
     elif camera and fake:
         report.add(
             Check(
@@ -626,10 +750,11 @@ def run_doctor(
             )
             check_stream(report, cam)
     if cockpit_url:
-        check_cockpit(report, cockpit_url)
+        check_cockpit(report, cockpit_url, info)
     if robot:
         cfg = robot_config or RobotConfig.from_env()
         cfg = RobotConfig(**{**cfg.__dict__, "timeout": min(cfg.timeout, 5.0)})
+        check_network(report, cfg)
         if check_robot_reachability(report, cfg):
             if robot_factory is not None:
                 rb = robot_factory(cfg)

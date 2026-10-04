@@ -32,6 +32,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from . import workcell
 from .robot import GRIPPER_ACTIONS, Robot
 
 # A reusable schema fragment for a 6-element joint vector (radians).
@@ -251,6 +252,28 @@ def _h_set_speed_override(robot: Robot, p: dict) -> dict:
 
 def _h_set_digital_output(robot: Robot, p: dict) -> dict:
     return robot.set_digital_output(p["pin"], p["value"])
+
+
+def _h_tcp_offset(robot: Robot, p: dict) -> dict:
+    return workcell.tcp_offset(robot, p["action"], name=p.get("name"), offset=p.get("offset"))
+
+
+def _h_position(robot: Robot, p: dict) -> dict:
+    move = {k: p[k] for k in ("velocity", "acceleration") if k in p}
+    return workcell.position(robot, p["action"], name=p.get("name"), **move)
+
+
+def _h_workplane(robot: Robot, p: dict) -> dict:
+    return workcell.workplane(
+        robot, p["action"], name=p.get("name"), index=p.get("index"), points=p.get("points")
+    )
+
+
+_NAME_SCHEMA = {
+    "type": "string",
+    "description": "1-64 of A-Z a-z 0-9 _ . - (starting alphanumeric).",
+}
+_POINT_SCHEMA = {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
 
 
 # ----- registry --------------------------------------------------------------
@@ -562,6 +585,58 @@ TOOLS: list[Tool] = [
             required=["pin", "value"],
         ),
         _h_set_digital_output,
+    ),
+    Tool(
+        "tcp_offset",
+        "Read or write the tool centre point, on any arm (UR e-Series, PolyScope X, "
+        "UFACTORY). get: the controller's active TCP offset [x, y, z, rx, ry, rz] (metres + "
+        "rotation vector, flange frame). set: make `offset` the active TCP (read back). "
+        "save: store `offset` (or the active one) under `name` in the cell store. use: "
+        "make a saved TCP active. list / delete: the saved TCPs.",
+        _object_schema(
+            {
+                "action": {"type": "string", "enum": list(workcell.TCP_ACTIONS)},
+                "name": _NAME_SCHEMA,
+                "offset": {"type": "array", "items": {"type": "number"}, "minItems": 6, "maxItems": 6},
+            },
+            required=["action"],
+        ),
+        _h_tcp_offset,
+    ),
+    Tool(
+        "position",
+        "Named robot positions in the cell store, on any arm. save: the current joints + "
+        "TCP pose (and the TCP offset) under `name`. get / list / delete. move_to: a joint "
+        "move to the saved joints (validated by the safety envelope).",
+        _object_schema(
+            {
+                "action": {"type": "string", "enum": list(workcell.POSITION_ACTIONS)},
+                "name": _NAME_SCHEMA,
+                "velocity": _VELOCITY_SCHEMA,
+                "acceleration": _ACCELERATION_SCHEMA,
+            },
+            required=["action"],
+        ),
+        _h_position,
+    ),
+    Tool(
+        "workplane",
+        "Workplanes (the table) from three touched points, on any arm. touch: record the "
+        "live TCP position as point `index` — 1 the corner, 2 along +X, 3 on the far side; "
+        "touch the table with the tool's point, and the third touch computes and saves the "
+        "plane. define: three base-frame [x, y, z] `points`. get / list / delete. use_tcp: "
+        "re-activate the TCP the plane was touched with. Answers carry tilt_deg (off base "
+        "XY) and table_z.",
+        _object_schema(
+            {
+                "action": {"type": "string", "enum": list(workcell.WORKPLANE_ACTIONS)},
+                "name": _NAME_SCHEMA,
+                "index": {"type": "integer", "minimum": 1, "maximum": 3},
+                "points": {"type": "array", "items": _POINT_SCHEMA, "minItems": 3, "maxItems": 3},
+            },
+            required=["action"],
+        ),
+        _h_workplane,
     ),
 ]
 

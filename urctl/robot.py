@@ -391,6 +391,43 @@ class Robot:
             )
         return self._log("get_flange_pose", {}, ok=True, result=result)
 
+    def get_tcp_offset(self) -> dict:
+        """The controller's active TCP offset (``[x, y, z, rx, ry, rz]``, metres +
+        rotation vector, flange frame) — from the state broadcast, so it works in
+        Local mode and sends no script (:meth:`get_flange_pose`)."""
+        fp = self.get_flange_pose(stand_in=False)
+        offset = fp.get("tcp_offset") if fp.get("ok") else None
+        result = {"tcp_offset": offset, "source": fp.get("source")}
+        if offset is None:
+            result["error"] = fp.get("error") or "no TCP offset reported"
+        return self._log("get_tcp_offset", {}, ok=offset is not None, result=result)
+
+    def set_tcp_offset(self, offset: list[float], *, collect_for: float = 5.0) -> dict:
+        """Make ``offset`` the controller's active TCP (URScript ``set_tcp``) and read it
+        back. It stays active until the next ``set_tcp``, an installation load or a
+        program started from the pendant (which re-applies the installation's default
+        TCP). On a real e-Series in Local mode URScript is ignored — the read-back then
+        fails and ``ok`` is false. The same path serves PolyScope X (Primary, Remote)."""
+        off = [float(v) for v in offset]
+        if len(off) != 6 or not all(math.isfinite(v) for v in off):
+            raise ValueError("offset must be 6 finite numbers [x, y, z, rx, ry, rz]")
+        args = {"offset": off}
+        if self.dry_run:
+            return self._log("set_tcp_offset", args, ok=True, result={"reply": "(dry-run)"})
+        literal = "p[" + ", ".join(repr(v) for v in off) + "]"
+        captured = self.primary.run_and_capture(
+            f'set_tcp({literal})\ntextmsg("urctl/tcp/done=", get_tcp_offset())\n',
+            fn_name="urctl_set_tcp",
+            marker="urctl/tcp",
+            collect_for=collect_for,
+            stop_marker="urctl/tcp/done=",
+        )
+        from .primary import parse_vector
+
+        active = parse_vector(captured, "urctl/tcp/done")
+        ok = active is not None and max(abs(a - b) for a, b in zip(active, off, strict=False)) < 1e-4
+        return self._log("set_tcp_offset", args, ok=ok, result={"tcp_offset": active})
+
     def rtde_state(self, *, deep: bool = False) -> dict:
         """High-rate structured state via RTDE (port 30004).
 

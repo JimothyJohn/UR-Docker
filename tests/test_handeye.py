@@ -30,14 +30,23 @@ def _close(a, b, tol=1e-9):
     return all(abs(x - y) < tol for x, y in zip(a, b, strict=True))
 
 
+C5, S5 = math.cos(math.radians(5.0)), math.sin(math.radians(5.0))
+SEED_ORIGIN = (0.0175, 0.063922336, 0.000626916)
+
+
 def test_bracket_nominal_matches_readme_section_3():
-    # depth origin (17.5, 66.5, 1.7) mm; x_cam = -X, y_cam = -Y, z_cam = +Z (camera on +Y)
-    assert _close(BRACKET_NOMINAL.translation, (0.0175, 0.0665, 0.0017))
+    # Rev C: depth origin (17.5, 63.9, 0.6) mm; x_cam = -X, the optical axis drafted 5° from +Z
+    # toward the flange axis (the camera is on +Y, so z_cam leans to -Y), y_cam follows it
+    assert _close(BRACKET_NOMINAL.translation, SEED_ORIGIN)
     assert _close(BRACKET_NOMINAL.rotate((1, 0, 0)), (-1, 0, 0))
-    assert _close(BRACKET_NOMINAL.rotate((0, 1, 0)), (0, -1, 0))
-    assert _close(BRACKET_NOMINAL.rotate((0, 0, 1)), (0, 0, 1))
-    # a point 300 mm straight out of the lens sits 303.7 mm out of the flange face
-    assert _close(HandEye().camera_to_flange((0, 0, 0.3)), (0.0175, 0.0665, 0.3017))
+    assert _close(BRACKET_NOMINAL.rotate((0, 1, 0)), (0, -C5, -S5))
+    assert _close(BRACKET_NOMINAL.rotate((0, 0, 1)), (0, -S5, C5))
+    # a point 300 mm out of the lens is 26 mm nearer the flange axis than the lens is
+    x, y, z = HandEye().camera_to_flange((0, 0, 0.3))
+    assert _close((x, y, z), (0.0175, SEED_ORIGIN[1] - 0.3 * S5, SEED_ORIGIN[2] + 0.3 * C5))
+    assert SEED_ORIGIN[1] - y == pytest.approx(0.02615, abs=1e-5)
+    # the optical axis crosses the flange's YZ-plane centre line ~0.73 m out
+    assert SEED_ORIGIN[1] / math.tan(math.radians(5.0)) == pytest.approx(0.7306, abs=1e-4)
 
 
 def test_extrinsics_move_the_colour_origin():
@@ -46,7 +55,8 @@ def test_extrinsics_move_the_colour_origin():
     # SDK convention: p_color = R·p_depth + t, so the *depth* origin sits at
     # +15 mm along colour x; a point on the colour axis is at depth x = -15 mm,
     # and camera x is flange -X.
-    assert _close(he.camera_to_flange((0, 0, 0.3)), (0.0175 + 0.015, 0.0665, 0.3017))
+    base = HandEye().camera_to_flange((0, 0, 0.3))
+    assert _close(he.camera_to_flange((0, 0, 0.3)), (base[0] + 0.015, base[1], base[2]))
     assert _close(transform_from_extrinsics(None).translation, (0, 0, 0))
     assert he.as_dict()["depth_to_color_translation"] == [0.015, 0.0, 0.0]
     assert HandEye().with_extrinsics(None).flange_to_color == HandEye().flange_to_depth
@@ -74,15 +84,16 @@ def test_locate_geometry_tool_down():
     base_from_flange = Transform.from_pose(flange)
     expect_base = base_from_flange.apply(he.camera_to_flange((0, 0, 0.3)))
     assert _close(out["point_base_m"], expect_base, 1e-9)
-    # tool down => the camera looks along base -Z; the object is 0.3017 below the flange
-    assert _close(out["view_ray_base"], (0, 0, -1), 1e-9)
-    assert out["point_base_m"][2] == pytest.approx(0.5 - 0.3017, abs=1e-9)
-    # approach = 50 mm short of the object along that ray, current tool orientation kept
-    assert out["approach_pose"][2] == pytest.approx(0.5 - 0.3017 + 0.05, abs=1e-9)
+    # tool down => the camera looks down, drafted 5° back toward the flange axis (flange y is kept
+    # under the π about Y, and the camera sits on flange +Y)
+    assert _close(out["view_ray_base"], (0, -S5, -C5), 1e-9)
+    assert out["point_base_m"][2] == pytest.approx(0.5 - SEED_ORIGIN[2] - 0.3 * C5, abs=1e-9)
+    # approach = 50 mm short of the object along the tool axis (the fingertip default), orientation kept
+    assert out["approach_pose"][2] == pytest.approx(out["point_base_m"][2] + 0.05, abs=1e-9)
     assert out["approach_pose"][3:] == tcp[3:]
     # the lateral camera offset on the bracket shows up in base xy (flange x flips under the π about Y)
     assert out["point_base_m"][0] == pytest.approx(0.5 - 0.0175, abs=1e-9)
-    assert out["point_base_m"][1] == pytest.approx(0.0 + 0.0665, abs=1e-9)
+    assert out["point_base_m"][1] == pytest.approx(SEED_ORIGIN[1] - 0.3 * S5, abs=1e-9)
     assert out["handeye"]["source"] == "bracket-nominal:eseries" and out["standoff_m"] == 0.05
 
 
@@ -197,7 +208,8 @@ def test_robotlink_unreachable_is_an_error_not_a_crash():
 
 
 def test_bracket_seeds_match_the_bracket_build_info():
-    """Both prints' seeds are the numbers ``bracket.py`` derived — the README §3
+    """Every print's seed is the numbers ``bracket.py`` derived, in that robot's own
+    flange frame (UR: the bracket's frame; UFACTORY: turned 180°) — the README §3
     table and ``out/build_info.json`` are the source of truth, not this file."""
     import json
     from pathlib import Path
@@ -209,12 +221,21 @@ def test_bracket_seeds_match_the_bracket_build_info():
     assert set(BRACKET_SEEDS) == set(variants)
     for name, seed in BRACKET_SEEDS.items():
         d = variants[name]["derived"]
-        origin_m = tuple(v / 1000.0 for v in d["depth_origin_flange_mm"])
+        origin_m = tuple(v / 1000.0 for v in d["depth_origin_robot_flange_mm"])
         assert _close(seed.translation, origin_m, tol=1e-6), name
-        axes = d["camera_axes_in_flange"]
+        axes = d["camera_axes_in_robot_flange"]
         assert _close(seed.rotate((1, 0, 0)), axes["x_cam"], tol=1e-5), name
         assert _close(seed.rotate((0, 1, 0)), axes["y_cam"], tol=1e-5), name
         assert _close(seed.rotate((0, 0, 1)), axes["z_cam"], tol=1e-5), name
+
+
+def test_the_uf850_seed_looks_in_toward_the_flange_axis_from_its_side():
+    # UFACTORY's flange frame: the camera hangs on -X, so its axis tips toward +X
+    seed = BRACKET_SEEDS["uf850"]
+    assert seed.translation[0] < -0.05 and abs(seed.translation[2]) < 0.002
+    z = seed.rotate((0, 0, 1))
+    assert z[0] > 0 and z[2] == pytest.approx(math.cos(math.radians(5.0)), abs=1e-6)
+    assert HandEye.from_env({"PERCEPTRONICS_BRACKET": "uf850"}).source == "bracket-nominal:uf850"
 
 
 def test_bracket_variant_selection():
@@ -578,3 +599,47 @@ def test_locate_withholds_the_polyscope_target_when_the_offset_is_not_the_one_in
     loc = RobotLink(RobotConfig(host="fake")).locate((0.0, 0.0, 0.3))
     assert loc["ok"] and loc["polyscope_pose"] is None
     assert "disagrees" in loc["polyscope_pose_note"] and loc["robot"]["tcp_offset_consistent"] is False
+
+
+# -- the pick PC keeps its hand-eye in the calibration file, never the environment -------------
+
+
+def test_a_seeded_file_is_what_from_env_reads(tmp_path):
+    from perceptronics.handeye import ENV_HANDEYE_FILE, HandEye, seed_calibration_file
+
+    f = tmp_path / "cal" / "handeye.json"
+    pose = [0.013337, 0.055303, 0.01286, 0.099999, -0.1637, 3.118758]
+    assert seed_calibration_file(f, pose, source="cell profile") is True
+    he = HandEye.from_env({ENV_HANDEYE_FILE: str(f)})
+    assert he.source == f"file:{f}" and he.calibrated
+    assert he.as_dict()["flange_to_depth_pose"] == pytest.approx(pose)
+
+
+def test_a_calibration_already_saved_is_never_overwritten_by_a_seed(tmp_path):
+    from perceptronics.handeye import seed_calibration_file
+
+    f = tmp_path / "handeye.json"
+    f.write_text(
+        '{"flange_to_depth_pose": [9, 9, 9, 0, 0, 0], "source": "touch-and-click"}', encoding="utf-8"
+    )
+    assert seed_calibration_file(f, [0, 0, 0, 0, 0, 0], source="cell profile") is False
+    assert "touch-and-click" in f.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("pose", [[0, 0, 0], [0, 0, 0, 0, 0, float("nan")], [0, 0, 0, 0, 0, float("inf")]])
+def test_a_seed_must_be_six_finite_numbers(tmp_path, pose):
+    from perceptronics.handeye import seed_calibration_file
+
+    with pytest.raises(ValueError):
+        seed_calibration_file(tmp_path / "h.json", pose, source="x")
+    assert not (tmp_path / "h.json").exists()
+
+
+def test_why_the_environment_must_not_carry_it(tmp_path):
+    # the trap the pick PC's installer avoids: an environment pose beats every saved calibration
+    from perceptronics.handeye import ENV_HANDEYE_FILE, ENV_T_FLANGE_CAMERA, HandEye, seed_calibration_file
+
+    f = tmp_path / "handeye.json"
+    seed_calibration_file(f, [0.1, 0, 0, 0, 0, 0], source="a calibration on this PC")
+    he = HandEye.from_env({ENV_HANDEYE_FILE: str(f), ENV_T_FLANGE_CAMERA: "[0,0,0,0,0,0]"})
+    assert he.source.startswith("env:")

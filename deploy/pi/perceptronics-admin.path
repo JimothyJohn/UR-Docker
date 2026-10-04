@@ -1,0 +1,15 @@
+# Starts perceptronics-admin.service when the cockpit queues a setup-portal request or an
+# update bundle (it writes <id>.json [+ <id>.tar] and then <id>.ready). Installed by
+# deploy/pi/install.sh.
+#   stop:  sudo systemctl disable --now perceptronics-admin.path
+#   logs:  journalctl -u perceptronics-admin
+
+[Unit]
+Description=Setup portal and update queue (perceptronics-admin)
+
+[Path]
+PathExistsGlob=/var/lib/perceptronics/admin/queue/*.ready
+Unit=perceptronics-admin.service
+
+[Install]
+WantedBy=multi-user.target

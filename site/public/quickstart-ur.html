@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Perceptronics UR Quickstart guide: mount the camera, connect the camera computer, install the Perceptronic URCap on PolyScope 5 or PolyScope X, calibrate, and write the first pick program.">
+  <title>Perceptronics UR Quickstart guide</title>
+  <style>
+    /* US Letter pages. Fixed light colours: this is the print master of the PDF. */
+    @page { size: 8.5in 11in; margin: 0.5in 0.55in; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 9pt; line-height: 1.38; color: #14181d; background: #ffffff;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .doc { width: 7.4in; margin: 0 auto; }
+    @media screen { body { background: #e9ecef; } .doc { background: #fff; padding: 0.5in 0.55in; width: 8.5in; margin: 1rem auto; } }
+    a { color: #157a45; text-decoration: none; }
+    h1, h2, h3, p, ul, ol { margin: 0; }
+    .head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2pt solid #157a45; padding-bottom: 6pt; }
+    .brand { display: flex; align-items: center; gap: 7pt; }
+    .brand svg { color: #157a45; }
+    h1 { font-size: 20pt; letter-spacing: -0.01em; line-height: 1; }
+    h1 small { display: block; font-size: 10.5pt; font-weight: 600; color: #5a6470; letter-spacing: 0; margin-top: 3pt; }
+    .beta { font-size: 6.5pt; font-weight: 700; letter-spacing: 0.08em; color: #8a5a00; background: #fdf3d7; border: 0.6pt solid #e8c96a; border-radius: 2pt; padding: 1pt 4pt; margin-left: 4pt; vertical-align: middle; }
+    .rev { text-align: right; color: #5a6470; font-size: 7.6pt; line-height: 1.4; }
+    .lede { font-size: 10pt; line-height: 1.38; margin: 8pt 0 6pt; }
+    .warn { margin: 6pt 0 4pt; padding: 5pt 8pt; background: #fdf3d7; border: 0.6pt solid #e8c96a; border-radius: 3pt; }
+    .warn strong { color: #8a5a00; }
+    .step { margin-top: 9pt; }
+    .keep { break-after: avoid; break-inside: avoid; }
+    h2, h3 { break-after: avoid; }
+    tr, .two, .box, pre, figure, li { break-inside: avoid; }
+    h2 { display: flex; align-items: center; gap: 7pt; font-size: 11.5pt; margin-bottom: 4pt; padding-top: 5pt; border-top: 0.5pt solid #d9dee3; }
+    h2 .n { display: inline-flex; align-items: center; justify-content: center; width: 16pt; height: 16pt; border-radius: 50%; background: #157a45; color: #fff; font-size: 8.5pt; flex: none; }
+    h3 { font-size: 9.5pt; margin: 6pt 0 2pt; }
+    p + p, p + ol, p + ul, ol + p, ul + p, table + p { margin-top: 4pt; }
+    ol, ul { padding-left: 14pt; }
+    li { margin: 2pt 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 3pt; }
+    th, td { text-align: left; vertical-align: top; padding: 2.5pt 6pt 2.5pt 0; border-top: 0.5pt solid #d9dee3; }
+    tr:first-child th, tr:first-child td { border-top: 0; }
+    thead th { color: #5a6470; font-size: 7.2pt; letter-spacing: 0.06em; text-transform: uppercase; }
+    tbody th { width: 1.45in; font-weight: 600; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0.22in; }
+    .box { background: #f6f7f8; border-radius: 3pt; padding: 5pt 8pt; }
+    .box h3 { margin-top: 0; }
+    pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { font-size: 0.9em; }
+    pre { font-size: 7.8pt; line-height: 1.35; background: #f6f7f8; border-left: 2pt solid #157a45; padding: 4pt 7pt; margin: 4pt 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .prog { font-size: 8.2pt; }
+    .note { color: #5a6470; font-size: 8pt; }
+    figure { margin: 6pt 0 0; width: 3.4in; }
+    pre { break-before: avoid; }
+    figure img { display: block; width: 100%; height: auto; border: 0.5pt solid #d9dee3; border-radius: 3pt; }
+    figcaption { color: #5a6470; font-size: 7.4pt; margin-top: 2pt; }
+    .foot { margin-top: 10pt; padding-top: 6pt; border-top: 0.5pt solid #d9dee3; color: #5a6470; font-size: 7pt; line-height: 1.4; break-inside: avoid; }
+    .foot p + p { margin-top: 3pt; }
+    .foot strong { color: #14181d; }
+  </style>
+</head>
+<body>
+  <div class="doc">
+    <div class="head">
+      <div class="brand">
+        <svg width="28" height="28" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 54V10h14a14 14 0 0 1 0 28H22"/><circle cx="36" cy="24" r="5" fill="currentColor" stroke="none"/></svg>
+        <h1>Perceptronics <span class="beta">BETA</span><small>Universal Robots Quickstart guide</small></h1>
+      </div>
+      <div class="rev">Quickstart · {{QUICKSTART_DATE}}<br>URCap {{PS5_VERSION}} (PolyScope 5) · {{PSX_VERSION}} (PolyScope X)</div>
+    </div>
+
+    <p class="lede">From the kit to the first pick on a Universal Robots arm: mount the camera, connect the camera computer, install the Perceptronic URCap, calibrate, and add the <strong>3D Pick</strong> node to a program. Steps 1 to 4 are done once per robot.</p>
+
+    <p class="warn"><strong>Beta software.</strong> The integrator is responsible for the risk assessment and safety of the cell. Run the first picks at reduced speed, with the area clear and a hand on the emergency stop. If a step here does not match what you see, write to <a href="mailto:nick@advin.io">nick@advin.io</a>.</p>
+
+    <div class="step">
+      <h2><span class="n">0</span>What you need</h2>
+      <table>
+        <tbody>
+          <tr><th>Robot</th><td>A Universal Robots e-Series arm on PolyScope {{PS5_RANGE}}, or an arm on PolyScope X {{PSX_RANGE}}.</td></tr>
+          <tr><th>Gripper</th><td>Any gripper with its own open and close program nodes. Perceptronics never drives it.</td></tr>
+          <tr><th>Kit</th><td>RealSense D435 camera, camera bracket and bolts, camera computer (ready to use) with its power supply, high-flex USB 3 cable, Ethernet cable.</td></tr>
+          <tr><th>USB stick</th><td>Formatted FAT32 (most sticks up to 32 GB are). The pendant does not read exFAT or NTFS.</td></tr>
+          <tr><th>The URCap</th><td><code>{{PS5_FILE}}</code> for PolyScope 5 or <code>{{PSX_FILE}}</code> for PolyScope X, from perceptronics.advin.io.</td></tr>
+          <tr><th>A laptop</th><td>With SSH, to calibrate (step 5) and to check the camera computer.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="step">
+      <h2><span class="n">1</span>Mount the camera</h2>
+      <ol>
+        <li>Fit the bracket between the robot's tool flange and the gripper, using the gripper's own bolts. Use the bracket made for your flange: ISO 9409-1-50-4-M6 for the e-Series, or the UR20 version.</li>
+        <li>Screw the D435 to the bracket with its 1/4-20 and M3 screws.</li>
+        <li>Run the USB 3 cable along the arm with strain relief at the wrist. Jog the wrist through its full rotation and check that the cable does not snag or pull.</li>
+      </ol>
+      <p class="note">Re-mounting the bracket or the camera later means calibrating again (step 5).</p>
+    </div>
+
+    <div class="step">
+      <h2><span class="n">2</span>Connect the camera computer</h2>
+      <table>
+        <thead><tr><th>Cable</th><th>From → to</th></tr></thead>
+        <tbody>
+          <tr><th>USB 3</th><td>D435 → a <strong>blue</strong> USB 3 port on the camera computer. Straight in, no hub.</td></tr>
+          <tr><th>Ethernet</th><td>Camera computer → the robot controller's Ethernet port, or the cell switch the robot is on.</td></tr>
+          <tr><th>Power</th><td>The kit's supply. A weaker supply browns out the camera: on a Raspberry Pi 5 that is the 27 W (5.1 V, 5 A) supply.</td></tr>
+        </tbody>
+      </table>
+      <p>The camera computer comes set up: nothing to install on it. Power-up order does not matter. Give it a minute after power-on. It runs the camera software as a service, gives itself <strong>192.168.3.20</strong> on the robot's cable, and gives the robot <strong>192.168.3.3</strong> if the robot asks for an address (DHCP). It stays quiet if another DHCP server is already on that network.</p>
+
+      <p><strong>Changing the gripper later.</strong> The camera computer approaches by the fingertips, so it knows the distance from the flange face to them for the gripper on your order. For a different gripper, set that distance in metres as <code>PERCEPTRONICS_TIP_M</code> in <code>/etc/perceptronics/cell.env</code> on the camera computer, then <code>sudo systemctl restart perceptronics-cockpit</code>.</p>
+    </div>
+
+    <div class="step">
+      <h2><span class="n">3</span>Install the URCap</h2>
+      <div class="two">
+        <div class="box">
+          <h3>PolyScope 5</h3>
+          <ol>
+            <li>Copy <code>{{PS5_FILE}}</code> to the top level of the stick (not in a folder; do not rename it). Eject the stick properly before pulling it out.</li>
+            <li>Plug it into the pendant. ☰ → <strong>Settings</strong> → <strong>System</strong> → <strong>URCaps</strong>.</li>
+            <li>Tap <strong>+</strong>, select the file, tap <strong>Open</strong>. If a Mac wrote the stick, pick the file <em>without</em> a leading <code>._</code>.</li>
+            <li>Tap <strong>Restart</strong> when PolyScope asks.</li>
+          </ol>
+          <p class="note">Or let the stick install it: put <code>urmagic_perceptronic.sh</code> from the URCap's GitHub release beside it, turn on Settings → Security → General → <strong>Run magic files</strong>, power the arm off and plug the stick in. The pendant shows ! USB ! and the robot restarts by itself.</p>
+        </div>
+        <div class="box">
+          <h3>PolyScope X</h3>
+          <ol>
+            <li>Copy <code>{{PSX_FILE}}</code> to the stick and plug it into the pendant.</li>
+            <li>☰ → <strong>System Manager</strong> → <strong>URCaps</strong>, and unlock it with the admin password.</li>
+            <li>Add a URCap and select the file.</li>
+            <li>When it is listed, ☰ → <strong>Reload</strong>. <strong>Perceptronic</strong> now appears under <strong>Application</strong>.</li>
+          </ol>
+          <p class="note">Updating from a URCap called RealSense Pilot: remove it first (select it, tap −). It is a different bundle; its saved settings do not carry over.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <h2><span class="n">4</span>Point the robot at the camera computer</h2>
+      <ol>
+        <li><strong>Robot network.</strong> ☰ → Settings → System → Network → <strong>DHCP</strong> → Apply. The camera computer gives the robot 192.168.3.3. A robot that must keep a static address: put it on 192.168.3.x / 255.255.255.0.</li>
+        <li><strong>PolyScope 5:</strong> Installation tab → URCaps → <strong>Perceptronic</strong>. The Cockpit field already reads <code>192.168.3.20</code> and the live picture appears within seconds. A camera computer at another address: type it and tap Save. Then ☰ → <strong>Save Installation</strong>.</li>
+        <li><strong>PolyScope X:</strong> Application → <strong>Perceptronic</strong>. Check the Cockpit address (<code>192.168.3.20</code>) and tap Save.</li>
+      </ol>
+      <p>No picture? The node says what to check first: the Ethernet link lights, the computer's power, the robot's network settings, or the camera's USB cable.</p>
+    </div>
+
+    <div class="step">
+      <h2><span class="n">5</span>Calibrate the camera to the flange</h2>
+      <p>Calibration finds where the camera sits on the wrist. Without it, positions come from the bracket's drawing and can be off by a few centimetres. Do it once after mounting, and again whenever the bracket or camera has moved, or picks land consistently off by more than a few millimetres.</p>
+      <ol>
+        <li>Switch the pendant to <strong>Remote</strong> control (top right): calibrating moves the arm over the network.</li>
+        <li>Put one part on the table under the camera, about 0.3 m below it.</li>
+        <li>From the laptop:
+          <pre>ssh &lt;user&gt;@&lt;computer-address&gt; sudo -u perceptronics /opt/perceptronics/current/bin/perceptronics \
+    --cell /etc/perceptronics/cell.env calibrate --cockpit http://127.0.0.1:7621 --apply</pre>
+          The arm orbits the part slowly (39 views at three distances, a few minutes). The result takes effect at once and is kept through restarts and updates.</li>
+        <li>Switch the pendant back to <strong>Local</strong> if that is how the cell runs. The 3D Pick node runs in either mode.</li>
+      </ol>
+    </div>
+
+    <div class="step">
+      <h2><span class="n">6</span>Teach pick areas (optional)</h2>
+      <p>A pick area tells the node which part of the table to look at. In the Perceptronic installation (PolyScope 5) or application (PolyScope X) node, on <strong>Pick areas</strong>: tap <strong>New area</strong> and touch the table with the fingertips at a corner, along one edge and on the far side. The map shows each area against the arm's reach. Without an area, the node finds the table by itself.</p>
+    </div>
+
+    <div class="step">
+      <h2><span class="n">7</span>Write the first pick program</h2>
+      <p class="keep">The 3D Pick node is one line with no children. It looks, finds the next part, and ends with the fingertips at the grip. It does not touch the gripper, so your gripper's nodes go around it. Program tab, inside a loop:</p>
+      <pre class="prog">Open gripper        ← your gripper's node
+3D Pick             ← Program → URCaps → 3D Pick
+Close gripper       ← your gripper's node
+If rs_pick_found    ← lift, place</pre>
+      <ol>
+        <li><strong>Picture point.</strong> Move the arm so the camera looks down at the parts from 0.3 to 0.6 m and tap <strong>+</strong>. Add more (up to 12) to cover a larger area; tap a point's second line to choose the pick area it looks at. On PolyScope X, open the node's screen with <strong>Teach &amp; options…</strong></li>
+        <li><strong>Pick order.</strong> Tap a tile: by rows or by columns, from any corner.</li>
+        <li><strong>Options → Part.</strong> Box, or cylinder standing on its end; its length, width and height as it lies; the tolerance (default 25 %).</li>
+        <li><strong>Options → Approach.</strong> How far above the part the fingertips stop first (25 mm), the grip depth, the finger room the grip check wants on each side (20 mm), whether a box is gripped across its long side, and the closer look.</li>
+        <li><strong>Check approach</strong> opens PolyScope's move screen over the first part: hold Move and watch the fingertips arrive above it.</li>
+      </ol>
+      <p>The node's picture shows the parts it will pick in <strong>green</strong>, numbered in pick order, and parts that nearly match in <strong>yellow</strong>, each with the reason: off size, two parts touching, out of reach, no room for a finger, outside the pick area, cut off by the edge of the picture. The toggle in its corner switches to the depth view. <code>rs_pick_found</code> is True once the tool is at the grip; <code>rs_pick_loc</code> is the picture point the part came from.</p>
+      <figure>
+        <img src="screens/pick-part.png" width="1000" height="560" alt="The 3D Pick node on the pendant, step 2 of 3: one tapped part taught its size; parts to pick outlined in green and numbered, rejected parts in yellow with the reason.">
+        <figcaption>The 3D Pick node on a PolyScope 5 pendant (simulated scene).</figcaption>
+      </figure>
+    </div>
+
+    <div class="step">
+      <h2><span class="n">8</span>When it does not work</h2>
+      <table>
+        <thead><tr><th>You see</th><th>Check</th></tr></thead>
+        <tbody>
+          <tr><th>No answer from the camera computer</th><td>Its power and Ethernet link lights; the robot's network on 192.168.3.x / 255.255.255.0; the address in the Cockpit field.</td></tr>
+          <tr><th>A computer answers, but not the camera program</th><td>On the camera computer: <code>systemctl status perceptronics-cockpit</code> and <code>journalctl -u perceptronics-cockpit -n 50</code>.</td></tr>
+          <tr><th>The camera gives no picture</th><td>The D435 in a blue port, no hub; the kit's power supply. Re-plug the camera: the picture comes back by itself.</td></tr>
+          <tr><th>Parts drawn, but picks miss by centimetres</th><td>Calibrate (step 5), and check the tool length (step 2).</td></tr>
+          <tr><th>A part is yellow</th><td>Read its reason. Off size: check the size and tolerance. Out of reach: move the parts or the picture point. No room for a finger: space the parts further apart.</td></tr>
+          <tr><th>A "3D Pick: no pick" popup</th><td>It names the reason; the node's picture shows what it saw.</td></tr>
+          <tr><th>The robot got no address</th><td>Another DHCP server is on that network, so the camera computer stays quiet. Give the robot a static 192.168.3.3.</td></tr>
+        </tbody>
+      </table>
+      <p>A full check from the laptop: <code>ssh -t &lt;user&gt;@&lt;computer-address&gt; sudo perceptronics-doctor</code>. Every failing line carries its fix.</p>
+    </div>
+
+    <div class="foot">
+      <p><strong>Downloads, datasheet and details:</strong> perceptronics.advin.io · <strong>Kit and questions:</strong> nick@advin.io · <strong>Source:</strong> github.com/JimothyJohn/perceptronics</p>
+      <p>Beta software, provided as is under the MIT license. Perceptronics is an independent product, not affiliated with or endorsed by Universal Robots A/S. Universal Robots, PolyScope and URCap are trademarks of Universal Robots A/S; RealSense and other names belong to their owners. &copy; 2026 Nick Armenta, Advin.</p>
+    </div>
+  </div>
+</body>
+</html>

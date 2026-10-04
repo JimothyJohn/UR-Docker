@@ -492,6 +492,7 @@ def test_the_node_teach_screen_sees_the_rejects_and_why():
         "shape": "box",
     }
     assert [b["size_mm"] for b in out["blocks"]] == [[54, 43]] and out["blocks"][0]["height_mm"] == 40
-    assert [(r["size_mm"], r["why"]) for r in out["rejected"]] == [([43, 43], "too short")]
+    # 43 x 43 is the part's 40 x 40 end face, which stands 54 tall (a box lies on any face)
+    assert [(r["size_mm"], r["why"]) for r in out["rejected"]] == [([43, 43], "too flat")]
     plain = detect_report(frame, pick_port=7622, handeye=True, tip_m=TIP)
     assert plain["part"] is None and len(plain["blocks"]) == 2 and plain["rejected"] == []

@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Perceptronics datasheet: conservative planning figures and capabilities of the 3D Pick URCap for Universal Robots. One page, printable.">
-  <title>Perceptronics datasheet · 3D picking for Universal Robots</title>
+  <meta name="description" content="Perceptronics datasheet: what a compatible robot needs, conservative planning figures and capabilities of 3D picking off flat surfaces. One page, printable.">
+  <title>Perceptronics datasheet · 3D picking for any industrial robot</title>
   <style>
     /* One US Letter page. Fixed light colours: this is the print master of the PDF. */
     @page { size: 8.5in 11in; margin: 0.45in 0.5in; }
@@ -25,31 +25,35 @@
     h1 { font-size: 19pt; letter-spacing: -0.01em; line-height: 1; }
     .beta { font-size: 6.5pt; font-weight: 700; letter-spacing: 0.08em; color: #8a5a00; background: #fdf3d7; border: 0.6pt solid #e8c96a; border-radius: 2pt; padding: 1pt 4pt; margin-left: 4pt; vertical-align: middle; }
     .rev { text-align: right; color: #5a6470; font-size: 7.2pt; line-height: 1.35; }
-    .lede { font-size: 9.2pt; line-height: 1.3; margin: 6pt 0 2pt; }
+    .lede { font-size: 9.2pt; line-height: 1.3; margin: 5pt 0 2pt; }
     .lede strong { font-weight: 700; }
-    .warn { margin: 6pt 0 7pt; padding: 4.5pt 7pt; background: #fdf3d7; border: 0.6pt solid #e8c96a; border-radius: 3pt; font-size: 7.9pt; }
+    .warn { margin: 5pt 0 5pt; padding: 4.5pt 7pt; background: #fdf3d7; border: 0.6pt solid #e8c96a; border-radius: 3pt; font-size: 7.9pt; }
     .warn strong { color: #8a5a00; }
-    .cols { display: grid; grid-template-columns: 4.75in 1fr; gap: 0.17in; }
+    .cols { display: grid; grid-template-columns: 4.3in 1fr; gap: 0.2in; }
     h2 { font-size: 8.2pt; text-transform: uppercase; letter-spacing: 0.07em; color: #157a45; margin: 0 0 3pt; }
-    .block + h2, table + h2, ul + h2, figure + h2 { margin-top: 8pt; }
+    .block + h2, table + h2, ul + h2, figure + h2 { margin-top: 7pt; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; vertical-align: top; padding: 1.8pt 4pt 1.8pt 0; border-top: 0.5pt solid #d9dee3; }
     tr:first-child th, tr:first-child td { border-top: 0; }
     th { width: 1.05in; font-weight: 600; }
     td.v { width: 1.12in; font-weight: 700; white-space: nowrap; }
     td.n { color: #5a6470; }
+    table.perf td.v { width: 0.9in; }
+    table.compat th { width: 0.85in; }
+    table.perf td.h { font-weight: 700; font-size: 7.2pt; line-height: 1.15; padding-bottom: 2.5pt; }
+    table.perf td.h span { font-weight: 400; color: #5a6470; }
     sup { font-size: 6pt; color: #8a5a00; font-weight: 700; line-height: 0; }
     ul { padding-left: 10pt; }
     .notfor ul { columns: 2; column-gap: 0.2in; }
-    .caps ul { columns: 2; column-gap: 0.25in; }
-    .caps li { break-inside: avoid; }
-    .caps { margin-top: 7pt; break-inside: avoid; }
+    .caps ul { columns: 3; column-gap: 0.2in; }
+    .caps li { break-inside: avoid; margin: 1pt 0; }
+    .caps { margin-top: 4pt; break-inside: avoid; }
     li { margin: 1.6pt 0; }
     figure { margin: 0; }
     figure img { display: block; width: 100%; height: auto; border: 0.5pt solid #d9dee3; border-radius: 3pt; }
     figcaption { color: #5a6470; font-size: 6.8pt; margin-top: 2pt; }
     .notfor { background: #f6f7f8; border-radius: 3pt; padding: 5pt 7pt; }
-    .foot { margin-top: 7pt; padding-top: 5pt; border-top: 0.5pt solid #d9dee3; color: #5a6470; font-size: 6.6pt; line-height: 1.35; }
+    .foot { margin-top: 5pt; padding-top: 4pt; border-top: 0.5pt solid #d9dee3; color: #5a6470; font-size: 6.6pt; line-height: 1.3; }
     .foot p + p { margin-top: 2.5pt; }
     .foot strong { color: #14181d; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
@@ -62,87 +66,101 @@
         <svg width="24" height="24" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 54V10h14a14 14 0 0 1 0 28H22"/><circle cx="36" cy="24" r="5" fill="currentColor" stroke="none"/></svg>
         <h1>Perceptronics <span class="beta">BETA</span></h1>
       </div>
-      <div class="rev">Datasheet · {{SHEET_DATE}}<br>URCap {{PS5_VERSION}} (PolyScope 5) · {{PSX_VERSION}} (PolyScope X)</div>
+      <div class="rev">Datasheet · {{SHEET_DATE}}<br>3D picking off flat surfaces</div>
     </div>
 
-    <p class="lede"><strong>3D picking for Universal Robots.</strong> A URCap whose 3D Pick program node uses a depth camera on the wrist to find every part of the size you enter, number them in the pick order you choose, and move the tool to the grip on each one. Your program opens and closes the gripper.</p>
+    <p class="lede"><strong>3D picking for any industrial robot.</strong> A depth camera on the wrist and a small computer beside the robot find every part of the size you enter lying on a flat surface, number them in the pick order you choose, and bring the tool to the grip on each one. A connector puts this into the robot's own programs; the robot's program opens and closes the gripper.</p>
 
     <p class="warn"><strong>Planning figures, not guarantees.</strong> The numbers below are deliberately conservative estimates derived from the software's limits, its programmed speeds and the camera's noise. This release is a beta and the figures have not been measured on a production cell. <strong>Test with your parts, gripper and layout before you commit to them.</strong></p>
 
     <div class="cols">
       <div>
-        <h2>Performance <span style="text-transform:none;letter-spacing:0;color:#5a6470;font-weight:400">(conservative; verify on your cell)</span></h2>
-        <table>
-          <tr><th>Smallest part</th><td class="v">25 × 25 × 15 mm<sup>E</sup></td><td class="n">Length × width × height as it lies. The software accepts 5 mm; depth noise makes that unreliable.</td></tr>
-          <tr><th>Largest part</th><td class="v">200 mm long side<sup>E</sup></td><td class="n">The whole part must be in one picture. The software accepts 500 mm.</td></tr>
-          <tr><th>Size measurement</th><td class="v">±5 mm</td><td class="n">The noise floor the size match allows for. Parts that differ by less than 10 mm cannot be told apart.</td></tr>
-          <tr><th>Grip position</th><td class="v">±10 mm<sup>E</sup></td><td class="n">Plan jaw opening and fingers for this much error. Depends on the camera calibration (4.4 mm RMS in one trial).</td></tr>
-          <tr><th>Gap between parts</th><td class="v">≥ 25 mm<sup>E</sup></td><td class="n">The grip check wants 20 mm clear on each side the fingers come down on. Touching parts are skipped.</td></tr>
-          <tr><th>Cycle time, node only</th><td class="v">15 s per part<sup>E</sup></td><td class="n">From the start of the node to the tool at the grip, with the closer look on. Excludes your gripper, lift and place.</td></tr>
-          <tr><th>Throughput</th><td class="v">2 parts / min<sup>E</sup></td><td class="n">With a short place move. Speeds are fixed and moderate: not a high-rate system.</td></tr>
-          <tr><th>Motion speeds</th><td class="v">0.15 m/s · 36°/s</td><td class="n">Linear approach and joint moves, set by the node. Final descent to the grip at 0.05 m/s.</td></tr>
-          <tr><th>Camera to parts</th><td class="v">0.30 to 0.60 m<sup>E</sup></td><td class="n">At the picture point. Never closer than 0.25 m.</td></tr>
-          <tr><th>Area per picture</th><td class="v">0.5 × 0.3 m<sup>E</sup></td><td class="n">Of table, from 0.5 m. Add picture points (up to 12 per node) for more.</td></tr>
-          <tr><th>Surface</th><td class="v">Flat, level</td><td class="n">A taught pick area follows the live table by at most 15 mm.</td></tr>
-          <tr><th>Size tolerance</th><td class="v">5 to 100 %</td><td class="n">Default 25 %, never tighter than ±5 mm.</td></tr>
-          <tr><th>Camera stream</th><td class="v">848 × 480, 30 fps</td><td class="n">RealSense D435 on USB 3.</td></tr>
+        <h2>Compatible robots</h2>
+        <table class="compat">
+          <tr><th>Arm</th><td class="v">6-axis articulated</td><td class="n">Cobot or industrial; grips top-down.</td></tr>
+          <tr><th>Reach</th><td class="v">≥ 0.5 m<sup>E</sup></td><td class="n">Rated; every grip is reach-checked.</td></tr>
+          <tr><th>Payload</th><td class="v">+ 0.1 kg</td><td class="n">Camera + bracket; CoG 40 mm off axis.</td></tr>
+          <tr><th>Tool flange</th><td class="v">ISO 9409-1-50-4-M6<br>ISO 9409-1-80-6-M8</td><td class="n">Brackets for both, under the gripper. Others need an adapter.</td></tr>
+          <tr><th>Controller</th><td class="v">Ethernet, TCP</td><td class="n">Its program opens a socket and moves.</td></tr>
+          <tr><th>Gripper</th><td class="v">Two-finger</td><td class="n">Any parallel jaw the program drives.</td></tr>
         </table>
-        <p class="n" style="color:#5a6470;font-size:6.8pt;margin-top:3pt"><sup>E</sup> Estimate, not a measured or guaranteed value.</p>
 
-        <h2 style="margin-top:8pt">Not for</h2>
-        <div class="notfor">
-          <ul>
-            <li>Bin picking: piled or leaning parts</li>
-            <li>Shapes other than boxes and upright cylinders</li>
-            <li>Transparent or mirror-like parts</li>
-            <li>Telling apart parts of the same size</li>
-            <li>Driving the gripper or the place move</li>
-          </ul>
-        </div>
-
+        <h2>Picking performance <span style="text-transform:none;letter-spacing:0;color:#5a6470;font-weight:400">(by camera-to-part distance; verify on your cell)</span></h2>
+        <table class="perf">
+          <tr><th></th><td class="h">0.30 to 0.60 m<br><span>working zone</span></td><td class="h">1.0 to 1.5 m<br><span>far limit</span></td><td class="n"></td></tr>
+          <tr><th>Parts found</th><td class="v">99 %<sup>S</sup></td><td class="v">4 of 4<sup>M</sup></td><td class="n">Right-size parts in view. Wrong ones picked: 0.</td></tr>
+          <tr><th>Size resolved to</th><td class="v">±5 mm</td><td class="v">±17 mm</td><td class="n">It checks a size; it does not measure one.</td></tr>
+          <tr><th>Sizes told apart</th><td class="v">≥ 10 mm<sup>E</sup></td><td class="v">≥ 35 mm<sup>E</sup></td><td class="n">Closer sizes read as the same part.</td></tr>
+          <tr><th>Smallest side</th><td class="v">20 mm<sup>E</sup></td><td class="v">45 mm<sup>E</sup></td><td class="n">Edges blur by ~1 % of the distance.</td></tr>
+          <tr><th>Lowest part</th><td class="v">5 mm<sup>E</sup></td><td class="v">15 mm<sup>M</sup></td><td class="n">Above the surface; rough ones raise it.</td></tr>
+          <tr><th>Part centre</th><td class="v">±3 mm<sup>S</sup></td><td class="v">±10 mm<sup>E</sup></td><td class="n">95 %, plus calibration: 9 mm per 1°.</td></tr>
+          <tr><th>Part heading</th><td class="v">±2.5°<sup>S</sup></td><td class="v">±8°<sup>E</sup></td><td class="n">95 %. None for a square top.</td></tr>
+          <tr><th>Gap to neighbours</th><td class="v">≥ 25 mm</td><td class="v">≥ 40 mm<sup>E</sup></td><td class="n">20 mm finger room a side.</td></tr>
+          <tr><th>Time to find</th><td class="v">0.9 s<sup>M</sup></td><td class="v">1.1 s<sup>M</sup></td><td class="n">Per picture, Raspberry Pi 5.</td></tr>
+        </table>
+        <table style="margin-top:5pt">
+          <tr><th>Distance limits</th><td class="v">0.28 to 1.6 m</td><td class="n">No depth nearer; nothing farther is picked.</td></tr>
+          <tr><th>Grip position</th><td class="v">±10 mm<sup>E</sup></td><td class="n">Plan the jaws for it. Mostly calibration.</td></tr>
+          <tr><th>Part pose</th><td class="v">Any face down</td><td class="n">Boxes on any face; cylinders on end.</td></tr>
+          <tr><th>Cycle, node only</th><td class="v">15 s per part<sup>E</sup></td><td class="n">To the grip. ~2 parts/min with a short place.</td></tr>
+        </table>
+        <p class="n" style="color:#5a6470;font-size:6.6pt;margin-top:3pt"><sup>M</sup> Measured with the camera computer and a D435, one setup. <sup>S</sup> Simulated: 720 parts through a model of the D435's noise. <sup>E</sup> Estimate, not a measured or guaranteed value.</p>
       </div>
 
       <div>
         <figure>
-          <img src="screens/pick-main.png" width="1000" height="560" alt="The 3D Pick node on the pendant: parts to pick outlined in green and numbered, rejected parts in yellow with the reason.">
-          <figcaption>3D Pick on a PolyScope 5 pendant (simulated scene).</figcaption>
+          <img src="screens/pick-part.png" width="1000" height="560" alt="The 3D Pick node on the pendant, step 2 of 3: one tapped part taught its size; parts to pick outlined in green and numbered, rejected parts in yellow with the reason.">
+          <figcaption>The Universal Robots connector on a PolyScope 5 pendant (simulated scene).</figcaption>
         </figure>
 
-        <h2>Compatibility</h2>
+        <h2>Connectors</h2>
         <table>
-          <tr><th style="width:0.85in">PolyScope 5</th><td>{{PS5_RANGE}} (e-Series)</td></tr>
-          <tr><th>PolyScope X</th><td>{{PSX_RANGE}}</td></tr>
-          <tr><th>Robots</th><td>UR3e, UR5e, UR7e, UR10e, UR12e, UR16e, UR20</td></tr>
-          <tr><th>Gripper</th><td>Any your program can open and close. The node does not drive it.</td></tr>
+          <tr><th style="width:0.85in">Universal Robots</th><td>PolyScope {{PS5_RANGE}}, URCap {{PS5_VERSION}}<br>PolyScope X {{PSX_RANGE}}, URCap {{PSX_VERSION}}</td></tr>
+          <tr><th>Other makes</th><td>On request</td></tr>
         </table>
 
         <h2>What a cell needs</h2>
         <table>
-          <tr><th style="width:0.85in">Camera</th><td>RealSense D435 on a printed bracket between the tool flange and the gripper</td></tr>
-          <tr><th>Computer</th><td>Small Linux computer beside the robot (Raspberry Pi class), on the robot's network</td></tr>
-          <tr><th>Network</th><td>TCP 7621 and 7622, robot to camera computer</td></tr>
-          <tr><th>Setup</th><td>One camera-to-flange calibration; optional pick areas taught with three fingertip touches</td></tr>
-          <tr><th>URCap</th><td>Free, open source (MIT). Kit from Advin.</td></tr>
+          <tr><th style="width:0.85in">Camera</th><td>RealSense D435 (848 × 480, 30 fps, USB 3) on a printed bracket</td></tr>
+          <tr><th>Computer</th><td>Raspberry Pi class, beside the robot; ships set up</td></tr>
+          <tr><th>Network</th><td>Ethernet; TCP 7621 and 7622</td></tr>
+          <tr><th>Setup</th><td>One camera calibration; optional pick areas</td></tr>
+          <tr><th>Software</th><td>Free, open source (MIT). Kit from Advin.</td></tr>
         </table>
+
+        <h2 style="margin-top:7pt">Not for (limits of the depth camera)</h2>
+        <div class="notfor">
+          <ul>
+            <li>Measuring parts or quality checks</li>
+            <li>Defect, surface or print inspection</li>
+            <li>Telling apart parts of nearly the same size</li>
+            <li>Thin or flat parts: sheets, washers, labels</li>
+            <li>Transparent, mirror-like or very dark parts</li>
+            <li>Bin picking: piled or leaning parts</li>
+            <li>Shapes other than boxes and upright cylinders</li>
+            <li>Direct sunlight on the work area</li>
+            <li>Driving the gripper or the place move</li>
+          </ul>
+        </div>
       </div>
     </div>
 
     <div class="caps">
       <h2>Capabilities</h2>
       <ul>
-        <li><strong>Finds parts by volume, from depth alone:</strong> boxes, and cylinders standing on end. Colour and lighting contrast are not used.</li>
-        <li><strong>Any position, any rotation</strong> on the surface. Fingers close across the short side, or the long side of a box if you choose.</li>
+        <li><strong>Finds parts by volume, from depth alone:</strong> boxes on any face, cylinders on end; the floor is fitted round each part.</li>
+        <li><strong>Any position, any rotation.</strong> Fingers across the short side, or the long one.</li>
         <li><strong>Eight pick orders:</strong> by rows or by columns, from any corner.</li>
-        <li><strong>Checks before it moves:</strong> reach by the arm's kinematics, and room for the fingers beside the part.</li>
-        <li><strong>Says why not:</strong> rejected parts are drawn in yellow with the reason (off size, touching, out of reach, no finger room, outside the area, cut off).</li>
-        <li><strong>Queues what it saw:</strong> the next part is picked without a trip back to the picture point.</li>
-        <li><strong>One program node, no child nodes.</strong> Sets <code>rs_pick_found</code> and <code>rs_pick_loc</code>. Runs in your program; no internet needed.</li>
+        <li><strong>Checks before it moves:</strong> reach by the arm's kinematics, finger room.</li>
+        <li><strong>Says why not:</strong> near misses drawn in yellow with the reason.</li>
+        <li><strong>Queues what it saw:</strong> no trip back to the picture point.</li>
+        <li><strong>Runs inside the robot's own program</strong> through its connector. No internet.</li>
       </ul>
     </div>
 
     <div class="foot">
       <p><strong>Download and details:</strong> perceptronics.advin.io · <strong>Kit and questions:</strong> nick@advin.io · <strong>Source:</strong> github.com/JimothyJohn/perceptronics</p>
-      <p>Beta software, provided as is under the MIT license. The integrator is responsible for the risk assessment and safety of the cell. Perceptronics is an independent product, not affiliated with or endorsed by Universal Robots A/S. Universal Robots, PolyScope and URCap are trademarks of Universal Robots A/S; RealSense and other names belong to their owners. &copy; 2026 Nick Armenta, Advin.</p>
+      <p>Beta software, provided as is under the MIT license. The integrator is responsible for the risk assessment and safety of the cell. Perceptronics is an independent product, not affiliated with or endorsed by any robot maker. Universal Robots, PolyScope and URCap are trademarks of Universal Robots A/S; RealSense and other names belong to their owners. &copy; 2026 Nick Armenta, Advin.</p>
     </div>
   </div>
 </body>

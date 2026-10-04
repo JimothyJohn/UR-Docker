@@ -100,6 +100,11 @@ class CockpitClient:
     def doctor(self, *, robot: bool = True) -> dict:
         return self.get(f"/api/doctor?robot={'1' if robot else '0'}")
 
+    def workplane_check(self, name: str) -> dict:
+        from urllib.parse import quote
+
+        return self.get(f"/api/workplane/check?name={quote(name, safe='')}")
+
     # -- robot (through the cockpit's link) ------------------------------------------
 
     def robot_state(self) -> dict:

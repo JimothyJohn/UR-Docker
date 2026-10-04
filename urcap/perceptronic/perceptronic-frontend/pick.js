@@ -25,6 +25,7 @@
   const APP_TAG = "advin-perceptronic";
   const ARCHIVE_PATH = "/advin/perceptronic/perceptronic-frontend/";
   const POLL_TIMEOUT_MS = 1500;
+  const FEED_TIMEOUT_MS = POLL_TIMEOUT_MS + 3500; // main.js: a silent address fails in seconds
   const SCENE_EVERY_MS = 700;
   const APP_EVERY_MS = 4000;
   const JOINT_NAMES = ["base", "shoulder", "elbow", "wrist1", "wrist2", "wrist3"];
@@ -770,7 +771,16 @@
         const base = this.cockpitUrl();
         const depth = this._depth;
         try {
-          const r = await fetch(`${base}/api/${depth ? "depth" : "color"}.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`);
+          const ctl = typeof AbortController === "function" ? new AbortController() : null;
+          const timer = ctl ? setTimeout(() => ctl.abort(), FEED_TIMEOUT_MS) : 0;
+          let r, blob;
+          try {
+            r = await fetch(`${base}/api/${depth ? "depth" : "color"}.png?after=${this._seq}&timeout_ms=${POLL_TIMEOUT_MS}`,
+              ctl ? { signal: ctl.signal } : undefined);
+            if (r.ok) blob = await r.blob();
+          } finally {
+            clearTimeout(timer);
+          }
           if (r.status === 503) { this.noCamera(P.advise("nopicture", base, "HTTP 503: the cockpit has no frame")); await sleep(500); continue; }
           if (r.status === 404 && depth) {
             // a camera computer older than 0.7.0 has no heatmap: the picture instead
@@ -781,7 +791,6 @@
           }
           if (!r.ok) { this.noCamera(P.advise("outdated", base, `HTTP ${r.status} on /api/color.png`)); await sleep(1500); continue; }
           const seq = Number(r.headers.get("X-Seq") || 0);
-          const blob = await r.blob();
           const url = URL.createObjectURL(blob);
           const previous = this._blobUrl;
           img.onload = () => { if (previous) URL.revokeObjectURL(previous); this.drawScene(); };

@@ -69,7 +69,7 @@ legacy Windows codepages never crash on unicode.
 with ctypes (no `pyrealsense2`; zero deps kept), streams colour + depth aligned
 to colour (both sensors at the D435's native 848×480 — **mismatched sizes give
 black colour frames** — through the SDK's spatial + temporal filter chain,
-sensor on the High Accuracy preset at full laser; `docs/realsense.md` §Depth
+sensor on the High Density preset at full laser (High Accuracy left holes in dark part tops, 2026-10-03); `docs/realsense.md` §Depth
 quality; `--no-depth-filters` / `--rs-preset none` for raw), and the cockpit (`perceptronics/webapp.py` + `perceptronics/webui/`) does
 hover-to-measure, click-to-segment (`perceptronics/segment.py`: colour+depth
 region growing, or SAM via the `sam` extra), snapshots (`POST /api/snapshot`), and a **Robot** panel that sends the segment's point to
@@ -311,7 +311,7 @@ root-owned, `~/Library/Logs/perceptronics/` (also `GET /api/pick/log`). **Kill t
 relaunching the cockpit** (`pkill -f "pick-server --bind"`): both bind `:7622`, and the cockpit
 just warns and runs without its pick server. The 0.3.0 script has not yet run on a controller.
 **Part size (0.4.0, `perceptronics/partspec.py`):** the node's Length × Width [× Height] ± tolerance
-(as the part lies; default ±25 %, never under ±5 mm) rides on FIND/REFINE as `part=60x40x30 tol=25`
+(any face down since 2026-10-03; default ±25 %, never under ±5 mm) rides on FIND/REFINE as `part=60x40x30 tol=25`
 and replaces `detect_blocks`' fixed foam-block gate (≤ 70 × 60 mm); height is measured against the
 non-white depth in a ring around the blob (unseen → not checked). Status −7 = white things in view,
 none that size; the teach screen draws the rejects grey with why. Still colour-segmented: the part
@@ -327,7 +327,10 @@ surface with a top face its length × width; the surface is a taught pick area (
 fingertip touches in the Installation node, nudged ≤ 15 mm to the live table) or the table
 found live; each part's min-area rectangle gives the axes, the fingers close across the short
 side. `order_parts` numbers parts in the **picture's** directions (front = bottom of the
-picture). Reach = base outer radius + 150 mm .. rated reach − 150 mm (`Reach.for_model`).
+picture); with the grip check on, `volume.clear_the_way` then reorders them so a part pinned
+only by other parts (one in its finger zone) is picked after them instead of being turned
+away, and the picture's order only breaks ties (Nick, 2026-10-02: "pick the parts that make
+other parts easier to pick"). Reach = base outer radius + 150 mm .. rated reach − 150 mm (`Reach.for_model`).
 **Pick server protocol 2** (`picknode.parse_options`): every request carries
 `part= tol= order= grip= stroke= [reach=] [plane= area=] node= loc= locs= proto=2`, answers
 are 16 numbers; `NEXT` serves the per-node queue (the next part already seen: no trip to the
@@ -391,10 +394,115 @@ end (decided; a lying one rolls). **The picture: pickable parts green with their
 near misses yellow with why** (still nothing for what is nothing like the part). The closer look
 assumes fingers open 50 mm (`LOOK_STROKE_MM`) when it keeps the part clear of them.
 
+**A robot nobody configured works (Nick, 2026-10-02: "assume their robots are not configured
+network-wise").** The pick PC's cell port is **192.168.3.20/24** (`install.sh --cell-if eth0
+--cell-address`, NetworkManager profile `perceptronics-cell`; a port already on another network
+is left alone) and `perceptronics-cell-dhcp` (dnsmasq, one lease = the cell's `UR_HOST`
+**192.168.3.3**, no route, no DNS) serves a robot left on DHCP — only after
+`python -m perceptronics.cellnet probe` heard no other DHCP server there, re-probed by a
+NetworkManager hook on every link-up. Both URCaps read an **empty Cockpit field as
+192.168.3.20** (PS5 0.9.0, PolyScope X 0.7.0; the field shows it, `:7621` still means the
+controller itself) and, when it is silent, tell the operator to put the robot on DHCP.
+`tests/test_cellnet.py` holds the address equal in the Python, Java, JS and installer. UR's
+factory network setting isn't documented: the manual says "select DHCP to enable networking";
+verified only against the office DHCP server and a cable-less port on the Pi 5 (2026-10-02).
+
+**The Pi on the UR3e: `PLUG-AND-PLAY.md`** (2026-10-02) — keep it true when anything it names
+changes. Two rules it depends on: (1) a pick PC keeps its hand-eye in `PERCEPTRONICS_HANDEYE_FILE`,
+**never** in `cell.env` — `install.sh`'s `handeye_out_of_env` seeds the file from the profile and
+drops the line on every install, because an environment pose beats every `calibrate --apply` at the
+next restart; (2) `perceptronics doctor`'s `network` line says whether this machine is on the
+robot's /24 and what the pendant's Cockpit field needs (nothing at 192.168.3.20).
+
 **Settled 2026-10-01 (Nick):** green overlays for pickable parts and yellow for *marginal* ones (the
 server's `near` flag) is the intended picture — nothing is drawn for what is nothing like the part;
 the 3D Pick node's picture carries no watermark; the **UR7e is the UR5e's arm and the UR12e the
-UR10e's** (`armfk.DH` aliases, so `armik` judges them; only the UR30 is still left to the controller).
+UR10e's** (`armfk.DH` aliases, so `armik` judges them). The UR30 and UR15 rows are UR's published table (2026-10-02); an arm not in `armfk.DH` is left to the controller.
+
+**Three traps from the 2026-10-02 sessions.** (1) **Every request the URCap pages make to the
+camera computer is bounded** (`AbortController` + `setTimeout`; `test_every_request_to_the_camera_computer_can_time_out`
+reads every `fetch(` in `urcap/perceptronic/perceptronic-frontend/`): an empty Cockpit field means
+192.168.3.20, and an unbounded fetch to an address nothing answers on hung the PolyScope X e2e on every
+version. (2) `scripts/deploy-pi.sh` builds the wheel with the first Python that has pip (`PYTHON=` first):
+the repo `.venv` has none and is often first on PATH. (3) `site/site.sh datasheet` from an SSH shell:
+Chrome can't print without a display — `CHROME=` Playwright's `chrome-headless-shell` (`site/site.sh`
+header has the line).
+
+**Detection (`perceptronics/volume.py`, reworked 2026-10-03; Nick: "more robust ... from a distance
+similar to the robot arm", "assumed that they could be lying on either face", "drawing a line halfway
+up the expected part height", "tying [the tolerance] to the distance").** One frame → parts:
+1. **Surface**: a plane fitted near level (≤ 8°; > 1° adds a "hand-eye is out" note), then a **local
+   floor** — median + MAD of near-floor heights in tiles of 3 part lengths (≥ 15 cm), interpolated:
+   heights are off the floor *round each part* (carpet: one plane leaves 5-7 mm, local 1.7 mm).
+2. **Occupied** = over half the part's lowest face height *and* over 3.5 × the local spread (a note
+   when roughness limits it).
+3. Per blob: the **footprint is where it stands over half the expected height** (the spec's height on
+   the face nearest the measured top) — the half-height line of a blurred step is its edge, and a white
+   label can't split it. Far-side **ramps are undone** (`_unramp`: a cell lower than its neighbour
+   toward the camera slides back `(top − h)·tanθ`). Footprints apart *on the surface* are separate
+   parts even when the picture joins them; a part owns its footprint + blur margin + **its shadow**;
+   what is left is looked at again (a low part beside a tall one).
+4. Measure at full resolution (eroded one pixel), **trimmed-quantile rectangle** (`robust_rect`, 2-98 %),
+   reject ledges (higher ground beside) and domes (shoulder heights round it).
+5. **Size check**: any face down (`PartSpec.poses()`), tolerance never under `RANGE_SLACK` × range
+   (1.2 %); past `MAX_PICK_RANGE_M` (1.6 m) nothing is picked.
+
+Tools: `synthscene.Sensor`/`sense()` (D435 noise model, sized from the real frames below) and
+`scripts/volume_bench.py` (random arm-distance cells vs truth: found / false picks / size bias) — **run
+the bench before and after any detector change**. Real labelled frames: `tests/fixtures/d435/` (4 boxes
+110×70×30 on carpet at 1.3-1.5 m, white labels; 2 flat + 2 on a side at 0.72-0.81 m, High Density;
+carpet with a lump) — the arbiter over the model.
+Numbers as of this rework: bench (0.28-0.60 m, hand-eye ≤ 1.5°) 99.4 % found, 0 false picks, size bias
++0.6 mm, heading p95 2.4°; real boxes 4/4 at 1.4 m, wrong sizes 0; ~1 s per frame on the Pi 5.
+
+**What a D435 can't do — read before proposing detector work** (measured on the pick PC's D435,
+2026-10-03, unless noted). These are the sensor's limits, not the software's; don't spend time trying
+to process past them:
+- **It doesn't measure parts.** Lateral blur is ~1 % of range (σ 12-16 mm at 1.4 m, **the same with
+  the SDK filters off**: it is the stereo matcher's window, not our filters). Sizes are good to about
+  ±max(5 mm, 1.2 % of range): it confirms a size *class*, it can't do metrology or QA, and two parts
+  closer in size than ~2× that can't be told apart. Edges are blurred steps and corners round: there
+  is **no perfect bounding box**, only a best edge estimate (the half-height line).
+- **No defect inspection.** Anything under ~5 mm at 0.4 m (~15 mm at 1.4 m) is smoothed away;
+  dents, chips, scratches, print and label content are invisible in depth.
+- **Near and far.** Nothing closer than ~0.28 m (848×480). Error grows with z²: the good zone is
+  0.30-0.60 m; usable for picking to ~1.5 m with looser sizes; past 1.6 m we never pick.
+- **Heights need contrast against the surface.** Nothing stands out under ~3.5× the local surface
+  spread: ~5 mm on a smooth table at 0.4 m, 10-18 mm on carpet at 0.85-1.4 m. Thin, flat parts
+  (sheets, washers, labels) are invisible in depth.
+- **Surfaces lie.** White labels / bright patches bias depth (one 30 mm box read 21-36 mm across its
+  top at 1.4 m); dark, shiny, transparent surfaces drop out or read wrong; sunlight washes out the
+  IR projector. **The preset decides how much drops out:** a dark, printed 30 mm-wide top at 0.72 m
+  kept 43 % of its depth on High Accuracy (box missed) and 92 % on High Density (found, 110×31×71 for
+  110×30×70) — hence High Density by default; holes can't be processed back, noise can.
+- **Oblique views hide floor.** A part hides `height·tanθ` of floor behind it (54 mm for 30 mm at 61°)
+  and the stereo **fills it with a ramp, not holes** — far edges stretch unless undone.
+- **Averaging frames buys little.** Filtered temporal noise is 0.8 mm at 1.4 m (raw 2.1 mm); the error
+  is spatial and static (swells, blur, material bias) and doesn't average out.
+- **The surface is never one plane** over a whole view: swells grow with z² (±4 mm at 0.85 m over a
+  carpet view). Fit locally.
+- **Positions inherit calibration.** The detector tolerates a hand-eye tilted 2.5° for *finding*
+  parts, but every 1° of hand-eye error is ~9 mm of grip error at 0.5 m.
+- **Rest pose is ambiguous for near-cubes**: a box with two equal sides has no long axis (heading
+  undefined), and faces of similar size can't be told apart by the camera.
+Known gaps: one harsh-bench false pick in 351 (a tall box's fragment fitting another face); the
+range-scaled tolerance also loosens the height check; a fixed deployment could subtract a taught
+empty-surface depth map instead of fitting the floor (not built).
+
+**Setup portal + update bundles (2026-10-03, Nick: "a setup portal ... at its default IP address",
+`admin`/`admin` for now; bundles checksummed, **not signed** — his call).** `http://<pick PC>:7621/setup`
+(`perceptronics/setupportal.py`, `webui/setup.html`) changes the cell port's address/gateway/DNS, the
+robot's address and the cell DHCP, and installs `perceptronics-update-*.tar` bundles
+(`scripts/pi-update.sh bundle|push`). The cockpit only queues; root work is
+`deploy/pi/perceptronics-admin` (stdlib, standalone, `.path`-triggered) → `install.sh --network` or the
+bundle's own `install.sh --wheel`, health check on `/api/info`, automatic `--rollback`. Off unless
+`PERCEPTRONICS_ADMIN_DIR` is set (only the Pi's unit sets it). Traps: (1) `/etc/perceptronics/network.env`
+is install.sh's **default for every later run** — a redeploy without `--cell-if`/`--cell-address` keeps
+what the portal chose; (2) after `--network` the port keeps `192.168.3.20/24` as a rescue address unless
+the new network holds it; (3) the network rules live twice (helper + `setupportal.validate_network`) and
+a hypothesis test holds them equal — change both; (4) install.sh must never restart
+`perceptronics-admin.service` (an update runs install.sh from inside it); (5) a card flashed before
+this has no portal: reflash it, or SSH with `deploy-pi.sh`. Not yet run on a board.
 
 **Three traps from the 3D Pick sessions.** (1) `urcap/pick5_e2e.py` compiles the test harness in
 `tests/test_urcap5.py` (`HARNESS`): anything the harness starts to use must be in the source list
@@ -406,6 +514,18 @@ conflicted files, `make urcap-package urcap5-package`, push. (3) Playwright is n
 gone from the repo): `uv run --with playwright==1.63.0 python urcap/e2e.py --image
 universalrobots/ursim_polyscopex:10.13.0` still works where uv is installed, but leaves a stray
 `uv.lock` — delete it before committing.
+
+**UFACTORY 850 (`urctl/xarm.py`, `urctl/ufactory.py`, `UR_PLATFORM=ufactory`, PR #57, 2026-10-03).**
+A second vendor behind `Controller`; `urctl/workcell.py` gives positions, TCP offsets and three-point
+workplanes on every arm. **UFACTORY's firmware simulator runs on this Mac** (unlike URSim e-Series):
+`scripts/ufactory-sim.sh up`, then `UFACTORY_SIM_HOST=127.0.0.1 python3 -m pytest -m ufactory_sim`.
+It binds **127.0.0.1:502, 503, 504, 18333 and 30000–30003 — the same 30001–30003 as URSim**, so
+`scripts/ufactory-sim.sh down` before starting URSim. What the sim (v2.4.0) does that a fake won't, all
+handled in `UFactoryArm` and modelled in `tests/_xarm_fake.py`: MOTION_EN is never answered (UFACTORY's
+SDK times out on it too); only_check_type 2 plans from a stale intermediate state (send 1 first); the
+first check after a move can say 24 (Speed Exceeds Limit) at rest; SET_TCP_OFFSET drops to state 5 until
+`set_state(0)`; joint-teaching mode is refused. When the sim disagrees with us, run UFACTORY's own SDK
+(`xArm-Python-SDK`) against it before deciding whose bug it is. Not yet seen on a real 850.
 
 **Monocular scan** (`perceptronics scan`, `docs/mono-scan.md`) was removed on
 2026-09-25 (branch refactor/prune-2026-09-25); it lives in git history before
