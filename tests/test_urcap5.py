@@ -245,7 +245,17 @@ public class Harness {
                 List<Object> toks = new ArrayList<Object>();
                 for (int i = -1; i < s.points.size(); i++) toks.add(s.tokens(i));
                 m.put("tokens", toks);
+                List<Object> teach = new ArrayList<Object>();
+                for (int i = -1; i < s.points.size(); i++) teach.add(s.teachTokens(i));
+                m.put("teach_tokens", teach);
                 out = m;
+                break;
+            }
+            case "at": {
+                // the Part step's tap: what Scene.at finds under picture pixel (u, v)
+                Scene sc = Scene.parse(Json.parseObject(a[1]));
+                Scene.Part p = sc.at(Integer.parseInt(a[2]), Integer.parseInt(a[3]), Integer.parseInt(a[4]));
+                out = p == null ? null : java.util.Arrays.asList(p.lengthMm, p.widthMm, p.heightMm);
                 break;
             }
             case "set": {
@@ -422,6 +432,9 @@ public class Harness {
                         screen.show(ps, rows, Math.max(0, n - 1));
                         if (args[5].equals("part")) screen.showOptions(0);
                         if (args[5].equals("approach")) screen.showOptions(1);
+                        if (args[5].equals("look")) screen.showStep(PickScreen.LOOK);
+                        if (args[5].equals("teach")) screen.showStep(PickScreen.PART);
+                        if (args[5].equals("grip")) screen.showStep(PickScreen.GRIP);
                         screen.setSize(Integer.parseInt(args[1]), Integer.parseInt(args[2]));
                         layout(screen);
                         List<Object> clipped = new ArrayList<Object>();

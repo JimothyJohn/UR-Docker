@@ -285,6 +285,23 @@ final class PickScript {
         return b.toString();
     }
 
+    /**
+     * {@link #tokens} without the part's size (no {@code part=}, {@code tol=}, {@code shape=})
+     * and without the grip check: what the Part step asks for when the operator taps the
+     * picture, so everything in view is measured whatever size the node holds now (0.9.0).
+     */
+    String teachTokens(int i) {
+        StringBuilder b = new StringBuilder();
+        for (String t : tokens(i).trim().split(" ")) {
+            if (t.startsWith("part=") || t.startsWith("tol=") || t.startsWith("shape=") || t.startsWith("room=")
+                    || t.startsWith("across=")) {
+                continue;
+            }
+            b.append(' ').append(t.startsWith("gripcheck=") ? "gripcheck=0" : t);
+        }
+        return b.toString();
+    }
+
     /** ASCII (it goes into the script). */
     String partText() {
         return (round() ? "cylinder D" + num(longSide()) : num(longSide()) + " x " + num(shortSide())) + " x "
