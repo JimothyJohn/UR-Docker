@@ -1,9 +1,9 @@
 # D435 tool-flange adapter — specification / datasheet
 
 **Part:** `d435_tool_bracket` · **Rev:** C (2026-10-02, Nick: one centre screw instead of three, a chamfered lip round the camera, the camera drafted 5° toward the centre, the wall half as thick, a cable clip for a USB cable leaving the right-hand end) · **Status:** Rev C designed, exported and clash-checked against Intel's body mesh, *not yet printed*. Rev B.2 is printed and runs on the UR3e (SETUP.md).
-**Files:** `bracket.py` (parametric source, CadQuery) · **two prints**, `out/d435_tool_bracket_eseries.{stl,step}` and `out/d435_tool_bracket_ur20.{stl,step}` · `out/d435_tool_bracket_assembly_{eseries,ur20}.step` (flange + adapter + camera envelope + hardware) · `out/d435_body_in_flange_frame.stl` (Intel's D435 body, placed) · `renders/*.png`
+**Files:** `bracket.py` (parametric source, CadQuery) · **three prints**, `out/d435_tool_bracket_eseries.{stl,step}`, `out/d435_tool_bracket_ur20.{stl,step}` and `out/d435_tool_bracket_uf850.{stl,step}` (UFACTORY 850, added 2026-10-03, *not yet printed*) · `out/d435_tool_bracket_assembly_{eseries,ur20,uf850}.step` (flange + adapter + camera envelope + hardware) · `out/d435_body_in_flange_frame.stl` (Intel's D435 body, placed) · `renders/*.png`
 
-A one-piece **sandwich adapter plate** for an Intel RealSense D435 on a Universal Robots tool flange, built as **two prints from one parametric file**: an ISO 9409-1-50-4-M6 print for the UR3e/5e/10e/16e (Ø63 disc, ISO-50 only) and an ISO 9409-1-80-6-M8 print for the UR20/UR30 (Ø96 disc, which also keeps the ISO-50 holes). The pattern holes are plain through holes, so the tool's own bolts pass through the plate into the robot. The camera **hangs beside the wrist, back along −Z**, in a **lipped seat on a 3 mm wall drafted 5°**, so its optical axis tips 5° in toward the flange axis; it leans about its outer front edge, which stays on the adapter's tool face, so nothing of the camera or the adapter rises into the tool's volume. **One 1/4-20 enters through the wall from the wrist side, sunk below the face**; the lip stops the camera turning on it. A **C clip** beside the camera's USB end takes the cable back along the wrist. Fit the camera to the adapter first, then bolt the adapter to the robot.
+A one-piece **sandwich adapter plate** for an Intel RealSense D435 on a Universal Robots tool flange, built as **three prints from one parametric file**: an ISO 9409-1-50-4-M6 print for the UR3e/5e/10e/16e (Ø63 disc, ISO-50 only), an ISO 9409-1-80-6-M8 print for the UR20/UR30 (Ø96 disc, which also keeps the ISO-50 holes), and an ISO-50 print for the **UFACTORY 850** (§2.5: the same face with two more M6, the camera clocked off its connector block). The pattern holes are plain through holes, so the tool's own bolts pass through the plate into the robot. The camera **hangs beside the wrist, back along −Z**, in a **lipped seat on a 3 mm wall drafted 5°**, so its optical axis tips 5° in toward the flange axis; it leans about its outer front edge, which stays on the adapter's tool face, so nothing of the camera or the adapter rises into the tool's volume. **One 1/4-20 enters through the wall from the wrist side, sunk below the face**; the lip stops the camera turning on it. A **C clip** beside the camera's USB end takes the cable back along the wrist. Fit the camera to the adapter first, then bolt the adapter to the robot.
 
 **What Rev C changed (Nick, 2026-10-02):**
 
@@ -23,8 +23,13 @@ A one-piece **sandwich adapter plate** for an Intel RealSense D435 on a Universa
 | --- | --- | --- | --- | --- | --- |
 | `eseries` (UR3e/5e/10e/16e) | **Ø63 × 6, ISO-50 only** (`ESERIES_PLATE_OD`, `ESERIES_PATTERNS`) | r = 48 … 51, 3 mm off the Ø90 wrist (`ESERIES_WRIST_R`); camera at r = 51.1 … 78.2 | `ARM_ANGLE_DEG = 90` — on the tool-I/O side | Ø31.3 × 4 into the Ø31.5 H7 recess | Ø31.7 × 4 for an ISO-50 tool's spigot |
 | `ur20` (UR20/UR30) | Ø96 × 6, ISO-80 + ISO-50 | r = 53 … 56, 3 mm off the Ø100 housing; camera at r = 56.1 … 83.2 | `UR20_ARM_ANGLE_DEG = 30` — 60° off the M8 socket (§6.10; Rev B.2 was 45°) | **+ Ø49.8 × 3 ring into the Ø50 H7 pilot** (`UR20_SPIGOT_OD`) | **Ø50.2 × 4** for an ISO-80 tool's spigot (`UR20_TOP_RECESS_D`) |
+| `uf850` (UFACTORY 850) | **Ø63 × 6, ISO-50 + the 850's two extra M6** at 3 and 9 o'clock (`UF850_BOLT50_ANGLES_DEG`) | r = 45 … 48, 3 mm off the Ø84 housing (`UF850_WRIST_R`); camera at r = 48.1 … 75.2 | `UF850_ARM_ANGLE_DEG = 0` — 3 o'clock, off the connector block that fills 67° … 162° (§2.5) | Ø31.3 × 4 into the Ø31.5 H6 pilot (6 deep) | Ø31.7 × 4 |
 
-Each variant is fully located on its own robot (pilot + pin + bolts) and re-presents that robot's ISO interface to the tool. The e-Series print dropped the ISO-80 pattern in Rev B.2 (Nick: optimise the e-Series); the UR20 print keeps the ISO-50 holes, which cost nothing on a Ø96 disc.
+Each variant is fully located on its own robot (pilot + pin + bolts) and re-presents that robot's ISO interface to the tool. The `uf850` build also checks the print against **UFACTORY's own wrist mesh** (`vendor/`, `robot_clash`): no wrist vertex inside the bracket (it refuses to export otherwise), the wall **3.17 mm** from the housing at its closest, the spigot 0.1 a side in the pilot (`out/build_info.json` → `robot_clash`).
+
+| | |
+| --- | --- |
+| ![UFACTORY 850](renders/iso_uf850.png) | ![850 underside](renders/underside_uf850.png) | The e-Series print dropped the ISO-80 pattern in Rev B.2 (Nick: optimise the e-Series); the UR20 print keeps the ISO-50 holes, which cost nothing on a Ø96 disc.
 
 | | |
 | --- | --- |
@@ -45,7 +50,7 @@ The camera in the renders is Intel's own D435 body mesh (`vendor/`, see the NOTI
 
 | ID | Requirement | How it is met | Verified |
 | --- | --- | --- | --- |
-| R1 | Mount on a UR e-Series ISO 9409-1-50-4-M6 flange **or** (second print) a UR20/UR30 ISO 9409-1-80-6-M8 flange | `eseries`: Ø63 × 6 plate, 4× Ø6.6 on Ø50 PCD (45°/135°/225°/315°), pin slot at 12 o'clock, Ø31.3 spigot into the Ø31.5 H7 recess. `ur20`: Ø96 × 6, + 6× Ø9 on Ø80 PCD (0°/60°/…/300°), Ø8 pin slot, Ø49.8 spigot into the Ø50 H7 pilot | dims from the UR10e and UR20 manuals (§2) |
+| R1 | Mount on a UR e-Series ISO 9409-1-50-4-M6 flange **or** (second print) a UR20/UR30 ISO 9409-1-80-6-M8 flange **or** (third print) a UFACTORY 850's ISO-50 flange | `eseries`: Ø63 × 6 plate, 4× Ø6.6 on Ø50 PCD (45°/135°/225°/315°), pin slot at 12 o'clock, Ø31.3 spigot into the Ø31.5 H7 recess. `ur20`: Ø96 × 6, + 6× Ø9 on Ø80 PCD (0°/60°/…/300°), Ø8 pin slot, Ø49.8 spigot into the Ø50 H7 pilot | dims from the UR10e and UR20 manuals (§2) |
 | R2 | Camera optical axis **5° off flange +Z, tipped toward the flange axis** | the seat is drafted 5° (`CAM_TILT_DEG`); the camera leans about its outer front edge | `derived()["camera_axes_in_flange"]`, `side_xz.png` |
 | R3 | Camera does not interfere with tooling | everything is at or below the tool face (z ≤ 6): the camera's outer front edge is on it, its inner front edge 2.2 below; the lip's front run is trimmed flush; camera, wall and clip only extend to −Z, beside the wrist (r ≥ 48 in the wall's arc, the clip past the camera's end) | `side_xz.png`, the trim in `build_bracket` |
 | R4 | Camera can be fitted before the adapter goes on the robot | the 1/4-20 enters from the wrist-side face, sunk 0.6 below it; 3 mm clearance to the wrist (Ø90 e-Series / Ø100 UR20) | `wrist_side.png` |
@@ -53,7 +58,7 @@ The camera in the renders is Intel's own D435 body mesh (`vendor/`, see the NOTI
 | R6 | Cable exit unobstructed and managed | the USB-C is on an end face (§6 A1); the cable drops off the plug into a snap-in C clip beside that end and runs back along −Z beside the wrist | §6 A1, `iso_closeup.png` |
 | R7 | Printable in PPA-CF; simple enough for machining | Z-extrusions + one radial hole; the only overhangs are the 5° draft and the 2.5 mm back run of the lip (§5) | §5 |
 | R8 | Others can iterate | every number is a named parameter in `bracket.py`; STL/STEP/renders regenerate from one command | this file |
-| R9 | Camera on the tool-I/O side, clear of the M8 plug | `ARM_ANGLE_DEG = 90` puts the wall at 12 o'clock. e-Series socket is 35.65 behind the face and the wall ends 23.9 behind it: **5.8 mm axial clearance** to a Ø12 plug. The UR20's socket is only 17.6 behind its face, so the UR20 part is clocked to 30° (`UR20_ARM_ANGLE_DEG`, 6.4° angular clearance counting the clip on both ends) | `derived()["tool_connector"]` |
+| R9 | Camera on the tool-I/O side, clear of the M8 plug | `ARM_ANGLE_DEG = 90` puts the wall at 12 o'clock. e-Series socket is 35.65 behind the face and the wall ends 23.9 behind it: **5.8 mm axial clearance** to a Ø12 plug. The UR20's socket is only 17.6 behind its face, so the UR20 part is clocked to 30° (`UR20_ARM_ANGLE_DEG`, 6.4° angular clearance counting the clip on both ends). The 850's connectors sit right in the wall's path (11.5–24.5 behind the face), so its print hangs at 3 o'clock, 18° clear of them | `derived()["tool_connector"]`; `uf850`: `robot_clash` against UFACTORY's mesh |
 | R10 | Camera located by one screw | the lip surrounds the footprint with 0.3 mm per side, so the camera cannot turn about the 1/4-20 | clash check, §7 |
 
 ## 2. Interfaces (the numbers that are not ours)
@@ -95,6 +100,21 @@ The camera in the renders is Intel's own D435 body mesh (`vendor/`, see the NOTI
 | USB-C | **on an end face** on Nick's unit (2026-09-12); Intel's 2018 mesh has it on the back face at the camera-left end. Camera-left is the **right-hand end seen from the front**, which is where the clip goes (`CABLE_SIDE = "right"`) | mesh, Nick |
 | Depth FOV (H×V) | 87° × 58°, RGB 69° × 42° | datasheet |
 | Mass | 72 g | Intel spec page |
+
+### 2.5 UFACTORY 850 tool flange (850 User Manual V2.3.0, §1.2.2.5 p. 26; UFACTORY's link6 mesh)
+
+| Feature | Value | Note |
+| --- | --- | --- |
+| Standard | ISO 9409-1-50-4-M6, "M6 × 6" on the datasheet | the e-Series face, so the plate, spigot and recess are the e-Series ones |
+| Flange face | Ø63 h6, **6.00 proud of an Ø84 housing** (mesh: 30 deep behind the face) | drives `UF850_WRIST_R = 42` |
+| Bolts | 4× M6 ▽10 on Ø50 at 45° from the dowel **+ 2× M6 ▽10 on Ø50 at 90° from it** | all six are through holes in the plate (`UF850_BOLT50_ANGLES_DEG`) |
+| Dowel | Ø6 H7 ▽5 on the Ø50 PCD | the plate's radial slot, as on the e-Series |
+| Pilot | Ø31.50 **H6**, 6 deep (mesh) | the Ø31.3 × 4 spigot |
+| Connectors | tool I/O and Ethernet (M8 4-pole) on a block beside the dowel: **r ≤ 47.9, 11.5–24.5 behind the face, 67°–162° round the axis** in this frame (dowel at 90°) | measured on the mesh; the e-Series clocking (wall at 90°, down to −23.9) would hit it |
+| Six-axis F/T port | on the face's rim opposite the connectors (270°), within 7.5 of the face | the plate covers the face as any tool does; the wall at 0° keeps 90° from it |
+| Frame | UFACTORY's flange frame (link6, what the controller reports) has the dowel at **−Y**: this frame turned 180° about Z (`UF850_ROBOT_FLANGE_DEG`) | the hand-eye seed `uf850` is in UFACTORY's frame (`derived()["depth_origin_robot_flange_mm"]`) |
+
+UFACTORY's mesh (`vendor/uf850_link6_xarm_ros2.stl`, BSD-3-Clause, see `vendor/NOTICE.md`) is the geometry the clash check and the renders use; the STEP assembly carries a plain stand-in (housing, face, pilot, holes, the connector block as a box).
 
 ### 2.4 USB cable (`hardware/BOM.md` K4)
 
@@ -187,4 +207,4 @@ python3 hardware/d435-tool-bracket/bracket.py CABLE_SIDE=left CAM_TILT_DEG=0 UR2
 python3 hardware/d435-tool-bracket/bracket.py --refresh-camera-mesh
 ```
 
-Outputs land in `out/` (STL + STEP per variant, an assembly STEP per variant, the placed camera body STL, `build_info.json` with the per-variant overrides, derived numbers, the tool-connector clearance check and the camera clash count) and `renders/`. Any `UR20_*` / `ESERIES_*` parameter can be overridden on the command line like the rest (tuples as JSON, e.g. `ESERIES_PATTERNS='["iso50","iso80"]'` brings the dual plate back; strings bare, e.g. `CABLE_SIDE=none`). Changing anything that moves the camera changes the hand-eye seed: copy the new `depth_origin_flange_mm` / `camera_axes_in_flange` into `perceptronics/handeye.py` (`tests/test_handeye.py` fails until you do). Sources for every external number are cited in `bracket.py`'s docstring and `vendor/NOTICE.md`.
+Outputs land in `out/` (STL + STEP per variant, an assembly STEP per variant, the placed camera body STL, `build_info.json` with the per-variant overrides, derived numbers, the tool-connector clearance check and the camera clash count) and `renders/`. Any `UR20_*` / `ESERIES_*` parameter can be overridden on the command line like the rest (tuples as JSON, e.g. `ESERIES_PATTERNS='["iso50","iso80"]'` brings the dual plate back; strings bare, e.g. `CABLE_SIDE=none`). Changing anything that moves the camera changes the hand-eye seed: copy the new `depth_origin_robot_flange_mm` / `camera_axes_in_robot_flange` into `perceptronics/handeye.py` (`tests/test_handeye.py` fails until you do). They are the robot's own flange frame: for the UR prints the same as `depth_origin_flange_mm`, for the `uf850` print turned 180° (`UF850_*` parameters override like the others). Sources for every external number are cited in `bracket.py`'s docstring and `vendor/NOTICE.md`.

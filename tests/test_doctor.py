@@ -164,6 +164,22 @@ def test_bracket_model_mismatch_is_flagged(listener, monkeypatch):
     assert c["handeye.bracket"]["ok"] is False and "PERCEPTRONICS_BRACKET=ur20" in c["handeye.bracket"]["fix"]
 
 
+def test_a_ufactory_850_expects_the_uf850_print(listener, monkeypatch):
+    cfg, robot = _fake_robot(listener, monkeypatch)
+    env = {"UR_ROBOT_MODEL": "UF850", "PERCEPTRONICS_BRACKET": "eseries"}
+    c = _by_name(
+        run_doctor(robot_config=cfg, camera=False, robot_factory=lambda _c: robot, env=env).as_dict()
+    )
+    assert (
+        c["handeye.bracket"]["ok"] is False and "PERCEPTRONICS_BRACKET=uf850" in c["handeye.bracket"]["fix"]
+    )
+    env["PERCEPTRONICS_BRACKET"] = "uf850"
+    c = _by_name(
+        run_doctor(robot_config=cfg, camera=False, robot_factory=lambda _c: robot, env=env).as_dict()
+    )
+    assert "handeye.bracket" not in c
+
+
 def test_render_lists_fixes_under_failures():
     cfg = RobotConfig(
         host="127.0.0.1", platform="polyscopex", robot_api_port=_closed_port(), dashboard_port=_closed_port()

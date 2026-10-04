@@ -19,8 +19,8 @@ Frames (all right-handed):
 
 ``p_base = T_base_flange · T_flange_depth · T_depth_color · p_color``.
 
-:data:`BRACKET_SEEDS` are *seeds*, one per print (``eseries`` / ``ur20``,
-picked by ``PERCEPTRONICS_BRACKET``): derived from the bracket geometry
+:data:`BRACKET_SEEDS` are *seeds*, one per print (``eseries`` / ``ur20`` /
+``uf850``, picked by ``PERCEPTRONICS_BRACKET``): derived from the bracket geometry
 (``hardware/d435-tool-bracket/README.md`` §3) and the camera's published
 imager position, not from a calibration. Expect a few mm
 and ~1° of error from a printed part; a hand-eye calibration replaces it via
@@ -66,7 +66,20 @@ BRACKET_NOMINAL_UR20 = Transform.from_axes(
     (-_ST * _C30, -_ST * _S30, _CT),
     (0.068438494, 0.019305723, 0.000626916),
 )
-BRACKET_SEEDS: dict[str, Transform] = {"eseries": BRACKET_NOMINAL_ESERIES, "ur20": BRACKET_NOMINAL_UR20}
+# ``uf850`` (UFACTORY 850, ISO-50 + two more M6): the wall clocked to 3 o'clock
+# (UF850_ARM_ANGLE_DEG = 0, clear of the connector block) and pulled in to the Ø84
+# housing (wall r = 45…48). UFACTORY's flange frame has the dowel at −Y where the
+# bracket's has it at +Y, so these are the bracket's numbers turned 180° about Z
+# (``derived()["depth_origin_robot_flange_mm"]``): depth origin (−60.9, 17.5, 0.6) mm,
+# x_cam = −Y, y_cam = (cos 5°, 0, −sin 5°), z_cam = (sin 5°, 0, cos 5°).
+BRACKET_NOMINAL_UF850 = Transform.from_axes(
+    (0.0, -1.0, 0.0), (_CT, 0.0, -_ST), (_ST, 0.0, _CT), (-0.060922336, 0.0175, 0.000626916)
+)
+BRACKET_SEEDS: dict[str, Transform] = {
+    "eseries": BRACKET_NOMINAL_ESERIES,
+    "ur20": BRACKET_NOMINAL_UR20,
+    "uf850": BRACKET_NOMINAL_UF850,
+}
 DEFAULT_BRACKET = "eseries"
 # Kept for callers that predate the second print.
 BRACKET_NOMINAL = BRACKET_NOMINAL_ESERIES

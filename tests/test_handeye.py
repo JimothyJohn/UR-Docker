@@ -208,7 +208,8 @@ def test_robotlink_unreachable_is_an_error_not_a_crash():
 
 
 def test_bracket_seeds_match_the_bracket_build_info():
-    """Both prints' seeds are the numbers ``bracket.py`` derived — the README §3
+    """Every print's seed is the numbers ``bracket.py`` derived, in that robot's own
+    flange frame (UR: the bracket's frame; UFACTORY: turned 180°) — the README §3
     table and ``out/build_info.json`` are the source of truth, not this file."""
     import json
     from pathlib import Path
@@ -220,12 +221,21 @@ def test_bracket_seeds_match_the_bracket_build_info():
     assert set(BRACKET_SEEDS) == set(variants)
     for name, seed in BRACKET_SEEDS.items():
         d = variants[name]["derived"]
-        origin_m = tuple(v / 1000.0 for v in d["depth_origin_flange_mm"])
+        origin_m = tuple(v / 1000.0 for v in d["depth_origin_robot_flange_mm"])
         assert _close(seed.translation, origin_m, tol=1e-6), name
-        axes = d["camera_axes_in_flange"]
+        axes = d["camera_axes_in_robot_flange"]
         assert _close(seed.rotate((1, 0, 0)), axes["x_cam"], tol=1e-5), name
         assert _close(seed.rotate((0, 1, 0)), axes["y_cam"], tol=1e-5), name
         assert _close(seed.rotate((0, 0, 1)), axes["z_cam"], tol=1e-5), name
+
+
+def test_the_uf850_seed_looks_in_toward_the_flange_axis_from_its_side():
+    # UFACTORY's flange frame: the camera hangs on -X, so its axis tips toward +X
+    seed = BRACKET_SEEDS["uf850"]
+    assert seed.translation[0] < -0.05 and abs(seed.translation[2]) < 0.002
+    z = seed.rotate((0, 0, 1))
+    assert z[0] > 0 and z[2] == pytest.approx(math.cos(math.radians(5.0)), abs=1e-6)
+    assert HandEye.from_env({"PERCEPTRONICS_BRACKET": "uf850"}).source == "bracket-nominal:uf850"
 
 
 def test_bracket_variant_selection():

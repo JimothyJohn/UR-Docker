@@ -530,7 +530,13 @@ def check_flange_and_handeye(report: Report, robot, handeye: HandEye, env=None) 
     env = os.environ if env is None else env
     bracket = env.get(ENV_BRACKET, "eseries")
     model = (env.get("UR_ROBOT_MODEL") or "").upper()
-    expected = "ur20" if model.startswith(("UR20", "UR30")) else "eseries"
+    expected = (
+        "ur20"
+        if model.startswith(("UR20", "UR30"))
+        else "uf850"
+        if model.startswith(("UF850", "850"))
+        else "eseries"
+    )
     report.add(
         Check(
             "handeye",
