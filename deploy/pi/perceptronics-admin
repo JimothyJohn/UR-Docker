@@ -50,6 +50,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -548,6 +549,24 @@ def _get_status(url: str, headers: dict) -> dict:
         return json.loads(resp.read())
 
 
+LOGIN_REFUSED = "login refused (PERCEPTRONICS_ADMIN_USER / PERCEPTRONICS_ADMIN_PASSWORD)"
+
+
+def _check_login(url: str, headers: dict) -> None:
+    """Ask for the status before streaming a bundle: a refused login answers at once.
+
+    The cockpit answers a refused upload without reading its body and closes, so a client
+    still sending the bundle sees a reset (Windows: WinError 10053/10054) instead of the 401."""
+    try:
+        _get_status(url, headers)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise AdminError(LOGIN_REFUSED) from None
+        raise AdminError(f"{url}: HTTP {exc.code} from the setup portal") from None
+    except OSError as exc:
+        raise AdminError(f"{url}: {exc.reason if isinstance(exc, urllib.error.URLError) else exc}") from None
+
+
 def push(bundle: Path, url: str, user: str, password: str, timeout_s: float = 1800.0) -> int:
     manifest = verify_bundle(bundle)
     mib = bundle.stat().st_size >> 20
@@ -556,24 +575,33 @@ def push(bundle: Path, url: str, user: str, password: str, timeout_s: float = 18
     if parts.scheme != "http" or not parts.hostname:
         raise AdminError(f"{url}: expected http://<pick PC>:7621")
     headers = _auth_headers(user, password)
+    _check_login(url, headers)
     conn = http.client.HTTPConnection(parts.hostname, parts.port or 80, timeout=60)
     size = bundle.stat().st_size
     conn.putrequest("POST", "/api/admin/update")
     for k, v in {**headers, "Content-Type": "application/x-tar", "Content-Length": str(size)}.items():
         conn.putheader(k, v)
     conn.endheaders()
-    with open(bundle, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            conn.send(chunk)
-    resp = conn.getresponse()
-    body = resp.read()
+    dropped: OSError | None = None
+    try:
+        with open(bundle, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                conn.send(chunk)
+    except OSError as exc:  # the cockpit refused early (too large, busy) and closed on us
+        dropped = exc
+    try:
+        resp = conn.getresponse()
+        body = resp.read()
+    except (OSError, http.client.HTTPException) as exc:
+        conn.close()
+        raise AdminError(f"the cockpit closed the connection during the upload: {dropped or exc}") from None
     conn.close()
     try:
         answer = json.loads(body)
     except ValueError:
         answer = {"ok": False, "error": f"HTTP {resp.status}"}
     if resp.status == 401:
-        raise AdminError("login refused (PERCEPTRONICS_ADMIN_USER / PERCEPTRONICS_ADMIN_PASSWORD)")
+        raise AdminError(LOGIN_REFUSED)
     if not answer.get("ok"):
         raise AdminError(f"refused: {answer.get('error')}")
     job_id = answer["job"]

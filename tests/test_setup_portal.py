@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import http.client
 import importlib.machinery
 import importlib.util
 import io
@@ -953,6 +954,26 @@ def test_push_reports_a_refused_login(portal_server, bundle):
     base, *_ = portal_server
     with pytest.raises(admin.AdminError, match="login"):
         admin.push(bundle, base, "admin", "nope", timeout_s=5)
+
+
+def test_push_checks_the_login_before_sending_the_bundle(portal_server, bundle, monkeypatch):
+    """A refused upload is answered unread and the connection closed, so a client still
+    streaming the body sees a reset (Windows: WinError 10053) instead of the 401. push asks
+    the status route with the credentials first and never starts the POST."""
+    base, *_ = portal_server
+    requests: list[tuple[str, str]] = []
+    real = http.client.HTTPConnection
+
+    class Recording(real):
+        def putrequest(self, method, url, *a, **kw):
+            requests.append((method, url))
+            return super().putrequest(method, url, *a, **kw)
+
+    monkeypatch.setattr(http.client, "HTTPConnection", Recording)
+    with pytest.raises(admin.AdminError, match="login"):
+        admin.push(bundle, base, "admin", "nope", timeout_s=5)
+    assert ("GET", "/api/admin/status") in requests, requests
+    assert not [r for r in requests if r[0] == "POST"], requests
 
 
 # ---- the pieces agree with each other ---------------------------------------------------------
