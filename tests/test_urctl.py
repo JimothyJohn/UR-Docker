@@ -60,6 +60,8 @@ class FakeController:
         # echoed as pose_trans(tcp, pose_inv(offset)) computed host-side.
         self.tcp_pose = [0.5, -0.1, 0.4, 0.0, 3.14159265, 0.0]
         self.tcp_offset = [0.0, 0.0, 0.12, 0.0, 0.0, 0.0]
+        # a real e-Series in Local mode: URScript is accepted and ignored
+        self.ignore_scripts = False
         # Dashboard `get robot model` reply (an e-Series arm reports without the e).
         self.model = "UR10"
         # Robotiq gripper daemon on the controller's loopback (None = no object in the way).
@@ -199,6 +201,13 @@ class FakeController:
             # The hold/release programs echo their marker once freedrive flips.
             marker = "urctl/freedrive=on" if "while" in body else "urctl/freedrive=off"
             return (marker + "\n").encode()
+        if "urctl/tcp/done" in body:
+            # set_tcp_offset: apply the set_tcp literal, echo the active offset back
+            m = re.search(r"set_tcp\(p\[([^\]]+)\]\)", body)
+            if m and not self.ignore_scripts:
+                self.tcp_offset = [float(v) for v in m.group(1).split(",")]
+                return ("urctl/tcp/done=[" + ",".join(f"{v:.6f}" for v in self.tcp_offset) + "]\n").encode()
+            return b""
         if "urctl/flange" in body:
             from urctl.pose import pose_inv, pose_trans
 

@@ -164,8 +164,9 @@ The Object panel has a **Robot** section. With a segment that has depth:
 
 **Hand-eye transform.** `perceptronics/handeye.py` seeds `T_flange_depth` from
 the bracket geometry (`hardware/d435-tool-bracket/README.md` §3,
-`ARM_ANGLE_DEG = 90`, camera on the tool-I/O side: camera x = flange −X,
-camera y = flange −Y, camera z = flange +Z, depth origin at (17.5, 66.5, 1.7) mm)
+Rev C, `ARM_ANGLE_DEG = 90`, camera on the tool-I/O side, its seat drafted 5° so
+the optical axis tips toward the flange axis: camera x = flange −X, camera z =
+(0, −sin 5°, cos 5°), depth origin at (17.5, 63.9, 0.6) mm)
 and takes
 `T_depth_color` from the SDK's extrinsics at open (`rs2_get_extrinsics`,
 ~15 mm along x on a D435; identity on the synthetic camera). That is an
@@ -207,7 +208,7 @@ Everything below is the day-to-day loop for testing on a laptop at the cell
 
 **Cell profiles** (`perceptronics/cells/{sim,ur3,ur20}.env`, `--cell NAME` on any
 `perceptronics` entry point or `UR_CELL=NAME`): one word selects the robot's
-host/platform/ports and the bracket print (`PERCEPTRONICS_BRACKET=eseries|ur20`,
+host/platform/ports and the bracket print (`PERCEPTRONICS_BRACKET=eseries|ur20|uf850`,
 which picks the hand-eye seed — `perceptronics.handeye.BRACKET_SEEDS`). A variable
 already set in the shell wins over the file. The real cells ship with `UR_HOST`
 empty: fill in the controller IP once. `perceptronics cells` prints them;

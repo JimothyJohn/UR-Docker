@@ -76,6 +76,8 @@ RAMP_EPS_M = 0.0015  # a cell this much lower than its neighbour toward the came
 FOOTPRINT_MARGIN_M = 0.005  # a part owns the cells this close round its top's footprint: its sides
 OCCUPIED_FLOOR_M = 0.005  # never call anything flatter than this a part
 LIVE_NUDGE_M = 0.015  # a taught plane follows the live table by at most this much
+CHECK_TILT_NOTE_DEG = 1.0  # taught vs measured table further apart than this: say so
+CHECK_AREA_MARGIN_M = 0.02  # the check samples the taught area and this much round it
 SURFACE_BAND_M = 0.004
 MIN_TOP_CELLS = 10
 EDGE_CELLS = 1  # a blob touching the outermost cells is cut off by the picture's edge
@@ -306,9 +308,12 @@ class Scene:
     surface: Surface | None
     stride: int
     notes: list[str] = field(default_factory=list)
+    # a taught plane against the table as the camera sees it (:func:`check_surface`)
+    surface_check: dict | None = None
 
     def as_dict(self) -> dict:
         return {
+            "surface_check": self.surface_check,
             "parts": [p.as_dict() for p in self.parts],
             "rejected": [p.as_dict() for p in self.rejected],
             "surface": None if self.surface is None else self.surface.as_dict(),
@@ -395,9 +400,15 @@ def find_parts(
     if len(valid) < 50:
         return Scene([], [], surface, stride, ["almost no depth in this frame"])
 
+    check = check_surface(valid, surface) if surface is not None and level_ok else None
+    if check is not None and check["tilt_deg"] > CHECK_TILT_NOTE_DEG:
+        notes.append(
+            f"the table reads {check['tilt_deg']:.1f}° off the taught plane: re-touch it, "
+            "or the hand-eye calibration is out"
+        )
     surf = _surface(valid, surface, level_ok, spec, notes)
     if surf is None:
-        return Scene([], [], None, stride, notes + ["no work surface found in the picture"])
+        return Scene([], [], None, stride, notes + ["no work surface found in the picture"], check)
 
     hmax = 0.5 if spec is None or not spec.heights() else 2.5 * spec.heights()[-1] + 0.02
     hs: list[float | None] = [None if p is None else surf.height(p) for p in pts]
@@ -458,7 +469,7 @@ def find_parts(
         for part in clear_the_way(parts, pts, blobs, fingers):
             part.near = _near(part, spec)
             rejected.append(part)
-    return Scene(parts, rejected, surf, stride, notes)
+    return Scene(parts, rejected, surf, stride, notes, check)
 
 
 def _surface(
@@ -483,6 +494,71 @@ def _surface(
             )
         return surf
     return _ransac_surface(valid)
+
+
+def check_surface(valid: Sequence[Vec3], taught: Surface) -> dict | None:
+    """The live table against a taught plane, both in the base frame: the points within
+    ``2 × LIVE_NUDGE_M`` of the plane and over its area (+ :data:`CHECK_AREA_MARGIN_M`) are
+    fitted as ``h = a·u + b·v + c`` in the plane's own coordinates (the narrowing windows
+    of :data:`PLANE_WINDOWS_M` drop the parts standing on it). Returns ``offset_mm`` — the
+    measured table's height above the taught plane at the area's centre (positive: the
+    camera sees the table higher than the robot touched it) — ``tilt_deg`` between the two
+    planes, ``tilt_dir_deg`` (the measured plane rises toward that heading in the taught
+    plane's X/Y), the inlier count and ``coverage`` (the share of the area's extent seen).
+    None when too little of the plane is in view. A good touch-off and a good hand-eye
+    calibration read within a millimetre or two and a fraction of a degree."""
+    lim = 2 * LIVE_NUDGE_M
+    if taught.area is not None:
+        x0, x1, y0, y1 = taught.area
+        cu, cv = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    else:
+        cu = cv = 0.0
+    sel = []
+    for p in valid:
+        hh = taught.height(p)
+        if abs(hh) < lim and taught.inside(p, CHECK_AREA_MARGIN_M):
+            u, v = taught.local(p)
+            sel.append((u - cu, v - cv, hh))
+    step = max(1, len(sel) // 6000)
+    sel = sel[::step]
+    fit = (0.0, 0.0, sorted(q[2] for q in sel)[len(sel) // 2] if sel else 0.0)
+    used: list = []
+    for win in (lim, *PLANE_WINDOWS_M):
+        a, b, c = fit
+        used = [q for q in sel if abs(q[2] - (a * q[0] + b * q[1] + c)) < win]
+        if len(used) < 30:
+            return None
+        n = len(used)
+        mu, mv, mh = (sum(q[i] for q in used) / n for i in range(3))
+        suu = suv = svv = suh = svh = 0.0
+        for u, v, hh in used:
+            du, dv, dh = u - mu, v - mv, hh - mh
+            suu += du * du
+            suv += du * dv
+            svv += dv * dv
+            suh += du * dh
+            svh += dv * dh
+        det = suu * svv - suv * suv
+        if det <= 1e-12 * max(1e-12, suu * svv):
+            return None
+        a = (suh * svv - svh * suv) / det
+        b = (svh * suu - suh * suv) / det
+        fit = (a, b, mh - a * mu - b * mv)
+    a, b, c = fit
+    us = [q[0] for q in used]
+    vs = [q[1] for q in used]
+    coverage = None
+    if taught.area is not None:
+        x0, x1, y0, y1 = taught.area
+        span = max(1e-9, x1 - x0) * max(1e-9, y1 - y0)
+        coverage = round(min(1.0, (max(us) - min(us)) * (max(vs) - min(vs)) / span), 2)
+    return {
+        "offset_mm": round(c * 1000.0, 2),
+        "tilt_deg": round(math.degrees(math.atan(math.hypot(a, b))), 3),
+        "tilt_dir_deg": round(math.degrees(math.atan2(b, a)), 1),
+        "points": len(used),
+        "coverage": coverage,
+    }
 
 
 def _level_surface(valid: list[Vec3], spec: PartSpec | None) -> Surface | None:

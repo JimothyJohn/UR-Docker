@@ -110,5 +110,10 @@ public class PickView implements SwingProgramNodeView<PickContribution> {
         public void resetDefaults() {
             node().resetDefaults();
         }
+
+        @Override
+        public void teachAt(int u, int v) {
+            node().teachAt(u, v);
+        }
     }
 }

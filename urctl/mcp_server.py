@@ -46,7 +46,8 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from . import __version__
-from .config import RobotConfig
+from .config import PLATFORMS, RobotConfig
+from .controller import make_controller
 from .robot import Robot
 from .tools import ToolError, call_tool, get_tool_schemas
 
@@ -201,10 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--host", default=None, help="controller host/IP (default: $UR_HOST or localhost)")
     ap.add_argument(
         "--platform",
-        choices=["e-series", "polyscopex"],
+        choices=list(PLATFORMS),
         default=None,
-        help="controller software: e-series (Dashboard) or polyscopex (REST Robot-API). "
-        "Default: $UR_PLATFORM or e-series.",
+        help="controller software: e-series (Dashboard), polyscopex (REST Robot-API) or "
+        "ufactory (a UFACTORY 850 / xArm / Lite 6). Default: $UR_PLATFORM or e-series.",
     )
     ap.add_argument(
         "--robot-api-port",
@@ -223,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.robot_api_port is not None:
         overrides["robot_api_port"] = args.robot_api_port
     config = RobotConfig.from_env(host=args.host, **overrides)
-    robot = Robot(config, dry_run=args.dry_run)
+    robot = make_controller(config, dry_run=args.dry_run)
     print(f"urctl-mcp serving {config.host} over stdio", file=sys.stderr)
     try:
         McpServer(robot).serve_stdio()
