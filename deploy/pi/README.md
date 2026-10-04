@@ -101,7 +101,8 @@ because the node is Java on the controller, not a web page.
 
 **Update:** run the same `scripts/deploy-pi.sh pi@<ip>` from a newer checkout. It
 installs a new release beside the old one, moves `current`, and restarts the service.
-`cell.env` is kept.
+`cell.env` is kept. A PC with no SSH login (a card flashed from the image with no seed)
+updates through the setup portal instead (below).
 
 **Rollback:** `scripts/deploy-pi.sh pi@<ip> --rollback`, or on the PC
 `sudo /opt/perceptronics/deploy/install.sh --rollback`. This swaps `current` and `previous`
@@ -111,12 +112,60 @@ and restarts the service.
 the firewall table and `/opt/perceptronics`. It keeps `/etc/perceptronics`, the calibrations
 in `/var/lib/perceptronics`, librealsense and the user. Add `--purge` to remove those too.
 
+## Setup portal: network and updates without SSH
+
+Every PC installed or flashed from this directory serves **http://192.168.3.20:7621/setup**
+(log in `admin` / `admin` for now; `PERCEPTRONICS_ADMIN_USER` / `PERCEPTRONICS_ADMIN_PASSWORD`
+in `cell.env` change it). Connect a laptop to the PC's Ethernet port and give the laptop a
+**static** `192.168.3.10`, mask `255.255.255.0`. Don't use DHCP: the PC's one-lease DHCP
+server would hand the laptop the robot's address.
+
+**Network.** Type the PC's new address, mask, optional gateway and DNS, and the robot's
+address, then press Apply. The PC moves at once and answers at the new address. **It keeps
+`192.168.3.20` as a second, backup address** unless the new network holds that address, so a
+wrong entry never locks you out: plug back in at `192.168.3.10` and fix it. Tick "Give the
+robot its address" only for a network with no DHCP server of its own (a cable straight to the
+robot). It never serves while another DHCP server answers anyway. The firewall follows: the
+cockpit and pick server accept the new network, the backup subnet, and a robot routed in from
+another subnet.
+
+**Update.** Choose the `perceptronics-update-<version>-<rev>.tar` you were sent and press
+Install. The PC checks every file against the bundle's manifest (sha256; a truncated or
+damaged upload is refused before anything changes), installs it as a new release with the
+same `install.sh`, waits up to 2 min for the cockpit to answer, and **rolls back by itself**
+if it doesn't. `cell.env`, calibrations and the network settings are kept. The page shows
+the install log. Make a bundle and send it from a checkout:
+
+```bash
+scripts/pi-update.sh bundle                       # target/pi-update/perceptronics-update-*.tar
+scripts/pi-update.sh push target/pi-update/perceptronics-update-*.tar 192.168.3.20
+```
+
+A cell PC has no internet. If a bundle pins a newer librealsense than the PC has, add the
+prebuilt library: `scripts/pi-update.sh bundle --librealsense
+target/pi-image/cache/librealsense-<ver>.tar`. Without it, `install.sh` fails before it
+switches anything, and the page says so.
+
+**How it works.** The cockpit (unprivileged, sandboxed) only checks the request and drops it
+in `/var/lib/perceptronics/admin/queue`. `perceptronics-admin.path` then starts
+`perceptronics-admin.service`, which runs `/usr/local/sbin/perceptronics-admin` (stdlib
+Python, as root; it doesn't depend on the release it is replacing). The helper re-checks
+everything the cockpit wrote (no symlinks, size caps, every field), runs `install.sh
+--network …` or the bundle's `install.sh --wheel …`, and writes
+`/var/lib/perceptronics-admin/status.json`, which the page shows. The network settings in use
+are saved to `/etc/perceptronics/network.env` and are the defaults of every later install, so
+an update never undoes the portal. Logs: `journalctl -u perceptronics-admin`.
+
+**Trust.** Bundles carry checksums, not a signature (decided 2026-10-03). Anyone who can
+reach `:7621` from the allowed subnets and knows the login can install software as root. The
+firewall limits that to the cell. Change the default login on a PC that leaves the bench.
+
 ## Ports
 
 | Port | Direction | What | Who may connect |
 | --- | --- | --- | --- |
 | 22/tcp | in | SSH | anyone (key auth; tighten in `nftables.conf` if the PC is on a wider network) |
-| 7621/tcp | in | cockpit HTTP API (`perceptronics gui --port`), incl. `/api/color.png` | cell subnet only |
+| 7621/tcp | in | cockpit HTTP API (`perceptronics gui --port`), incl. `/api/color.png`, and the setup portal `/setup` (login) | cell subnet only (+ the backup subnet after a network change) |
 | 7622/tcp | in | pick server for the 3D Pick node (`--pick-port`) | cell subnet only |
 | 29999, 30001, 30004/tcp | out | robot Dashboard, Primary, RTDE (`UR_*_PORT` in `cell.env`) | — |
 

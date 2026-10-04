@@ -194,6 +194,111 @@ over SSH from the cell side.
 
 ---
 
+## Part 3 — testing the setup portal and update bundles (PR #59, written 2026-10-03)
+
+The state on 2026-10-03 evening: the Pi has the **build #2 card** in it (flashed unseeded from
+perceptronics.advin.io/imager.json). It has **no login user and no SSH**, and it predates the
+portal, so nothing can be installed on it. The portal is on branch `feature/pi-setup-portal`
+(worktree `../perceptronics-pi-setup`, draft PR #59, stacked on #49). It has passed tests,
+but **has not run on a board**. The test board for it is the **old card**: hand-deployed, Wi-Fi
+`10.0.0.56`, your key, passwordless sudo. Because SSH rides the Wi-Fi, changing eth0 never
+cuts the session.
+
+What the portal is: `http://<Pi>:7621/setup`, login `admin` / `admin`. It sets the Pi's
+network (address, mask, gateway, DNS, robot address, robot DHCP) and installs a
+`perceptronics-update-*.tar` with automatic rollback. Reference: `deploy/pi/README.md`
+§Setup portal.
+
+### Nick, by hand (~5 min)
+
+1. Unplug the Pi's power. The build #2 card has no SSH, so there is no clean shutdown; it's
+   idle, so that's fine. Take that card out and keep it (it is the "older card" to reflash
+   later).
+2. Put the **old card** back in (it went through a power yank on 2026-10-03; if it doesn't
+   boot, say so). Keep the cable from the Pi's Ethernet to the Mac Studio's `en0`, and the
+   D435 in a blue port.
+3. Set the Mac's Ethernet to static. It is on DHCP now and took the robot's address `.3`
+   from the Pi:
+   `sudo networksetup -setmanual "Ethernet" 192.168.3.10 255.255.255.0`
+4. Power the Pi on. Tell Claude "old card is in".
+
+### Claude, over SSH from the Mac Studio
+
+Work from `../perceptronics-pi-setup`, branch `feature/pi-setup-portal`. Pull first; check
+`git log --since=12.hours` for another session's commits. Every step's result goes in the
+log at the end of this section.
+
+1. **Preflight.** `ssh nick@10.0.0.56 true`. Then `cat /etc/perceptronics/cell.env
+   /etc/perceptronics/network.env`; `network.env` must not exist yet. Then `nmcli -t
+   connection show`. Expect the hand-made `netplan-eth0` (192.168.3.20) and the Wi-Fi.
+2. **Install the branch:** `PYTHON=/opt/homebrew/bin/python3 scripts/deploy-pi.sh
+   nick@10.0.0.56`. Then check:
+   - `systemctl is-active perceptronics-admin.path` → active.
+   - `/etc/perceptronics/network.env` now exists, `CELL_IF=eth0`, `CELL_ADDRESS=192.168.3.20/24`.
+   - `/var/lib/perceptronics/admin/queue` is owned by `perceptronics`.
+   - `/var/lib/perceptronics-admin` is `root:perceptronics 0750`.
+   - From the Mac: `curl -s -o /dev/null -w '%{http_code}' http://192.168.3.20:7621/setup` → `401`.
+     With `-u admin:admin` → `200`.
+3. **The page by eye.** Open `http://192.168.3.20:7621/setup` in a browser on the Mac. Log in.
+   It should show the current address, robot `192.168.3.3`, the release, and "installed by
+   hand" for the image. Screenshot it for the PR.
+4. **Network change, then back.** On the page: address `192.168.50.20`, mask
+   `255.255.255.0`, no gateway, robot `192.168.50.3`, robot DHCP off. Apply. Expect:
+   - `journalctl -u perceptronics-admin -n 50` shows `install.sh --network` finishing.
+   - `ip -4 addr show eth0` has **both** `192.168.50.20/24` and `192.168.3.20/24`.
+   - `sudo nft list ruleset` allows 7621/7622 from `192.168.50.0/24` and `192.168.3.0/24`.
+   - `UR_HOST=192.168.50.3` in cell.env, and the cockpit restarted.
+   - The page still loads at `http://192.168.3.20:7621/setup` (rescue address).
+   - Give the Mac a second address, `sudo ifconfig en0 alias 192.168.50.10 255.255.255.0`.
+     The page then loads at `http://192.168.50.20:7621/setup` too.
+
+   Then set it back: `192.168.3.20` / `255.255.255.0` / robot `192.168.3.3` / robot DHCP
+   **on**. Only `192.168.3.20/24` should remain on eth0. Remove the alias with `sudo ifconfig
+   en0 -alias 192.168.50.10`.
+5. **Settings survive an update.** Redeploy with `scripts/deploy-pi.sh nick@10.0.0.56` and no
+   network flags. `network.env` and eth0 must be unchanged.
+6. **An update through the portal.** Make one small, visible commit on the branch, e.g. a
+   line in this file. Then `scripts/pi-update.sh bundle` and `scripts/pi-update.sh push
+   target/pi-update/perceptronics-update-*.tar 192.168.3.20`. Expect the log to end in
+   `done: updated to …` and `/opt/perceptronics/current` to point at the new release. Upload
+   the same file once more through the browser page too, to check the progress bar and the
+   restart message.
+7. **A rollback.** Make a broken bundle in a scratch copy, never on the branch:
+   `git worktree add <scratchpad>/broken HEAD`, append `raise RuntimeError("broken on purpose")`
+   to `perceptronics/webapp.py` there, and run that copy's `scripts/pi-update.sh bundle`. Push
+   it. Expect `rolled_back` within ~2½ min, `current` back on the release from step 6, and the
+   cockpit answering. Remove the scratch worktree afterwards.
+8. **Refusals on the real board.**
+   - A truncated bundle: `head -c 100000 bundle.tar > cut.tar`, then push. Expect it refused,
+     nothing changed.
+   - A wrong password: expect 401.
+   - A POST without `X-Perceptronics-Admin`: expect 403.
+9. **Image #3** with the portal in it:
+   `PYTHON=/opt/homebrew/bin/python3 scripts/pi-image.sh build nick@10.0.0.56 --cell ur3`
+   (~12 min; set `PYTHON` because `pi-image.sh` takes the first `python3` even without pip).
+   Log it in `deploy/pi/image/README.md` §Iteration log. **Ask Nick before** publishing it
+   to the site (`site/site.sh image` in `../perceptronics-site-any-robot`, whose own changes
+   are still uncommitted).
+10. **The real target: a fresh card.** Nick flashes build #3 unseeded onto the build #2 card
+    (reflashing it is the "upgrade" for cards made before the portal). Boot it, and redo
+    steps 3, 4 and 6 against `192.168.3.20` with no SSH at all. That is the operator's path
+    end to end.
+
+If something breaks: two failed attempts, then stop and write down what you tried. A Pi
+that lost eth0 is still on Wi-Fi: `sudo /opt/perceptronics/deploy/install.sh --network
+--cell-address 192.168.3.20/24 --robot-host 192.168.3.3 --gateway none --dns none
+--cell-dhcp auto` puts it back.
+
+Afterwards: fill in the log below, move PR #59 out of draft only if 2–8 passed, update
+`deploy/pi/README.md` (drop "not yet run on a board"), the CLAUDE.md paragraph, and the
+`perceptronics-pi5-pickpc` memory.
+
+| Step | Date | Result |
+| --- | --- | --- |
+| | | |
+
+---
+
 ## Later (not Thursday, not designed yet)
 
 Nick's direction for the shipped product, 2026-09-30. Recorded so it isn't lost; none of it
@@ -205,7 +310,8 @@ is built, and it is far off.
 - **SSH off** on shipped units.
 - **Commissioning over a hotspot**: the box raises a Wi-Fi network during commissioning
   only, with a web page to set the wired address (DHCP or static). Stuck → power-cycle
-  brings it back.
+  brings it back. *2026-10-03: the pre-built image exists (#49) and the web page
+  exists, over the wired default address rather than a hotspot: the setup portal, Part 3.*
 - **Board**: possibly an industrial Pi 4.
 - **librealsense**: whichever build reduces dependencies and increases portability
   (`TODO.md`).

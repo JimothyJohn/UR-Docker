@@ -8,6 +8,9 @@
 #                     [--cell-if eth0|none] [--cell-address 192.168.3.20/24]
 #   sudo ./install.sh --wheel ... --image        # into an image root under chroot (no live system)
 #   sudo /opt/perceptronics/deploy/install.sh --rollback        # back to the previous release
+#   sudo /opt/perceptronics/deploy/install.sh --network --cell-address 10.20.0.50/24 \
+#        --robot-host 10.20.0.10 [--gateway 10.20.0.1|none] [--dns 10.20.0.1|none] [--cell-dhcp auto|off]
+#        # what the setup portal (http://<PC>:7621/setup) runs through perceptronics-admin
 #   sudo /opt/perceptronics/deploy/install.sh --uninstall [--purge]
 #
 # Idempotent: re-running with the same wheel installs nothing new (the service is only
@@ -26,6 +29,18 @@
 # — but only when no other DHCP server answers there. A port already on another network
 # (the bench's office LAN) is left alone. --cell-if none skips all of it.
 #   stop:  sudo systemctl disable --now perceptronics-cell-dhcp   logs: journalctl -u perceptronics-cell-dhcp
+# The network settings in use are saved to /etc/perceptronics/network.env and are the defaults
+# of the next run, so an update (or a redeploy without the flags) keeps what the setup portal
+# or an earlier --cell-if / --cell-address chose. --network forces them onto the cell port
+# (the plain install never re-addresses a configured port) and keeps 192.168.3.20/24 on it as a
+# second, rescue address unless the new network holds that address: a mistyped plant network
+# never locks the operator out of the setup page.
+#
+# Long-lived units this also installs: perceptronics-admin.path, which starts
+# perceptronics-admin.service (root, oneshot: /usr/local/sbin/perceptronics-admin run) when
+# the cockpit queues a setup-portal request or an update bundle.
+#   stop:  sudo systemctl disable --now perceptronics-admin.path   logs: journalctl -u perceptronics-admin
+#
 # --image: the root is an image being built (deploy/pi/image/build.sh runs this under chroot),
 # not a running PC. Units are enabled but nothing is started or reloaded: no udev reload (no
 # udevd in a chroot), and no firewall load, which would land in the BUILD host's kernel.
@@ -80,6 +95,13 @@ readonly CELL_DHCP_CONF="${ETC_DIR}/cell-dhcp.conf"
 readonly NM_HOOK="/etc/NetworkManager/dispatcher.d/50-perceptronics-cell"
 readonly NM_CELL_CON="perceptronics-cell"
 readonly KEEP_RELEASES=3
+readonly NETWORK_ENV="${ETC_DIR}/network.env"
+readonly RESCUE_CIDR="192.168.3.20/24"
+readonly ADMIN_BIN="/usr/local/sbin/perceptronics-admin"
+readonly ADMIN_PATH_UNIT="perceptronics-admin.path"
+readonly ADMIN_UNIT="perceptronics-admin.service"
+readonly ADMIN_QUEUE="${STATE_DIR}/admin/queue"
+readonly ADMIN_STATE="/var/lib/perceptronics-admin"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly HERE
@@ -403,11 +425,19 @@ cell_net() {
 }
 
 install_firewall() {
-    local net="$1" cell_if="$2"
-    [[ "$net" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]] || die "--allow-from ${net}: expected an IPv4 CIDR"
+    local net="$1" cell_if="$2" one nft_net
+    [[ "$net" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}(,[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2})*$ ]] \
+        || die "--allow-from ${net}: expected an IPv4 CIDR (or several, comma-separated)"
+    # several subnets (the setup portal's network + the rescue subnet) are an nft anonymous set
+    nft_net="$net"
+    if [[ "$net" == *,* ]]; then
+        nft_net="{ "
+        for one in ${net//,/ }; do nft_net+="${one}, "; done
+        nft_net="${nft_net%, } }"
+    fi
     local rendered
     rendered="$(mktemp)"
-    sed -e "s#@CELL_NET@#${net}#g" -e "s#@CELL_IF@#${cell_if}#g" "${HERE}/nftables.conf" >"$rendered"
+    sed -e "s#@CELL_NET@#${nft_net}#g" -e "s#@CELL_IF@#${cell_if}#g" "${HERE}/nftables.conf" >"$rendered"
     nft -c -f "$rendered" || die "nftables.conf failed nft's syntax check"
     if [ -f "$NFT_CONF" ] && ! grep -qF "$NFT_MARKER" "$NFT_CONF" && [ ! -f "$NFT_BACKUP" ]; then
         cp -p "$NFT_CONF" "$NFT_BACKUP"
@@ -485,6 +515,119 @@ configure_cell_address() {
         nmcli connection up "$NM_CELL_CON" >/dev/null || log "cell port: ${NM_CELL_CON} did not come up — check nmcli"
     fi
     log "cell port: ${cell_if} = ${cidr} (NetworkManager profile ${NM_CELL_CON}; up when a cable is in)"
+}
+
+# ---- --network: what the setup portal changes ---------------------------------------------
+in_network() {
+    local ip="$1" cidr="$2" prefix="${2#*/}"
+    [ $(($(ip_to_int "$ip") >> (32 - prefix))) -eq $(($(ip_to_int "${cidr%/*}") >> (32 - prefix))) ]
+}
+
+network_of() {
+    local cidr="$1" prefix="${1#*/}" n
+    n=$(($(ip_to_int "${cidr%/*}") & (0xffffffff << (32 - prefix)) & 0xffffffff))
+    echo "$((n >> 24 & 255)).$((n >> 16 & 255)).$((n >> 8 & 255)).$((n & 255))/${prefix}"
+}
+
+set_cell_value() {
+    local key="$1" value="$2"
+    [ -f "$CELL_ENV" ] || die "no ${CELL_ENV} to change ${key} in (install first)"
+    cp -p "$CELL_ENV" "${CELL_ENV}.$(date +%Y%m%d-%H%M%S)"
+    awk -v k="$key" -v v="$value" 'BEGIN { done = 0 }
+        index($0, k "=") == 1 { if (!done) print k "=" v; done = 1; next }
+        { print }
+        END { if (!done) print k "=" v }' "$CELL_ENV" >"${CELL_ENV}.new"
+    chown root:"$SVC_USER" "${CELL_ENV}.new"
+    chmod 0640 "${CELL_ENV}.new"
+    mv "${CELL_ENV}.new" "$CELL_ENV"
+    log "${CELL_ENV}: ${key}=${value}"
+}
+
+# Unlike configure_cell_address, this re-addresses the cell port whatever is on it: the
+# operator asked for it on the setup page. Our own profile, priority 100, so it also wins over
+# Raspberry Pi OS's eth0 profile on the next boot; the rescue address rides along.
+force_cell_address() {
+    local cell_if="$1" cidr="$2" gateway="$3" dns="$4" rescue="$5" addrs="$2"
+    [ "$rescue" = 1 ] && addrs+=",${RESCUE_CIDR}"
+    if ! command -v nmcli >/dev/null || ! nmcli -t general status >/dev/null 2>&1; then
+        die "--network: NetworkManager is not running"
+    fi
+    local route=(ipv4.gateway "" ipv4.never-default yes)
+    [ -n "$gateway" ] && route=(ipv4.gateway "$gateway" ipv4.never-default no)
+    local settings=(connection.interface-name "$cell_if" connection.autoconnect yes
+        connection.autoconnect-priority 100 ipv4.method manual ipv4.addresses "$addrs" "${route[@]}"
+        ipv4.dns "$dns" ipv4.ignore-auto-dns yes ipv6.method link-local)
+    if nmcli -t -f NAME connection show | grep -qx "$NM_CELL_CON"; then
+        nmcli connection modify "$NM_CELL_CON" "${settings[@]}"
+    else
+        nmcli connection add type ethernet con-name "$NM_CELL_CON" ifname "$cell_if" "${settings[@]}" >/dev/null
+    fi
+    if [ "$(cat "/sys/class/net/${cell_if}/carrier" 2>/dev/null)" = 1 ]; then
+        nmcli connection up "$NM_CELL_CON" >/dev/null || log "cell port: ${NM_CELL_CON} did not come up — check nmcli"
+    fi
+    log "cell port: ${cell_if} = ${addrs}${gateway:+, gateway ${gateway}}${dns:+, DNS ${dns}}"
+}
+
+save_network_env() {
+    local cell_if="$1" cidr="$2" gateway="$3" dns="$4" cell_dhcp="$5" allow_from="$6"
+    mkdir -p "$ETC_DIR"
+    cat >"${NETWORK_ENV}.new" <<NETENV
+# /etc/perceptronics/network.env — written by install.sh (and so by the setup portal).
+# The defaults of install.sh's next run: an update keeps these network settings.
+CELL_IF=${cell_if}
+CELL_ADDRESS=${cidr}
+GATEWAY=${gateway}
+DNS=${dns}
+CELL_DHCP=${cell_dhcp}
+ALLOW_FROM=${allow_from}
+NETENV
+    chmod 0644 "${NETWORK_ENV}.new"
+    mv "${NETWORK_ENV}.new" "$NETWORK_ENV"
+}
+
+# Sets the saved_* variables from network.env; every value is checked again by main's guards.
+load_saved_network() {
+    saved_cell_if="" saved_cell_address="" saved_gateway="" saved_dns="" saved_cell_dhcp="" saved_allow_from=""
+    [ -f "$NETWORK_ENV" ] || return 0
+    local key value
+    while IFS='=' read -r key value; do
+        case "$key" in
+            CELL_IF) saved_cell_if="$value" ;;
+            CELL_ADDRESS) saved_cell_address="$value" ;;
+            GATEWAY) saved_gateway="$value" ;;
+            DNS) saved_dns="$value" ;;
+            CELL_DHCP) saved_cell_dhcp="$value" ;;
+            ALLOW_FROM) saved_allow_from="$value" ;;
+        esac
+    done <"$NETWORK_ENV"
+}
+
+apply_network() {
+    local cell_if="$1" cidr="$2" robot_host="$3" gateway="$4" dns="$5" cell_dhcp="$6" allow_from="$7"
+    [ "$cell_if" != none ] || die "--network: this PC's cell port is not managed (installed with --cell-if none)"
+    [ -f "$CELL_ENV" ] || die "--network: no ${CELL_ENV} (install first)"
+    [ -n "$robot_host" ] && set_cell_value UR_HOST "$robot_host"
+    local robot rescue=1
+    robot="$(cell_value UR_HOST)"
+    in_network "${RESCUE_CIDR%/*}" "$cidr" && rescue=0
+    [ -n "$gateway" ] && ! in_network "$gateway" "$cidr" && die "--gateway ${gateway} is not on ${cidr}"
+    force_cell_address "$cell_if" "$cidr" "$gateway" "$dns" "$rescue"
+    if [ -z "$allow_from" ]; then
+        # the cockpit from: this network, the rescue subnet, and a robot routed in from elsewhere
+        allow_from="$(network_of "$cidr")"
+        [ "$rescue" = 1 ] && allow_from+=",$(network_of "$RESCUE_CIDR")"
+        [[ "$robot" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && ! in_network "$robot" "$cidr" && allow_from+=",${robot}/32"
+    fi
+    install_firewall "$allow_from" "$cell_if"
+    if [ "$cell_dhcp" = off ]; then
+        remove_cell_dhcp
+        log "cell DHCP: off"
+    else
+        install_cell_dhcp "$cell_if" "$cidr"
+    fi
+    save_network_env "$cell_if" "$cidr" "$gateway" "$dns" "$cell_dhcp" "$allow_from"
+    systemctl restart "$UNIT"
+    log "network: done; the cockpit restarted with UR_HOST=${robot}"
 }
 
 # The image has no running NetworkManager: write the profile nmcli would have made. Every
@@ -575,15 +718,36 @@ install_units() {
     log "systemd: ${UNIT} enabled and (re)started"
 }
 
+# ---- the setup portal / update queue's root side ------------------------------------------
+install_admin() {
+    install -m 0755 "${HERE}/perceptronics-admin" "$ADMIN_BIN"
+    install -m 0644 "${HERE}/${ADMIN_PATH_UNIT}" "/etc/systemd/system/${ADMIN_PATH_UNIT}"
+    install -m 0644 "${HERE}/${ADMIN_UNIT}" "/etc/systemd/system/${ADMIN_UNIT}"
+    # the queue is the cockpit's to write; the status and the work area are root's to write
+    install -d -o "$SVC_USER" -g "$SVC_USER" -m 0750 "${STATE_DIR}/admin" "$ADMIN_QUEUE"
+    install -d -o root -g "$SVC_USER" -m 0750 "$ADMIN_STATE"
+    install -d -o root -g root -m 0700 "${ADMIN_STATE}/work"
+    if [ "$IMAGE" = 1 ]; then
+        systemctl enable -q "$ADMIN_PATH_UNIT"
+        return
+    fi
+    systemctl daemon-reload
+    # never restart perceptronics-admin.service here: an update runs this installer from it
+    systemctl enable -q --now "$ADMIN_PATH_UNIT"
+    log "setup portal: ${ADMIN_PATH_UNIT} watching ${ADMIN_QUEUE}"
+}
+
 copy_deploy_files() {
     mkdir -p "$DEPLOY_COPY"
     local f
     for f in install.sh perceptronics-cockpit.service nftables.conf cell.env.template perceptronics-doctor README.md \
-        cell-dhcp.conf perceptronics-cell-dhcp.service 50-perceptronics-cell; do
+        cell-dhcp.conf perceptronics-cell-dhcp.service 50-perceptronics-cell \
+        perceptronics-admin perceptronics-admin.path perceptronics-admin.service; do
         [ "${HERE}/${f}" -ef "${DEPLOY_COPY}/${f}" ] && continue
         install -m 0644 "${HERE}/${f}" "${DEPLOY_COPY}/${f}"
     done
-    chmod 0755 "${DEPLOY_COPY}/install.sh" "${DEPLOY_COPY}/perceptronics-doctor" "${DEPLOY_COPY}/50-perceptronics-cell"
+    chmod 0755 "${DEPLOY_COPY}/install.sh" "${DEPLOY_COPY}/perceptronics-doctor" "${DEPLOY_COPY}/50-perceptronics-cell" \
+        "${DEPLOY_COPY}/perceptronics-admin"
 }
 
 # ---- rollback / uninstall -------------------------------------------------------------
@@ -601,8 +765,9 @@ rollback() {
 
 uninstall() {
     local purge="$1"
-    systemctl disable --now "$UNIT" 2>/dev/null || true
-    rm -f "/etc/systemd/system/${UNIT}" /usr/local/bin/perceptronics-doctor
+    systemctl disable --now "$UNIT" "$ADMIN_PATH_UNIT" 2>/dev/null || true
+    rm -f "/etc/systemd/system/${UNIT}" /usr/local/bin/perceptronics-doctor "$ADMIN_BIN" \
+        "/etc/systemd/system/${ADMIN_PATH_UNIT}" "/etc/systemd/system/${ADMIN_UNIT}"
     remove_cell_dhcp
     systemctl daemon-reload
     if [ -f "$NFT_CONF" ] && grep -qF "$NFT_MARKER" "$NFT_CONF"; then
@@ -617,7 +782,7 @@ uninstall() {
     rm -rf "$APP_ROOT"
     log "removed ${UNIT}, the cell DHCP server, the firewall table and ${APP_ROOT}"
     if [ "$purge" = 1 ]; then
-        rm -rf "$ETC_DIR" "$STATE_DIR" "$LIBREALSENSE_PREFIX" "$LIBREALSENSE_LINK" "$LDCONF" "$UDEV_RULES"
+        rm -rf "$ETC_DIR" "$STATE_DIR" "$ADMIN_STATE" "$LIBREALSENSE_PREFIX" "$LIBREALSENSE_LINK" "$LDCONF" "$UDEV_RULES"
         ldconfig
         udevadm control --reload-rules
         userdel "$SVC_USER" 2>/dev/null || true
@@ -631,7 +796,16 @@ uninstall() {
 # ---- main ------------------------------------------------------------------------------
 main() {
     local wheel="" cell="ur3" robot_host="" allow_from="" reconfigure=0 action=install purge=0
-    local cell_if="eth0" cell_address="192.168.3.20/24"
+    local cell_if="eth0" cell_address="192.168.3.20/24" gateway="" dns="" cell_dhcp="auto"
+    local saved_cell_if saved_cell_address saved_gateway saved_dns saved_cell_dhcp saved_allow_from
+    # what an earlier run (or the setup portal) chose is the default; a flag below overrides it
+    if [[ " $* " != *" --image "* ]]; then
+        load_saved_network
+        cell_if="${saved_cell_if:-$cell_if}"
+        cell_address="${saved_cell_address:-$cell_address}"
+        gateway="$saved_gateway" dns="$saved_dns" cell_dhcp="${saved_cell_dhcp:-$cell_dhcp}"
+        allow_from="$saved_allow_from"
+    fi
     while [ $# -gt 0 ]; do
         case "$1" in
             --wheel) wheel="${2:?--wheel needs a path}"; shift 2 ;;
@@ -640,6 +814,10 @@ main() {
             --allow-from) allow_from="${2:?--allow-from needs a CIDR}"; shift 2 ;;
             --cell-if) cell_if="${2:?--cell-if needs an interface or none}"; shift 2 ;;
             --cell-address) cell_address="${2:?--cell-address needs a CIDR}"; shift 2 ;;
+            --gateway) gateway="${2:?--gateway needs an address or none}"; shift 2 ;;
+            --dns) dns="${2:?--dns needs addresses or none}"; shift 2 ;;
+            --cell-dhcp) cell_dhcp="${2:?--cell-dhcp needs auto or off}"; shift 2 ;;
+            --network) action=network; shift ;;
             --reconfigure) reconfigure=1; shift ;;
             --image) IMAGE=1; shift ;;
             --rollback) action=rollback; shift ;;
@@ -655,8 +833,18 @@ main() {
     [[ "$cell_if" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || die "--cell-if ${cell_if}: expected an interface name or none"
     [[ "$cell_address" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/([89]|[12][0-9]|30)$ ]] \
         || die "--cell-address ${cell_address}: expected an IPv4 CIDR such as 192.168.3.20/24"
+    [ "$gateway" = none ] && gateway=""
+    [ "$dns" = none ] && dns=""
+    [ -z "$gateway" ] || [[ "$gateway" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "--gateway ${gateway}: expected an IPv4 address"
+    [ -z "$dns" ] || [[ "$dns" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(,[0-9]{1,3}(\.[0-9]{1,3}){3}){0,2}$ ]] \
+        || die "--dns ${dns}: expected up to three comma-separated IPv4 addresses"
+    case "$cell_dhcp" in auto | off) ;; *) die "--cell-dhcp ${cell_dhcp}: expected auto or off" ;; esac
     [ "$(id -u)" -eq 0 ] || die "run as root (sudo $0 ...)"
     case "$action" in
+        network)
+            apply_network "$cell_if" "$cell_address" "$robot_host" "$gateway" "$dns" "$cell_dhcp" "$allow_from"
+            return
+            ;;
         rollback) rollback; return ;;
         uninstall) uninstall "$purge"; return ;;
     esac
@@ -680,13 +868,20 @@ main() {
     install_firewall "$net" "$cell_if"
     copy_deploy_files
     install_units
+    install_admin
     if [ "$cell_if" = none ]; then
         remove_cell_dhcp
         log "cell port: --cell-if none — no cell address, no DHCP server"
     else
         configure_cell_address "$cell_if" "$cell_address"
-        install_cell_dhcp "$cell_if" "$cell_address"
+        if [ "$cell_dhcp" = off ]; then
+            remove_cell_dhcp
+            log "cell DHCP: off (network.env)"
+        else
+            install_cell_dhcp "$cell_if" "$cell_address"
+        fi
     fi
+    save_network_env "$cell_if" "$cell_address" "$gateway" "$dns" "$cell_dhcp" "$allow_from"
     if [ "$IMAGE" = 1 ]; then
         log "done (image root)"
     else

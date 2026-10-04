@@ -1,0 +1,700 @@
+#!/usr/bin/python3
+"""perceptronics-admin: the pick PC's root side of the setup portal and of update bundles.
+
+The cockpit runs unprivileged and sandboxed, so it never changes the system itself: the setup
+page (http://<pick PC>:7621/setup) only checks a request and drops it in the queue
+(/var/lib/perceptronics/admin/queue), and perceptronics-admin.path starts this script as root
+to carry it out. Everything in the queue was written by the cockpit's user, so it is read as
+untrusted: no symlinks, size caps, every field validated again here.
+
+  perceptronics-admin make-bundle --wheel W --deploy deploy/pi --out DIR [--librealsense TAR]
+                                  [--source-rev REV]       build an update bundle (any machine)
+  perceptronics-admin verify BUNDLE                        check a bundle, print what it holds
+  perceptronics-admin apply-update BUNDLE                  install it (root): install.sh, health
+                                                           check, rollback if the cockpit dies
+  perceptronics-admin apply-network REQUEST.json           change the cell port (root)
+  perceptronics-admin run                                  carry out the queue (the .service)
+  perceptronics-admin status                               the last jobs, as JSON
+  perceptronics-admin push BUNDLE [--url http://192.168.3.20:7621]
+                                  send a bundle to a pick PC's setup portal and follow it
+                                  (login: PERCEPTRONICS_ADMIN_USER / _PASSWORD, default admin)
+
+An update bundle is one uncompressed tar: perceptronics-update/MANIFEST.json, the wheel, the
+deploy/pi files (install.sh and what it installs), and optionally the prebuilt librealsense
+tarball scripts/pi-image.sh caches. MANIFEST.json lists the sha256 of every other member;
+a member not listed, or listed and different, refuses the bundle. There is no signature
+(Nick, 2026-10-03): the checksums catch a truncated or corrupted upload, and the portal's
+login + the firewall (cell subnet only) are what stand between the network and root.
+
+Stdlib only and independent of /opt/perceptronics: it must still work when the release it is
+replacing is broken. Runs under the system python3 (>= 3.11 on Raspberry Pi OS trixie).
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import datetime as _dt
+import functools
+import hashlib
+import http.client
+import io
+import ipaddress
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+FORMAT = 1
+TOP = "perceptronics-update"
+MANIFEST = "MANIFEST.json"
+
+QUEUE = Path("/var/lib/perceptronics/admin/queue")
+STATE = Path("/var/lib/perceptronics-admin")
+STATUS = STATE / "status.json"
+WORK = STATE / "work"
+INSTALL_SH = Path("/opt/perceptronics/deploy/install.sh")
+LIBREALSENSE_PARENT = Path("/opt")
+HEALTH_URL = "http://127.0.0.1:7621/api/info"
+HEALTH_TIMEOUT_S = 120.0
+
+MAX_REQUEST_BYTES = 64 * 1024
+MAX_BUNDLE_BYTES = 256 * 1024 * 1024
+MAX_MEMBERS = 200
+JOB_ID = re.compile(r"^[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$")
+WHEEL = re.compile(r"^perceptronics-[0-9A-Za-z.+]+-py3-none-any\.whl$")
+LIBREALSENSE_TAR = re.compile(r"^librealsense-[0-9.]+\.tar$")
+# install.sh refuses to start without these; a bundle that lacks one is not a pick-PC update
+REQUIRED_DEPLOY = ("install.sh", "perceptronics-cockpit.service", "nftables.conf", "cell.env.template")
+RESCUE_ADDRESS = ipaddress.IPv4Interface("192.168.3.20/24")
+HISTORY = 10
+
+
+class AdminError(Exception):
+    """A request or bundle this PC refuses; the message is shown on the setup page."""
+
+
+def _now() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# ---- network requests ----------------------------------------------------------------------
+
+
+def _ipv4(value, what: str) -> ipaddress.IPv4Address:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,3}(\.[0-9]{1,3}){3}", value):
+        raise AdminError(f"{what}: expected an address like 192.168.1.20")
+    try:
+        return ipaddress.IPv4Address(value)
+    except ValueError as exc:
+        raise AdminError(f"{what}: {exc}") from None
+
+
+def validate_network(req) -> dict:
+    """The normalised request the cockpit queues: {cidr, gateway, dns, robot_host, robot_dhcp}.
+
+    The cockpit runs the same rules (perceptronics/setupportal.py) for a friendly answer; this
+    is the copy that counts, and tests hold the two to the same cases."""
+    if not isinstance(req, dict):
+        raise AdminError("network request must be an object")
+    unknown = set(req) - {"cidr", "gateway", "dns", "robot_host", "robot_dhcp"}
+    if unknown:
+        raise AdminError(f"unknown network fields: {', '.join(sorted(unknown))}")
+    cidr = req.get("cidr")
+    if not isinstance(cidr, str) or not re.fullmatch(r"[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}", cidr):
+        raise AdminError("address: expected address/prefix like 192.168.1.20/24")
+    try:
+        iface = ipaddress.IPv4Interface(cidr)
+    except ValueError as exc:
+        raise AdminError(f"address: {exc}") from None
+    if not 8 <= iface.network.prefixlen <= 30:
+        raise AdminError("subnet mask: between 255.0.0.0 (/8) and 255.255.255.252 (/30)")
+    ip = iface.ip
+    if ip.is_loopback or ip.is_multicast or ip.is_link_local or ip.is_unspecified or ip.is_reserved:
+        raise AdminError(f"address: {ip} can't be a computer's address")
+    if ip in (iface.network.network_address, iface.network.broadcast_address):
+        raise AdminError(f"address: {ip} is the network's own or broadcast address with that subnet mask")
+    gateway = req.get("gateway") or ""
+    if gateway:
+        gw = _ipv4(gateway, "gateway")
+        if gw not in iface.network:
+            raise AdminError(f"gateway: {gw} is not on {iface.network}")
+        if gw == ip:
+            raise AdminError("gateway: it is this computer's own address")
+        gateway = str(gw)
+    dns = req.get("dns") or []
+    if not isinstance(dns, list) or len(dns) > 3:
+        raise AdminError("DNS: up to three addresses")
+    dns = [str(_ipv4(d, "DNS")) for d in dns]
+    robot = _ipv4(req.get("robot_host"), "robot address")
+    if robot == ip:
+        raise AdminError("robot address: it is this computer's own address")
+    robot_dhcp = req.get("robot_dhcp", False)
+    if not isinstance(robot_dhcp, bool):
+        raise AdminError("robot_dhcp must be true or false")
+    if robot_dhcp and robot not in iface.network:
+        raise AdminError(f"giving the robot its address needs it on {iface.network}")
+    return {
+        "cidr": str(iface),
+        "gateway": gateway,
+        "dns": dns,
+        "robot_host": str(robot),
+        "robot_dhcp": robot_dhcp,
+    }
+
+
+def keeps_rescue_address(cidr: str) -> bool:
+    """192.168.3.20 stays on the cell port as a second address unless the new network holds it."""
+    return RESCUE_ADDRESS.ip not in ipaddress.IPv4Interface(cidr).network
+
+
+def network_argv(req: dict, install_sh: Path | None = None) -> list[str]:
+    install_sh = INSTALL_SH if install_sh is None else install_sh
+    req = validate_network(req)
+    return [
+        "bash",
+        str(install_sh),
+        "--network",
+        "--cell-address",
+        req["cidr"],
+        "--robot-host",
+        req["robot_host"],
+        "--gateway",
+        req["gateway"] or "none",
+        "--dns",
+        ",".join(req["dns"]) or "none",
+        "--cell-dhcp",
+        "auto" if req["robot_dhcp"] else "off",
+    ]
+
+
+# ---- bundles -------------------------------------------------------------------------------
+
+
+def make_bundle(
+    wheel: Path, deploy: Path, out_dir: Path, librealsense: Path | None = None, source_rev: str = "unknown"
+) -> Path:
+    if not WHEEL.match(wheel.name):
+        raise AdminError(f"{wheel.name}: expected perceptronics-<version>-py3-none-any.whl")
+    if librealsense is not None and not LIBREALSENSE_TAR.match(librealsense.name):
+        raise AdminError(f"{librealsense.name}: expected librealsense-<version>.tar")
+    members: dict[str, Path] = {wheel.name: wheel}
+    for f in sorted(deploy.iterdir()):
+        if f.is_file() and not f.name.startswith(".") and f.suffix != ".pyc":
+            members[f"deploy/{f.name}"] = f
+    for name in REQUIRED_DEPLOY:
+        if f"deploy/{name}" not in members:
+            raise AdminError(f"{deploy} has no {name}")
+    if librealsense is not None:
+        members[librealsense.name] = librealsense
+    version = wheel.name.split("-")[1]
+    manifest = {
+        "format": FORMAT,
+        "version": version,
+        "source_rev": source_rev,
+        "created_utc": _now(),
+        "wheel": wheel.name,
+        "librealsense": librealsense.name if librealsense is not None else None,
+        "files": {name: _sha256(path) for name, path in members.items()},
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rev = re.sub(r"[^0-9A-Za-z.-]", "-", source_rev)[:24] or "unknown"
+    out = out_dir / f"perceptronics-update-{version}-{rev}.tar"
+    blob = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
+    tmp = out.with_suffix(".tar.part")
+
+    def _info(name: str, size: int, mode: int) -> tarfile.TarInfo:
+        ti = tarfile.TarInfo(f"{TOP}/{name}")
+        ti.size, ti.mode, ti.mtime = size, mode, 0
+        ti.uname = ti.gname = "root"
+        return ti
+
+    with tarfile.open(tmp, "w", format=tarfile.PAX_FORMAT) as tar:
+        tar.addfile(_info(MANIFEST, len(blob), 0o644), io.BytesIO(blob))
+        for name, path in members.items():
+            mode = 0o755 if os.access(path, os.X_OK) or name.endswith(".sh") else 0o644
+            with open(path, "rb") as fh:
+                tar.addfile(_info(name, path.stat().st_size, mode), fh)
+    tmp.replace(out)
+    return out
+
+
+def verify_bundle(bundle: Path, dest: Path | None = None) -> dict:
+    """Check every member against MANIFEST.json; with ``dest``, also unpack it there.
+
+    Refuses: links, devices, absolute or ``..`` paths, anything outside perceptronics-update/,
+    a member the manifest doesn't list (or lists twice), a listed member that is missing or
+    whose sha256 differs, and a bundle larger than MAX_BUNDLE_BYTES."""
+    size = bundle.stat().st_size
+    if size > MAX_BUNDLE_BYTES:
+        raise AdminError(f"bundle is {size >> 20} MiB, more than {MAX_BUNDLE_BYTES >> 20} MiB")
+    try:
+        tar = tarfile.open(bundle, "r:")
+    except (tarfile.TarError, OSError) as exc:
+        raise AdminError(f"not an update bundle (an uncompressed tar): {exc}") from None
+    with tar:
+        try:
+            infos = tar.getmembers()
+        except (tarfile.TarError, EOFError) as exc:
+            raise AdminError(f"bundle is damaged (truncated upload?): {exc}") from None
+        if len(infos) > MAX_MEMBERS:
+            raise AdminError("bundle has too many files")
+        files: dict[str, tarfile.TarInfo] = {}
+        for ti in infos:
+            name = ti.name
+            if ti.isdir():
+                continue
+            if not ti.isfile():
+                raise AdminError(f"bundle member {name!r} is not a plain file")
+            parts = name.split("/")
+            if parts[0] != TOP or len(parts) < 2 or any(p in ("", ".", "..") for p in parts):
+                raise AdminError(f"bundle member {name!r} is outside {TOP}/")
+            rel = "/".join(parts[1:])
+            if rel in files:
+                raise AdminError(f"bundle lists {rel} twice")
+            files[rel] = ti
+        if MANIFEST not in files:
+            raise AdminError(f"bundle has no {MANIFEST}")
+        if files[MANIFEST].size > MAX_REQUEST_BYTES:
+            raise AdminError(f"{MANIFEST} is too large")
+        try:
+            manifest = json.loads(tar.extractfile(files[MANIFEST]).read())
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise AdminError(f"{MANIFEST} is not JSON: {exc}") from None
+        if not isinstance(manifest, dict) or manifest.get("format") != FORMAT:
+            raise AdminError(
+                f"{MANIFEST}: format {manifest.get('format') if isinstance(manifest, dict) else '?'}"
+                f" — this PC reads format {FORMAT}"
+            )
+        listed = manifest.get("files")
+        if not isinstance(listed, dict):
+            raise AdminError(f"{MANIFEST} has no file list")
+        present = set(files) - {MANIFEST}
+        if present - set(listed):
+            extra = ", ".join(sorted(present - set(listed)))
+            raise AdminError(f"bundle holds files its manifest doesn't list: {extra}")
+        if set(listed) - present:
+            raise AdminError(f"bundle is missing {', '.join(sorted(set(listed) - present))}")
+        wheel = manifest.get("wheel")
+        if not isinstance(wheel, str) or not WHEEL.match(wheel) or wheel not in listed:
+            raise AdminError(f"{MANIFEST}: no perceptronics wheel")
+        for name in REQUIRED_DEPLOY:
+            if f"deploy/{name}" not in listed:
+                raise AdminError(f"bundle has no deploy/{name}")
+        lrs = manifest.get("librealsense")
+        if lrs is not None and (
+            not isinstance(lrs, str) or not LIBREALSENSE_TAR.match(lrs) or lrs not in listed
+        ):
+            raise AdminError(f"{MANIFEST}: bad librealsense entry")
+        for rel in sorted(present):
+            want = listed[rel]
+            h = hashlib.sha256()
+            src = tar.extractfile(files[rel])
+            out = None
+            if dest is not None:
+                target = dest / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                out = open(target, "wb")
+            try:
+                for chunk in iter(functools.partial(src.read, 1 << 20), b""):
+                    h.update(chunk)
+                    if out is not None:
+                        out.write(chunk)
+            finally:
+                if out is not None:
+                    out.close()
+            if h.hexdigest() != want:
+                raise AdminError(f"{rel}: checksum differs from the manifest (damaged bundle)")
+            if dest is not None:
+                os.chmod(dest / rel, 0o755 if files[rel].mode & 0o111 else 0o644)
+    return manifest
+
+
+# ---- status --------------------------------------------------------------------------------
+
+
+def read_status(path: Path | None = None) -> dict:
+    path = STATUS if path is None else path
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_status(job: dict, path: Path | None = None) -> None:
+    path = STATUS if path is None else path
+    data = read_status(path)
+    history = [j for j in data.get("history", []) if j.get("id") != job.get("id")]
+    history.insert(0, job)
+    data = {"updated_utc": _now(), "job": job, "history": history[:HISTORY]}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o644)
+    tmp.replace(path)
+
+
+class Job:
+    def __init__(self, job_id: str, kind: str, status_path: Path | None = None):
+        self.status_path = STATUS if status_path is None else status_path
+        self.data = {
+            "id": job_id,
+            "kind": kind,
+            "state": "running",
+            "started_utc": _now(),
+            "message": "",
+            "log": [],
+        }
+        self.save()
+
+    def log(self, line: str) -> None:
+        print(line, flush=True)
+        self.data["log"] = (self.data["log"] + [line])[-60:]
+        self.save()
+
+    def finish(self, state: str, message: str) -> None:
+        self.data.update(state=state, message=message, finished_utc=_now())
+        self.log(f"{state}: {message}")
+
+    def save(self) -> None:
+        write_status(self.data, self.status_path)
+
+
+def _run_logged(job: Job, argv: list[str]) -> int:
+    proc = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace"
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        job.log(line.rstrip("\n"))
+    return proc.wait()
+
+
+def _current_release() -> str:
+    try:
+        return Path("/opt/perceptronics/current").resolve(strict=True).name
+    except OSError:
+        return "none"
+
+
+def wait_healthy(url: str | None = None, timeout_s: float | None = None) -> bool:
+    """The cockpit answers /api/info with ok:true. install.sh has already restarted it (systemctl
+    restart returns once the old process is gone), so any answer is the new release's."""
+    url = HEALTH_URL if url is None else url
+    deadline = time.monotonic() + (HEALTH_TIMEOUT_S if timeout_s is None else timeout_s)
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                info = json.loads(resp.read())
+            if info.get("ok"):
+                return True
+        except (OSError, ValueError):
+            pass
+        time.sleep(2)
+    return False
+
+
+# ---- jobs ----------------------------------------------------------------------------------
+
+
+def apply_update(bundle: Path, job: Job) -> None:
+    before = _current_release()
+    work = Path(tempfile.mkdtemp(prefix="update-", dir=WORK if WORK.is_dir() else None))
+    try:
+        job.log(f"checking {bundle.name}")
+        manifest = verify_bundle(bundle, dest=work)
+        rev, built = manifest.get("source_rev", "?"), manifest.get("created_utc", "?")
+        job.log(f"bundle {manifest['version']} ({rev}), built {built}")
+        lrs = manifest.get("librealsense")
+        if lrs:
+            stem = lrs[: -len(".tar")]
+            stamp = LIBREALSENSE_PARENT / stem / ".perceptronics-build-stamp"
+            with tarfile.open(work / lrs) as t:
+                try:
+                    theirs = t.extractfile(f"{stem}/.perceptronics-build-stamp").read()
+                except (KeyError, AttributeError):
+                    raise AdminError(f"{lrs} has no build stamp") from None
+                if stamp.is_file() and stamp.read_bytes() == theirs:
+                    job.log(f"{stem}: already installed")
+                else:
+                    job.log(f"{stem}: unpacking the prebuilt library")
+                    t.extractall(LIBREALSENSE_PARENT, filter="data")
+        rc = _run_logged(
+            job, ["bash", str(work / "deploy" / "install.sh"), "--wheel", str(work / manifest["wheel"])]
+        )
+        if rc != 0:
+            raise AdminError(f"install.sh failed (exit {rc}); the running release {before} was left in place")
+        after = _current_release()
+        job.log(f"release {before} -> {after}; waiting for the cockpit")
+        if wait_healthy():
+            job.finish("done", f"updated to {manifest['version']} ({after})")
+            return
+        job.log("the cockpit did not come back — rolling back")
+        rc = _run_logged(job, ["bash", str(INSTALL_SH), "--rollback"])
+        healthy = wait_healthy()
+        job.finish(
+            "rolled_back",
+            f"{after} did not start; back on {_current_release()}"
+            + ("" if healthy and rc == 0 else " (check it)"),
+        )
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def apply_network(req: dict, job: Job, install_sh: Path | None = None) -> None:
+    argv = network_argv(req, INSTALL_SH if install_sh is None else install_sh)
+    req = validate_network(req)
+    job.log(
+        f"cell port -> {req['cidr']}, robot {req['robot_host']}"
+        + (" (192.168.3.20 kept as a rescue address)" if keeps_rescue_address(req["cidr"]) else "")
+    )
+    rc = _run_logged(job, argv)
+    if rc != 0:
+        raise AdminError(f"install.sh --network failed (exit {rc})")
+    job.finish("done", f"this PC is now {req['cidr'].split('/')[0]}; the robot is {req['robot_host']}")
+
+
+# ---- the queue -----------------------------------------------------------------------------
+
+
+def _read_untrusted(path: Path, limit: int, into: Path | None = None) -> bytes | None:
+    """Open a queue file the cockpit's user wrote: a regular file, not a link, under ``limit``."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(fd, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise AdminError(f"{path.name} is not a regular file")
+        if st.st_size > limit:
+            raise AdminError(f"{path.name} is larger than {limit >> 20 or 1} MiB")
+        if into is None:
+            return fh.read(limit + 1)[:limit]
+        with open(into, "wb") as out:
+            shutil.copyfileobj(fh, out, 1 << 20)
+        return None
+
+
+def run_queue(queue: Path | None = None) -> int:
+    queue = QUEUE if queue is None else queue
+    WORK.mkdir(parents=True, exist_ok=True)
+    os.chmod(WORK, 0o700)
+    done = 0
+    for ready in sorted(queue.glob("*.ready")):
+        job_id = ready.name[: -len(".ready")]
+        files = [queue / f"{job_id}{s}" for s in (".ready", ".json", ".tar")]
+        if not JOB_ID.match(job_id):
+            for f in files:
+                f.unlink(missing_ok=True)
+            continue
+        kind = "unknown"
+        job = None
+        try:
+            raw = _read_untrusted(queue / f"{job_id}.json", MAX_REQUEST_BYTES)
+            req = json.loads(raw)
+            kind = req.get("kind") if isinstance(req, dict) else None
+            if kind not in ("update", "network"):
+                raise AdminError("unknown request")
+            job = Job(job_id, kind)
+            if kind == "network":
+                apply_network(req.get("network"), job)
+            else:
+                bundle = WORK / f"{job_id}.tar"
+                _read_untrusted(queue / f"{job_id}.tar", MAX_BUNDLE_BYTES, into=bundle)
+                for f in files:
+                    f.unlink(missing_ok=True)
+                try:
+                    apply_update(bundle, job)
+                finally:
+                    bundle.unlink(missing_ok=True)
+        except (AdminError, OSError, ValueError) as exc:
+            if job is None:
+                job = Job(job_id, kind if isinstance(kind, str) else "unknown")
+            job.finish("failed", str(exc))
+        finally:
+            for f in files:
+                f.unlink(missing_ok=True)
+        done += 1
+    return done
+
+
+# ---- push: a bundle to a pick PC's setup portal (from a laptop) ------------------------------
+
+
+def _auth_headers(user: str, password: str) -> dict:
+    token = base64.b64encode(f"{user}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}", "X-Perceptronics-Admin": "1"}
+
+
+def _get_status(url: str, headers: dict) -> dict:
+    req = urllib.request.Request(f"{url}/api/admin/status", headers=headers)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read())
+
+
+LOGIN_REFUSED = "login refused (PERCEPTRONICS_ADMIN_USER / PERCEPTRONICS_ADMIN_PASSWORD)"
+
+
+def _check_login(url: str, headers: dict) -> None:
+    """Ask for the status before streaming a bundle: a refused login answers at once.
+
+    The cockpit answers a refused upload without reading its body and closes, so a client
+    still sending the bundle sees a reset (Windows: WinError 10053/10054) instead of the 401."""
+    try:
+        _get_status(url, headers)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise AdminError(LOGIN_REFUSED) from None
+        raise AdminError(f"{url}: HTTP {exc.code} from the setup portal") from None
+    except OSError as exc:
+        raise AdminError(f"{url}: {exc.reason if isinstance(exc, urllib.error.URLError) else exc}") from None
+
+
+def push(bundle: Path, url: str, user: str, password: str, timeout_s: float = 1800.0) -> int:
+    manifest = verify_bundle(bundle)
+    mib = bundle.stat().st_size >> 20
+    print(f"bundle {manifest['version']} ({manifest.get('source_rev')}), {mib} MiB -> {url}")
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "http" or not parts.hostname:
+        raise AdminError(f"{url}: expected http://<pick PC>:7621")
+    headers = _auth_headers(user, password)
+    _check_login(url, headers)
+    conn = http.client.HTTPConnection(parts.hostname, parts.port or 80, timeout=60)
+    size = bundle.stat().st_size
+    conn.putrequest("POST", "/api/admin/update")
+    for k, v in {**headers, "Content-Type": "application/x-tar", "Content-Length": str(size)}.items():
+        conn.putheader(k, v)
+    conn.endheaders()
+    dropped: OSError | None = None
+    try:
+        with open(bundle, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                conn.send(chunk)
+    except OSError as exc:  # the cockpit refused early (too large, busy) and closed on us
+        dropped = exc
+    try:
+        resp = conn.getresponse()
+        body = resp.read()
+    except (OSError, http.client.HTTPException) as exc:
+        conn.close()
+        raise AdminError(f"the cockpit closed the connection during the upload: {dropped or exc}") from None
+    conn.close()
+    try:
+        answer = json.loads(body)
+    except ValueError:
+        answer = {"ok": False, "error": f"HTTP {resp.status}"}
+    if resp.status == 401:
+        raise AdminError(LOGIN_REFUSED)
+    if not answer.get("ok"):
+        raise AdminError(f"refused: {answer.get('error')}")
+    job_id = answer["job"]
+    print(f"queued as {job_id}")
+    shown = 0
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        time.sleep(2)
+        try:
+            st = _get_status(url, headers)
+        except (OSError, ValueError):
+            continue  # the cockpit restarts during an update
+        job = st.get("job") or {}
+        if job.get("id") != job_id:
+            continue
+        log = job.get("log", [])
+        for line in log[shown:] if len(log) > shown else []:
+            print(f"  {line}")
+        shown = len(log)
+        if job.get("state") != "running":
+            return 0 if job.get("state") == "done" else 1
+    raise AdminError(f"no result after {timeout_s:.0f} s — look at {url}/setup")
+
+
+# ---- CLI -----------------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="perceptronics-admin", description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    mb = sub.add_parser("make-bundle")
+    mb.add_argument("--wheel", type=Path, required=True)
+    mb.add_argument("--deploy", type=Path, required=True)
+    mb.add_argument("--out", type=Path, required=True)
+    mb.add_argument("--librealsense", type=Path)
+    mb.add_argument("--source-rev", default="unknown")
+    sub.add_parser("verify").add_argument("bundle", type=Path)
+    sub.add_parser("apply-update").add_argument("bundle", type=Path)
+    sub.add_parser("apply-network").add_argument("request", type=Path)
+    sub.add_parser("run")
+    sub.add_parser("status")
+    pu = sub.add_parser("push")
+    pu.add_argument("bundle", type=Path)
+    pu.add_argument("--url", default="http://192.168.3.20:7621")
+    args = ap.parse_args(argv)
+    try:
+        if args.cmd == "make-bundle":
+            out = make_bundle(args.wheel, args.deploy, args.out, args.librealsense, args.source_rev)
+            print(out)
+        elif args.cmd == "verify":
+            m = verify_bundle(args.bundle)
+            print(
+                json.dumps(
+                    {k: m[k] for k in ("version", "source_rev", "created_utc", "wheel", "librealsense")}
+                )
+            )
+        elif args.cmd == "push":
+            return push(
+                args.bundle,
+                args.url.rstrip("/"),
+                os.environ.get("PERCEPTRONICS_ADMIN_USER") or "admin",
+                os.environ.get("PERCEPTRONICS_ADMIN_PASSWORD") or "admin",
+            )
+        elif args.cmd == "status":
+            print(json.dumps(read_status(), indent=2))
+        else:
+            if os.geteuid() != 0:
+                raise AdminError("run as root")
+            if args.cmd == "run":
+                print(f"perceptronics-admin: {run_queue()} job(s)")
+                return 0
+            stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S")
+            job_id = f"{stamp}-{os.urandom(4).hex()}"
+            if args.cmd == "apply-update":
+                job = Job(job_id, "update")
+                try:
+                    apply_update(args.bundle, job)
+                except AdminError as exc:
+                    job.finish("failed", str(exc))
+                    return 1
+            else:
+                job = Job(job_id, "network")
+                try:
+                    apply_network(json.loads(args.request.read_text(encoding="utf-8")), job)
+                except (AdminError, ValueError) as exc:
+                    job.finish("failed", str(exc))
+                    return 1
+            return 0 if job.data["state"] == "done" else 1
+    except AdminError as exc:
+        print(f"perceptronics-admin: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

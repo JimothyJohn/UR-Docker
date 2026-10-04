@@ -1,0 +1,19 @@
+# The root side of the setup portal and of update bundles: carries out what the cockpit
+# queued in /var/lib/perceptronics/admin/queue, then exits. Started by
+# perceptronics-admin.path; the result is /var/lib/perceptronics-admin/status.json, which
+# the setup page (http://<this PC>:7621/setup) shows.
+#   logs:  journalctl -u perceptronics-admin
+# Not hardened like the cockpit on purpose: it runs install.sh, which changes the system.
+
+[Unit]
+Description=Carry out the setup portal's queue (network changes, updates)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/perceptronics-admin run
+# an update may unpack librealsense and restart the cockpit; the health check waits 2 min
+TimeoutStartSec=30min
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perceptronics-admin
