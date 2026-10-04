@@ -43,6 +43,10 @@ DEFAULT_INTERPRETER_PORT = 30020
 # execution still rides the Primary client on 30001. See CLAUDE.md.
 PLATFORM_E_SERIES = "e-series"
 PLATFORM_POLYSCOPEX = "polyscopex"
+# Not a UR at all: a UFACTORY arm (850, xArm, Lite 6) over its own control
+# protocol (urctl/xarm.py), driven by urctl.ufactory.UFactoryArm.
+PLATFORM_UFACTORY = "ufactory"
+PLATFORMS = (PLATFORM_E_SERIES, PLATFORM_POLYSCOPEX, PLATFORM_UFACTORY)
 DEFAULT_PLATFORM = PLATFORM_E_SERIES
 
 # The PolyScope X Robot-API is reached over plain HTTP. On a real robot it is
@@ -148,6 +152,10 @@ class RobotConfig:
     def is_polyscopex(self) -> bool:
         """True when targeting a PolyScope X / PolyScope 10 controller."""
         return self.platform == PLATFORM_POLYSCOPEX
+
+    def is_ufactory(self) -> bool:
+        """True when targeting a UFACTORY controller instead of a UR."""
+        return self.platform == PLATFORM_UFACTORY
 
     def is_loopback(self) -> bool:
         """True when pointed at the local machine (URSim dev container)."""

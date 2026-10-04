@@ -1068,6 +1068,37 @@ class ViewerApp:
                     part["polyscope_approach_pose"] = [round(v, 6) for v in pose_trans(hover, offset)]
         return out
 
+    def workplane_check(self, name: str) -> dict:
+        """A workplane from the cell store (three TCP touches, any arm: ``urctl
+        workplane``) against the table in the newest frame: the same FIND as a pick with
+        that plane, reduced to ``check`` (:func:`perceptronics.volume.check_surface` —
+        ``offset_mm``, ``tilt_deg``, …) and the notes. Needs a live robot pose."""
+        from urctl.workcell import CellStore
+
+        plane = CellStore.open().workplane(name)
+        pose = ",".join(f"{v:.6f}" for v in plane.pose())
+        sx, sy = (max(5.0, abs(v) * 1000.0) * (1 if v >= 0 else -1) for v in plane.size)
+        opts = parse_options(f"plane=p[{pose}] area={sx:.1f}x{sy:.1f}")
+        flange = self.frame_pose().get("flange_pose")
+        if flange is None and self.robot is not None:
+            fp = self.robot.flange_pose()
+            flange = list(fp["flange"]) if fp.get("ok") and fp.get("flange") else None
+        if flange is None:
+            return {"ok": False, "error": "no live robot pose: the plane can't be put in the picture"}
+        out = scene_report(self.pick_planner(), flange, opts, pick_port=self.pick_port)
+        if not out.get("ok"):
+            return out
+        check = out.get("surface_check")
+        return {
+            "ok": check is not None,
+            "workplane": name,
+            "taught": {k: plane.as_dict()[k] for k in ("table_z", "tilt_deg", "size", "pose")},
+            "check": check,
+            "notes": out.get("notes", []),
+            "seq": out.get("seq"),
+            **({} if check is not None else {"error": "too little of the plane is in view"}),
+        }
+
     # -- API -------------------------------------------------------------------------
 
     def info(self) -> dict:
@@ -1669,6 +1700,16 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": f"bad request: {exc}"}, status=400)
                 return
             self._guarded(lambda: self.app.pick_detect(part))
+        elif route == "/api/workplane/check":
+            name = (qs.get("name") or [""])[0]
+            try:
+                from urctl.workcell import check_name
+
+                check_name(name)
+            except ValueError as exc:
+                self._send_json({"ok": False, "error": f"bad request: {exc}"}, status=400)
+                return
+            self._guarded(lambda: self.app.workplane_check(name))
         elif route == "/api/pick/scene":
             opts = (qs.get("opts") or [""])[0]
             try:

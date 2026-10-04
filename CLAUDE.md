@@ -500,6 +500,18 @@ gone from the repo): `uv run --with playwright==1.63.0 python urcap/e2e.py --ima
 universalrobots/ursim_polyscopex:10.13.0` still works where uv is installed, but leaves a stray
 `uv.lock` — delete it before committing.
 
+**UFACTORY 850 (`urctl/xarm.py`, `urctl/ufactory.py`, `UR_PLATFORM=ufactory`, PR #57, 2026-10-03).**
+A second vendor behind `Controller`; `urctl/workcell.py` gives positions, TCP offsets and three-point
+workplanes on every arm. **UFACTORY's firmware simulator runs on this Mac** (unlike URSim e-Series):
+`scripts/ufactory-sim.sh up`, then `UFACTORY_SIM_HOST=127.0.0.1 python3 -m pytest -m ufactory_sim`.
+It binds **127.0.0.1:502, 503, 504, 18333 and 30000–30003 — the same 30001–30003 as URSim**, so
+`scripts/ufactory-sim.sh down` before starting URSim. What the sim (v2.4.0) does that a fake won't, all
+handled in `UFactoryArm` and modelled in `tests/_xarm_fake.py`: MOTION_EN is never answered (UFACTORY's
+SDK times out on it too); only_check_type 2 plans from a stale intermediate state (send 1 first); the
+first check after a move can say 24 (Speed Exceeds Limit) at rest; SET_TCP_OFFSET drops to state 5 until
+`set_state(0)`; joint-teaching mode is refused. When the sim disagrees with us, run UFACTORY's own SDK
+(`xArm-Python-SDK`) against it before deciding whose bug it is. Not yet seen on a real 850.
+
 **Monocular scan** (`perceptronics scan`, `docs/mono-scan.md`) was removed on
 2026-09-25 (branch refactor/prune-2026-09-25); it lives in git history before
 that commit if the idea comes back.
